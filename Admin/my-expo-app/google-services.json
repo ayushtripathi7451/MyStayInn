@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "616137550294",
+    "project_id": "mystayinn-17f1d",
+    "storage_bucket": "mystayinn-17f1d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:616137550294:android:c39fe0c62caaef00669c77",
+        "android_client_info": {
+          "package_name": "mystayy.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGYbj0Yha9eWo_B2OkZFPtzyVd1ak0jzA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:616137550294:android:41fe5fe645b744bb669c77",
+        "android_client_info": {
+          "package_name": "mystayyuser.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGYbj0Yha9eWo_B2OkZFPtzyVd1ak0jzA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

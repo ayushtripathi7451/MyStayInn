@@ -1,0 +1,58 @@
+# dependencies
+node_modules
+
+# git
+.git
+.gitignore
+
+# expo
+.expo
+.expo-shared
+
+# next / web
+.next
+out
+
+# build outputs
+dist
+build
+coverage
+web-build
+
+# logs
+*.log
+
+# local env files
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode
+.idea
+
+# temp
+tmp
+temp
+.cache
+
+# typescript
+*.tsbuildinfo
+
+# testing
+jest
+__tests__
+tests
+
+# documentation
+*.md
+docs
+
+# misc
+*.zip
+*.tar
+*.gz

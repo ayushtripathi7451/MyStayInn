@@ -1,0 +1,177 @@
+/** @import must precede all other statements */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+   * TechMudita Brand Colors:
+   * Dark Mode: #0E0E10 (bg), #151518 (surface), #FFFFFF (text), #B3B3B3 (secondary), #FF6450 (accent)
+   * Light Mode: #FAFAFA (bg), #FFFFFF (surface), #121212 (text), #5A5A5A (secondary), #FF6450 (accent)
+  */
+  :root {
+    /* Light Mode (default) */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 7%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 7%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 7%;
+
+    --secondary: 0 0% 35%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 35%;
+
+    --accent: 9 94% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 96%;
+    --ring: 9 94% 60%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 0 0% 7%;
+    --sidebar-primary: 9 94% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 93%;
+    --sidebar-accent-foreground: 0 0% 7%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 9 94% 60%;
+  }
+
+  .dark {
+    /* Dark Mode */
+    --background: white;
+    --foreground: 0 0% 7%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 7%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 7%;
+
+    --secondary: 0 0% 35%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 35%;
+
+    --accent: 207 54% 52%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 96%;
+    --ring: 9 94% 60%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 0 0% 7%;
+    --sidebar-primary: 9 94% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 93%;
+    --sidebar-accent-foreground: 0 0% 7%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 9 94% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border transition-colors duration-300;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  :where(p, span, li, h1, h2, h3, h4, h5, h6, a, button, label, td, th) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  pre,
+  code {
+    overflow-x: auto;
+    white-space: pre;
+  }
+}
+
+@layer components {
+  .tech-gradient-text {
+    @apply bg-gradient-to-r from-foreground via-accent to-foreground bg-clip-text text-transparent;
+  }
+
+  .tech-glow {
+    @apply rounded-lg p-6 transition-all duration-300 hover:shadow-lg hover:shadow-accent/20;
+  }
+
+  .tech-button {
+    @apply px-6 py-3 rounded-lg font-semibold transition-all duration-300 hover:scale-105 active:scale-95;
+  }
+
+  .tech-button-primary {
+    @apply tech-button bg-accent text-accent-foreground hover:opacity-90;
+  }
+
+  .tech-button-secondary {
+    @apply tech-button bg-card text-foreground border border-border hover:border-accent;
+  }
+
+  .section-container {
+    @apply container mx-auto px-4 py-20;
+  }
+
+  .fade-in-up {
+    animation: fadeInUp 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .stagger-item {
+    animation: fadeInUp 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .stagger-item:nth-child(1) { animation-delay: 0.1s; }
+  .stagger-item:nth-child(2) { animation-delay: 0.2s; }
+  .stagger-item:nth-child(3) { animation-delay: 0.3s; }
+  .stagger-item:nth-child(4) { animation-delay: 0.4s; }
+  .stagger-item:nth-child(5) { animation-delay: 0.5s; }
+  .stagger-item:nth-child(6) { animation-delay: 0.6s; }
+}
