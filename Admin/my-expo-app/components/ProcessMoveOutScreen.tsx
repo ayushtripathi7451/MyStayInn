@@ -12,7 +12,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { MoveOutService } from "../services/moveOutService";
-import { userApi } from "../utils/api";
+import { bookingApi, userApi } from "../utils/api";
+import { saveInactiveTenant } from "../utils/inactiveTenantsStore";
 
 export default function ProcessMoveOutScreen(props: any) {
   const { navigation, route } = props;
@@ -53,6 +54,8 @@ export default function ProcessMoveOutScreen(props: any) {
       }
       let customerName = r.customerUniqueId || r.customerId || "Tenant";
       let mystayId = r.customerUniqueId || r.customerId || "—";
+      let profile: any = null;
+      let booking: any = null;
       const hasAlphaInUnique = typeof r.customerUniqueId === "string" && /[A-Za-z]/.test(r.customerUniqueId);
       if (r.customerUniqueId && hasAlphaInUnique) {
         try {
@@ -62,6 +65,7 @@ export default function ProcessMoveOutScreen(props: any) {
           );
           const user = profileRes.data?.user;
           if (user) {
+            profile = user;
             customerName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || customerName;
             mystayId = user.uniqueId || mystayId;
           }
@@ -77,12 +81,18 @@ export default function ProcessMoveOutScreen(props: any) {
           );
           const customer = byIdRes.data?.customer;
           if (customer) {
+            profile = customer;
             customerName = [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim() || customerName;
             mystayId = customer.uniqueId || mystayId;
           }
         } catch {
           // keep default
         }
+      }
+      if (r.customerId) {
+        const bookRes = await bookingApi.get(`/api/bookings/customer/${encodeURIComponent(String(r.customerId))}`).catch(() => null);
+        const bookings = bookRes?.data?.bookings || [];
+        booking = bookings.find((b: any) => b.status === "active") || bookings[0] || null;
       }
       const securityDeposit = Number(r.securityDepositAmount) ?? 0;
       const currentDueVal = Number(r.currentDue) ?? 0;
@@ -91,8 +101,13 @@ export default function ProcessMoveOutScreen(props: any) {
         requestId,
         customerName,
         mystayId,
+        customerId: r.customerId,
+        profile,
+        booking,
         roomNumber: r.roomNumber || "—",
         propertyName: r.propertyName || "—",
+        propertyId: r.propertyId,
+        roomId: r.roomId,
         moveInDate: r.submissionDate,
         moveOutDate: r.requestedDate,
         monthlyRent: 0,
@@ -226,6 +241,41 @@ export default function ProcessMoveOutScreen(props: any) {
       });
       setShowConfirmModal(false);
       if (res.success) {
+        const profile = moveOutData.profile || {};
+        const booking = moveOutData.booking || {};
+        await saveInactiveTenant({
+          id: String(moveOutData.customerId || moveOutData.mystayId),
+          uniqueId: String(moveOutData.mystayId || moveOutData.customerId),
+          firstName: profile.firstName || moveOutData.customerName.split(" ")[0] || "Tenant",
+          lastName: profile.lastName || moveOutData.customerName.split(" ").slice(1).join(" ") || "",
+          name: moveOutData.customerName,
+          phone: profile.phone || "Not provided",
+          email: profile.email || "Not provided",
+          sex: profile.sex,
+          profession: profile.profession,
+          emergencyName: profile.emergencyName,
+          emergencyPhone: profile.emergencyPhone,
+          aadhaarStatus: profile.aadhaarStatus,
+          kycStatus: profile.kycStatus,
+          profileImage: profile.profileExtras?.profileImage || profile.profileImage,
+          profileExtras: profile.profileExtras || {},
+          roomId: moveOutData.roomId || booking.roomId,
+          roomNumber: moveOutData.roomNumber,
+          floor: booking.room?.floor,
+          propertyId: moveOutData.propertyId || booking.room?.propertyId,
+          propertyName: moveOutData.propertyName || booking.room?.propertyName,
+          moveInDate: booking.moveInDate || moveOutData.moveInDate,
+          moveOutDate: moveOutData.moveOutDate,
+          securityDeposit: moveOutData.securityDeposit,
+          currentDue: moveOutData.currentDue,
+          settlement: {
+            securityDepositReturned: parseFloat(securityDepositReturned || "0"),
+            deductions: getTotalDeductions(),
+          },
+          movedOutAt: new Date().toISOString(),
+          moveOutRequestId: requestId,
+          status: "inactive",
+        });
         Alert.alert(
           "Success",
           "Move-out processed successfully. Tenant marked as moved out and notification sent.",

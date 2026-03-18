@@ -119,7 +119,16 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       });
     } catch (error: any) {
       console.error("Verification Error:", error);
-      const errorMessage = error.response?.data?.message || error.message || "Invalid OTP or registration failed.";
+      // Log validation errors array from backend if present
+      const resData = error.response?.data;
+      if (resData?.errors) {
+        console.error("Backend validation errors:", JSON.stringify(resData.errors, null, 2));
+      }
+      const errorMessage =
+        resData?.message ||
+        (resData?.errors?.[0]?.msg) ||
+        error.message ||
+        "Invalid OTP or registration failed.";
       Alert.alert("Error", errorMessage);
     } finally {
       setLoading(false);

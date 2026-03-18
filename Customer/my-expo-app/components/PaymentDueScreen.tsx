@@ -130,6 +130,11 @@ export default function PaymentDueScreen({ navigation }: any) {
             <Text className="text-slate-600 text-base">
               No pending dues.
             </Text>
+            {!!raw?.booking?.rentInfoMessage && (
+              <Text className="text-slate-500 text-sm mt-3 leading-5">
+                {String(raw.booking.rentInfoMessage)}
+              </Text>
+            )}
           </View>
         ) : (
           <>

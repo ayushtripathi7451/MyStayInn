@@ -15,12 +15,12 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import MapView, { Marker } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
 import MapFallback from "./MapFallback";
+import ScrollableDatePicker from "./ScrollableDatePicker";
 
 type Admin = {
   id: string;
@@ -58,9 +58,9 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
 
   const fp = fullProperty;
   const displayName = fp?.name ?? property?.name ?? "Property";
-  const displayLocation = fp?.location ?? fp?.address
-    ? [fp.address, fp.city, fp.state].filter(Boolean).join(", ")
-    : property?.location ?? "—";
+  const displayLocation =
+    [fp?.city, fp?.state].filter(Boolean).join(", ") ||
+    "—";
   const displayRent = fp?.rent ?? property?.rent ?? "—";
   const propertyFacilities = fp ? toList(fp.amenities) : [];
   const roomFacilitiesList = fp?.rooms?.length
@@ -84,6 +84,15 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
           []
         )
       : [];
+  const roomPreferenceOptions = useMemo(() => {
+    if (roomTypesWithPrice.length > 0) {
+      return roomTypesWithPrice.map((row) => `${row.type} • ${row.price}`);
+    }
+    if (property?.roomType) {
+      return [String(property.roomType)];
+    }
+    return [];
+  }, [roomTypesWithPrice, property?.roomType]);
   const totalRooms = fp?.totalRooms ?? fp?.rooms?.length ?? null;
   const propertyType = fp?.propertyType ?? property?.roomType ?? "—";
   const propertyId = fp?.uniqueId ?? fp?.id ?? admin?.id ?? "—";
@@ -160,10 +169,8 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
   const [advance, setAdvance] = useState("");
   const [checkIn, setCheckIn] = useState<Date | null>(null);
   const [checkOut, setCheckOut] = useState<Date | null>(null);
+  const [roomPreference, setRoomPreference] = useState("");
   const [comments, setComments] = useState("");
-
-  const [showCheckIn, setShowCheckIn] = useState(false);
-  const [showCheckOut, setShowCheckOut] = useState(false);
   // Pre-fill security deposit from backend when available
   useEffect(() => {
     if (securityDepositAmount != null && !isNaN(securityDepositAmount) && advance === "") {
@@ -207,6 +214,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
         moveOutDate: checkOut ? checkOut.toISOString?.()?.split("T")[0] : null,
         securityDeposit: advance ? Number(advance) : securityDepositAmount ?? 0,
         payDepositLater: true,
+        roomPreference: roomPreference.trim() || null,
         comments: comments.trim() || null,
       };
       const res = await bookingApi.post("/api/enrollment-requests", payload);
@@ -283,7 +291,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
               </Text>
             </View>
             {/* Property location map — always show when we have coords or can geocode address */}
-            <View className="mt-4 mb-2">
+            {/* <View className="mt-4 mb-2">
               <Text className="text-gray-700 font-medium mb-2">Property location</Text>
               {geocodeLoading ? (
                 <View className="rounded-2xl border border-gray-200 bg-gray-50 py-8 px-4 items-center justify-center" style={adminDetailsMapStyles.mapContainer}>
@@ -361,7 +369,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
                   )}
                 </View>
               )}
-            </View>
+            </View> */}
 
             {/* ROOM META: type, occupancy, total rooms, Boys/Girls/Colive */}
             <View className="flex-row flex-wrap gap-2 mt-4">
@@ -618,35 +626,48 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
             <Text className="text-gray-700 mb-1">
               Move-in Date *
             </Text>
-            <TouchableOpacity
-              onPress={() => setShowCheckIn(true)}
-              className="border rounded-xl px-3 h-[48px] flex-row items-center justify-between mb-4"
-            >
-              <Text>
-                {checkIn ? formatDate(checkIn) : "Select date"}
-              </Text>
-              <Ionicons
-                name="calendar-outline"
-                size={18}
-              />
-            </TouchableOpacity>
+            <ScrollableDatePicker
+              selectedDate={checkIn}
+              onDateChange={(date) => {
+                setCheckIn(date);
+                if (checkOut && checkOut < date) setCheckOut(null);
+              }}
+              mode="date"
+              placeholder="Select move in date"
+              containerStyle="mb-4"
+            />
+            {checkIn && (
+              <TouchableOpacity
+                onPress={() => {
+                  setCheckIn(null);
+                  setCheckOut(null);
+                }}
+                className="self-start mb-4 -mt-2"
+              >
+                <Text className="text-sm font-semibold text-red-500">Clear move-in date</Text>
+              </TouchableOpacity>
+            )}
 
             {/* CHECK-OUT */}
             <Text className="text-gray-700 mb-1">
               Move-out Date
             </Text>
-            <TouchableOpacity
-              onPress={() => setShowCheckOut(true)}
-              className="border rounded-xl px-3 h-[48px] flex-row items-center justify-between mb-4"
-            >
-              <Text>
-                {checkOut ? formatDate(checkOut) : "Select date"}
-              </Text>
-              <Ionicons
-                name="calendar-outline"
-                size={18}
-              />
-            </TouchableOpacity>
+            <ScrollableDatePicker
+              selectedDate={checkOut}
+              onDateChange={setCheckOut}
+              mode="date"
+              placeholder="Select move out date"
+              minimumDate={checkIn || undefined}
+              containerStyle="mb-4"
+            />
+            {checkOut && (
+              <TouchableOpacity
+                onPress={() => setCheckOut(null)}
+                className="self-start mb-2 -mt-2"
+              >
+                <Text className="text-sm font-semibold text-red-500">Clear move-out date</Text>
+              </TouchableOpacity>
+            )}
 
             {/* SECURITY DEPOSIT (pre-filled from backend, always visible and editable) */}
             <Text className="text-gray-700 mb-1 mt-2">
@@ -659,14 +680,21 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
                 onChangeText={setAdvance}
                 editable
                 keyboardType="numeric"
+                placeholderTextColor="#64748B"
                 placeholder={
                   securityDepositAmount != null && !isNaN(securityDepositAmount)
                     ? `₹${securityDepositAmount.toLocaleString("en-IN")} (as per property)`
                     : "Enter amount (optional)"
                 }
                 className="ml-2 flex-1"
+                style={{ color: "#0F172A", fontWeight: "700" }}
               />
             </View>
+            {securityDepositAmount != null && !isNaN(securityDepositAmount) && (
+              <Text className="text-[12px] font-semibold mt-1" style={{ color: "#1E33FF" }}>
+                Auto-fetched deposit: ₹{securityDepositAmount.toLocaleString("en-IN")}
+              </Text>
+            )}
 
             {durationText && (
               <Text className="text-gray-500 text-[13px] mt-2">
@@ -674,7 +702,53 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
               </Text>
             )}
 
-            
+            {/* ROOM PREFERENCE */}
+            <Text className="text-gray-700 mt-5 mb-1">
+              Room Preference
+            </Text>
+            {roomPreferenceOptions.length > 0 ? (
+              <View className="mt-1">
+                <View className="flex-row flex-wrap gap-2">
+                  {roomPreferenceOptions.map((option) => {
+                    const selected = roomPreference === option;
+                    return (
+                      <TouchableOpacity
+                        key={option}
+                        onPress={() => setRoomPreference(option)}
+                        className={`px-3 py-2 rounded-full border ${
+                          selected ? "bg-blue-50 border-blue-500" : "bg-white border-gray-300"
+                        }`}
+                      >
+                        <Text
+                          className={`text-sm font-medium ${
+                            selected ? "text-blue-700" : "text-gray-700"
+                          }`}
+                        >
+                          {option}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <TouchableOpacity
+                  onPress={() => setRoomPreference("")}
+                  className={`mt-3 px-3 py-2 rounded-full border self-start ${
+                    roomPreference === "" ? "bg-slate-100 border-slate-400" : "bg-white border-gray-300"
+                  }`}
+                >
+                  <Text className="text-sm text-slate-700 font-medium">No specific preference</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TextInput
+                value={roomPreference}
+                onChangeText={setRoomPreference}
+                placeholder="e.g. Single room, near window, lower floor"
+                placeholderTextColor="#9CA3AF"
+                className="border rounded-xl p-3"
+                style={{ color: "#111827" }}
+              />
+            )}
 
             {/* COMMENTS */}
             <Text className="text-gray-700 mt-5 mb-1">
@@ -702,30 +776,6 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* DATE PICKERS */}
-      {showCheckIn && (
-        <DateTimePicker
-          value={checkIn || new Date()}
-          mode="date"
-          onChange={(e, d) => {
-            setShowCheckIn(false);
-            d && setCheckIn(d);
-            setCheckOut(null);
-          }}
-        />
-      )}
-
-      {showCheckOut && (
-        <DateTimePicker
-          value={checkOut || new Date()}
-          mode="date"
-          onChange={(e, d) => {
-            setShowCheckOut(false);
-            d && setCheckOut(d);
-          }}
-        />
-      )}
     </View>
   );
 }

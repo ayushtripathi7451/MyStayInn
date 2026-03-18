@@ -13,8 +13,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { userApi, bookingApi, propertyApi } from "../utils/api";
+import { userApi, bookingApi, propertyApi, USER_SERVICE_URL } from "../utils/api";
 import { formatAddress } from "../utils/address";
+import { resolveFinalKycVerified, resolveKycFieldMatches } from "../utils/kyc";
 
 interface CustomerProfile {
   id?: string; // numeric user id (from DB), required for booking API
@@ -31,6 +32,16 @@ interface CustomerProfile {
   kycStatus?: string;
   verificationStatus?: string;
   profileImage?: string;
+  aadhaarData?: {
+    name?: string;
+    dob?: string;
+    gender?: string;
+  };
+  aadhaarDetails?: {
+    name?: string;
+    dob?: string;
+    gender?: string;
+  };
   profileExtras?: {
     dob?: string;
     addressAsPerAadhaar?: string;
@@ -40,6 +51,16 @@ interface CustomerProfile {
     aadhaarStatus?: string;
     kycStatus?: string;
     photo?: string;
+    aadhaarData?: {
+      name?: string;
+      dob?: string;
+      gender?: string;
+    };
+    aadhaarDetails?: {
+      name?: string;
+      dob?: string;
+      gender?: string;
+    };
     documents?: {
       aadharFront?: string;
       aadharBack?: string;
@@ -62,6 +83,25 @@ interface ActiveStay {
   securityDeposit?: number;
   moveInDate?: string;
 }
+
+const normalizeImageUri = (uri?: string | null): string | null => {
+  if (!uri || typeof uri !== "string") return null;
+
+  const trimmed = uri.trim();
+  if (!trimmed) return null;
+
+  // ✅ DO NOT TOUCH http/https
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    const base = USER_SERVICE_URL.replace(/\/$/, "");
+    return `${base}${trimmed}`;
+  }
+
+  return trimmed;
+};
 
 export default function AdminCustomerDetailScreen({ navigation, route }: any) {
   const [isVerified, setIsVerified] = useState(false);
@@ -92,52 +132,76 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
 
       if (response.data.success) {
         const user = response.data.user;
-        console.log("ADMIN PROFILE DATA:", JSON.stringify(user, null, 2));
-        setProfile(user);
+        const fromRoute = route?.params?.customer;
+        const mergedProfile: CustomerProfile = {
+          ...user,
+          profileExtras: {
+            // Merge order matters:
+            // - Start with any route-provided extras (often stale/raw URLs from list screen)
+            // - Then overlay the freshly-fetched user-service extras (includes signed S3 URLs)
+            ...(fromRoute?.profileExtras && typeof fromRoute.profileExtras === "object"
+              ? fromRoute.profileExtras
+              : {}),
+            ...(user.profileExtras || {}),
+            ...(fromRoute?.aadhaarData && { aadhaarData: fromRoute.aadhaarData }),
+            ...(fromRoute?.aadhaarDetails && { aadhaarDetails: fromRoute.aadhaarDetails }),
+          },
+        };
+        if (typeof fromRoute?.kycVerified === "boolean") {
+          (mergedProfile.profileExtras as any).kycVerified = fromRoute.kycVerified;
+        }
+        if (fromRoute?.kycStatus) {
+          (mergedProfile.profileExtras as any).kycStatus = fromRoute.kycStatus;
+        }
+        console.log("ADMIN PROFILE DATA:", JSON.stringify(mergedProfile, null, 2));
+        setProfile(mergedProfile);
         const numericId = user.id;
         if (numericId) {
-          try {
-            const bookRes = await bookingApi.get(`/api/bookings/customer/${numericId}`);
-            const bookings = bookRes.data?.bookings || [];
-            const active = bookings.find((b: any) => b.status === "active");
-            if (active) {
-              try {
-                const roomRes = await propertyApi.get(`/api/properties/rooms/${active.roomId}`);
-                const room = roomRes.data?.room;
-                setActiveStay({
-                  bookingId: active.uniqueId || active.id,
-                  roomId: String(active.roomId),
-                  propertyId: room?.propertyId,
-                  propertyName: room?.propertyName,
-                  roomNumber: room?.roomNumber,
-                  securityDeposit: parseFloat(active.securityDeposit || "0"),
-                  moveInDate: active.moveInDate,
-                });
-              } catch {
-                setActiveStay({
-                  bookingId: active.uniqueId || active.id,
-                  roomId: String(active.roomId),
-                  securityDeposit: parseFloat(active.securityDeposit || "0"),
-                  moveInDate: active.moveInDate,
-                });
-              }
-            } else {
-              setActiveStay(null);
-            }
-          } catch {
+          const bookRes = await bookingApi.get(`/api/bookings/customer/${numericId}`).catch(() => null);
+          const bookings = bookRes?.data?.bookings || [];
+          const active = bookings.find((b: any) => b.status === "active");
+          if (active) {
+            const roomRes = await propertyApi.get(`/api/properties/rooms/${active.roomId}`).catch(() => null);
+            const room = roomRes?.data?.room;
+            setActiveStay({
+              bookingId: active.uniqueId || active.id,
+              roomId: String(active.roomId),
+              propertyId: room?.propertyId,
+              propertyName: room?.propertyName,
+              roomNumber: room?.roomNumber,
+              securityDeposit: parseFloat(active.securityDeposit || "0"),
+              moveInDate: active.moveInDate,
+            });
+          } else {
             setActiveStay(null);
           }
         }
       }
     } catch (error: any) {
       console.error("Failed to fetch customer profile:", error);
-      Alert.alert("Error", "Failed to load customer profile");
+      const fromRoute = route?.params?.customer;
+      if (fromRoute?.uniqueId && (fromRoute?.firstName != null || fromRoute?.name)) {
+        const nameParts = (fromRoute.name || `${fromRoute.firstName || ''} ${fromRoute.lastName || ''}`.trim()).split(/\s+/);
+        setProfile({
+          uniqueId: fromRoute.uniqueId,
+          id: fromRoute.id,
+          firstName: fromRoute.firstName ?? nameParts[0] ?? "",
+          lastName: fromRoute.lastName ?? nameParts.slice(1).join(" ") ?? "",
+          sex: fromRoute.sex ?? "",
+          phone: fromRoute.phone ?? "",
+          email: fromRoute.email ?? "",
+          aadhaarStatus: fromRoute.aadhaarStatus ?? "",
+          profileExtras: (fromRoute.profileExtras || {}) as any,
+        } as CustomerProfile);
+      } else {
+        Alert.alert("Error", "Failed to load customer profile");
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) {
+  if (loading && !profile) {
     return (
       <SafeAreaView className="flex-1 bg-[#F1F5F9] items-center justify-center">
         <ActivityIndicator size="large" color="#1E33FF" />
@@ -169,27 +233,53 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
     ? profile.profileExtras
     : {};
 
-const documents =
-  typeof profileExtras.documents === "object" && profileExtras.documents !== null
-    ? profileExtras.documents
-    : {};
+  const documentsRaw =
+    typeof profileExtras.documents === "object" && profileExtras.documents !== null
+      ? profileExtras.documents
+      : {};
+  const documents = {
+    aadharFront: normalizeImageUri(documentsRaw.aadharFront || documentsRaw.aadhaarFront || null),
+    aadharBack: normalizeImageUri(documentsRaw.aadharBack || documentsRaw.aadhaarBack || null),
+    idFront: normalizeImageUri(documentsRaw.idFront || documentsRaw.extraIdFront || null),
+    idBack: normalizeImageUri(documentsRaw.idBack || documentsRaw.extraIdBack || null),
+  };
   const fullName = `${profile.firstName} ${profile.lastName}`;
 
   // Use backend profile image first, then card photo, then default avatar
   const profileImage =
-    profileExtras.profileImage ||
-    customer?.photo ||
+    normalizeImageUri(profileExtras.profileImage) ||
+    normalizeImageUri(customer?.photo) ||
     "https://ui-avatars.com/api/?name=" +
       encodeURIComponent(fullName) +
       "&size=300&background=3B82F6&color=fff&bold=true";
 
-  const status = (profile.aadhaarStatus || "").toLowerCase();
+  const aadhaarDataForKyc =
+    profileExtras.aadhaarData ||
+    profileExtras.aadhaarDetails ||
+    profile.aadhaarData ||
+    profile.aadhaarDetails;
+
+  // Prefer backend-stored kycStatus for display; fallback to computed from profile + Aadhaar match.
+  const storedKycStatus = (profileExtras.kycStatus ?? "").toString().trim().toLowerCase();
   const isKycVerified =
-    status === "verified" ||
-    status === "approved" ||
-    status === "success" ||
-    status === "completed";
+    storedKycStatus === "verified"
+      ? true
+      : storedKycStatus === "unverified"
+        ? false
+        : resolveFinalKycVerified(profile, aadhaarDataForKyc);
   const kycStatus = isKycVerified ? "Verified" : "Unverified";
+
+  const kycMatches = resolveKycFieldMatches(profile, aadhaarDataForKyc);
+  const profileFullName = `${profile.firstName} ${profile.lastName}`.trim();
+  const profileGenderDisplay = profile.sex
+    ? profile.sex.charAt(0).toUpperCase() + profile.sex.slice(1).toLowerCase()
+    : "Not provided";
+  const profileDobDisplay = profileExtras.dob || "Not provided";
+
+  if (__DEV__) {
+    console.log("ADMIN DOCS RAW:", documentsRaw);
+    console.log("ADMIN DOCS NORMALIZED:", documents);
+  }
 
   // Validate phone number
   const isValidPhone = profile.phone && (profile.phone.startsWith('+') || /^\d{10,}$/.test(profile.phone));
@@ -215,22 +305,10 @@ const documents =
     emergencyContactName: profile.emergencyName || "Not provided",
     emergencyContactPhone: profile.emergencyPhone || "Not provided",
     documents: {
-      aadharFront:
-        documents.aadharFront ||
-        documents.aadhaarFront ||
-        "https://via.placeholder.com/600x400?text=No+Document",
-      aadharBack:
-        documents.aadharBack ||
-        documents.aadhaarBack ||
-        "https://via.placeholder.com/600x400?text=No+Document",
-      idFront:
-        documents.idFront ||
-        documents.extraIdFront ||
-        "https://via.placeholder.com/600x400?text=No+Document",
-      idBack:
-        documents.idBack ||
-        documents.extraIdBack ||
-        "https://via.placeholder.com/600x400?text=No+Document",
+      aadharFront: documents.aadharFront,
+      aadharBack: documents.aadharBack,
+      idFront: documents.idFront,
+      idBack: documents.idBack,
       photo: profileImage,
     },
   };
@@ -287,8 +365,8 @@ const documents =
               <Text className="text-2xl font-black text-slate-900 leading-7">
                 {CUSTOMER.firstName}{"\n"}{CUSTOMER.lastName}
               </Text>
-              <View className="bg-green-100 self-start px-2 py-0.5 rounded-md mt-2">
-                <Text className="text-[10px] font-black text-green-700 uppercase tracking-widest">
+              <View className={`self-start px-2 py-0.5 rounded-md mt-2 ${isKycVerified ? "bg-green-100" : "bg-orange-100"}`}>
+                <Text className={`text-[10px] font-black uppercase tracking-widest ${isKycVerified ? "text-green-700" : "text-orange-600"}`}>
                   KYC {CUSTOMER.kycStatus}
                 </Text>
               </View>
@@ -383,6 +461,60 @@ const documents =
           </View>
         </Section>
 
+        {/* KYC VERIFICATION DETAILS */}
+        <Section title="KYC Verification">
+          {/* Overall KYC status badge */}
+          <View className={`flex-row items-center px-4 py-3 rounded-2xl mb-5 ${isKycVerified ? "bg-emerald-50 border border-emerald-200" : "bg-orange-50 border border-orange-200"}`}>
+            <Ionicons
+              name={isKycVerified ? "shield-checkmark" : "shield-outline"}
+              size={22}
+              color={isKycVerified ? "#059669" : "#EA580C"}
+            />
+            <Text className={`ml-3 font-black text-base ${isKycVerified ? "text-emerald-700" : "text-orange-600"}`}>
+              KYC {kycStatus}
+            </Text>
+            {kycMatches.hasAadhaarData && (
+              <Text className="ml-auto text-[11px] font-semibold text-slate-400">Aadhaar matched</Text>
+            )}
+          </View>
+
+          {/* Field-by-field comparison */}
+          {kycMatches.hasAadhaarData ? (
+            <View className="space-y-3">
+              {/* Name */}
+              <KycMatchRow
+                label="Full Name"
+                profileValue={profileFullName || "Not provided"}
+                aadhaarValue={kycMatches.aadhaarName || "Not provided"}
+                matched={kycMatches.nameMatch}
+              />
+              {/* Date of Birth */}
+              <KycMatchRow
+                label="Date of Birth"
+                profileValue={profileDobDisplay}
+                aadhaarValue={kycMatches.aadhaarDob || "Not provided"}
+                matched={kycMatches.dobMatch}
+              />
+              {/* Gender */}
+              <KycMatchRow
+                label="Gender"
+                profileValue={profileGenderDisplay}
+                aadhaarValue={kycMatches.aadhaarGender
+                  ? kycMatches.aadhaarGender.charAt(0).toUpperCase() + kycMatches.aadhaarGender.slice(1).toLowerCase()
+                  : "Not provided"}
+                matched={kycMatches.genderMatch}
+              />
+            </View>
+          ) : (
+            <View className="items-center py-4">
+              <Ionicons name="information-circle-outline" size={28} color="#94A3B8" />
+              <Text className="text-slate-400 font-semibold text-sm mt-2 text-center">
+                No Aadhaar data available.{"\n"}Customer has not completed Digilocker verification.
+              </Text>
+            </View>
+          )}
+        </Section>
+
         {/* VERIFICATION */}
         <TouchableOpacity
           activeOpacity={0.8}
@@ -419,6 +551,11 @@ const documents =
                 photo: profileImage,
                 mystayId: profile.uniqueId,
                 kycStatus: kycStatus,
+                roomPreference: (route?.params as any)?.customer?.roomPreference,
+                moveInDate: (route?.params as any)?.customer?.moveInDate,
+                moveOutDate: (route?.params as any)?.customer?.moveOutDate,
+                comments: (route?.params as any)?.customer?.comments,
+                securityDeposit: (route?.params as any)?.customer?.securityDeposit,
                 enrollmentRequestId: (route?.params as any)?.customer?.enrollmentRequestId,
               },
             })
@@ -455,10 +592,48 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => (
   </View>
 );
 
+const KycMatchRow = ({
+  label,
+  profileValue,
+  aadhaarValue,
+  matched,
+}: {
+  label: string;
+  profileValue: string;
+  aadhaarValue: string;
+  matched: boolean;
+}) => (
+  <View className={`rounded-2xl p-4 mb-3 border ${matched ? "bg-emerald-50 border-emerald-100" : "bg-slate-50 border-slate-200"}`}>
+    <View className="flex-row items-center justify-between mb-2">
+      <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</Text>
+      <Ionicons
+        name={matched ? "checkmark-circle" : "ellipse-outline"}
+        size={18}
+        color={matched ? "#059669" : "#94A3B8"}
+      />
+    </View>
+    <View className="flex-row justify-between">
+      <View className="flex-1 mr-3">
+        <Text className="text-[9px] font-bold text-slate-400 uppercase mb-0.5">Profile</Text>
+        <Text className="text-[13px] font-bold text-slate-800" numberOfLines={2}>{profileValue}</Text>
+      </View>
+      <View className="w-px bg-slate-200 mx-2" />
+      <View className="flex-1 ml-3">
+        <Text className="text-[9px] font-bold text-indigo-400 uppercase mb-0.5">Aadhaar</Text>
+        <Text className="text-[13px] font-bold text-slate-800" numberOfLines={2}>{aadhaarValue}</Text>
+      </View>
+    </View>
+  </View>
+);
+
 const Doc = ({ label, uri, half, onPreview }: any) => {
   const [hasError, setHasError] = useState(false);
   const hasUri = typeof uri === "string" && uri.trim().length > 0;
   const isLoadable = hasUri && !hasError;
+
+  if (__DEV__ && hasUri) {
+    console.log("FINAL DOC URL:", label, uri);
+  }
 
   return (
     <TouchableOpacity
@@ -469,12 +644,23 @@ const Doc = ({ label, uri, half, onPreview }: any) => {
     >
       <Text className="text-[10px] font-bold text-slate-500 mb-2 uppercase">{label}</Text>
       {isLoadable ? (
-        <Image
-          source={{ uri }}
-          onError={() => setHasError(true)}
-          className="w-full h-28 rounded-2xl bg-slate-50 border border-slate-100"
-          resizeMode="cover"
-        />
+        <View className="w-full h-28 rounded-2xl bg-slate-50 border border-slate-100 overflow-hidden">
+          <Image
+            source={{ uri }}
+            onError={() => {
+              if (__DEV__) {
+                console.log("ADMIN DOC IMAGE FAILED:", label, uri);
+              }
+              setHasError(true);
+            }}
+            className="w-full h-full"
+            resizeMode="cover"
+          />
+          {/* Expand affordance (same as profile pic) */}
+          <View className="absolute bottom-2 right-2 bg-[#1E33FF] p-1 rounded-lg border-2 border-white">
+            <Ionicons name="expand" size={12} color="white" />
+          </View>
+        </View>
       ) : (
         <View className="w-full h-28 rounded-2xl bg-slate-100 border border-slate-200 items-center justify-center">
           <Ionicons name="image-outline" size={22} color="#94A3B8" />

@@ -101,7 +101,7 @@ export default function CreateRequestScreen({ navigation }: any) {
       return;
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 0.7,
     });
     if (!res.canceled) setPhotos((p) => [...p, res.assets[0]]);

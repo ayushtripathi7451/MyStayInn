@@ -5,12 +5,13 @@ import { MoveOutService } from '../../services/moveOutService';
 /** Same property match as TicketsScreen so home count matches Open tab */
 function filterTicketsByProperty(tickets: { propertyRef?: string | null }[], propertyMatchValues: string[]) {
   if (!propertyMatchValues.length) return tickets;
+  const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const keys = propertyMatchValues.map(normalize);
   return tickets.filter((t) => {
     const ref = (t.propertyRef || '').trim();
     if (!ref) return false;
-    return propertyMatchValues.some(
-      (v) => ref === v || ref.startsWith(v) || (v && (ref.includes(v) || v.includes(ref)))
-    );
+    const normRef = normalize(ref);
+    return keys.some((k) => normRef === k || normRef.startsWith(`${k} - room`));
   });
 }
 

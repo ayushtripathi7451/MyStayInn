@@ -59,6 +59,8 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
       isSingleOccupancy: allocationData?.isSingleOccupancy || false,
       moveIn: allocationData?.moveIn ? formatDate(allocationData.moveIn) : "N/A",
       moveOut: allocationData?.moveOut ? formatDate(allocationData.moveOut) : "N/A",
+      roomPreference: allocationData?.roomPreference || "—",
+      comments: allocationData?.comments || "—",
     },
     payment: {
       securityDeposit: allocationData?.securityDeposit || "0",
@@ -98,7 +100,7 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
         rentPeriod: allocationData?.rentPeriod || "month",
         onlinePaymentRecv: allocationData?.onlinePayment || 0,
         cashPaymentRecv: allocationData?.cashPayment || 0,
-        notes: `Allocated to ${customerName}${allocationData?.isSingleOccupancy ? ' (Single Occupancy)' : ''}`,
+        notes: `Allocated to ${customerName}${allocationData?.isSingleOccupancy ? ' (Single Occupancy)' : ''} | Room preference: ${allocationData?.roomPreference || '—'} | Comments: ${allocationData?.comments || '—'}`,
       };
 
       console.log("[AdminAllocationSummary] Allocating room with payload:", bookingPayload);
@@ -277,6 +279,15 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
           <View className="flex-row justify-between pt-5 border-t border-slate-50">
             <SummaryItem label="Move In" value={FINAL_SUMMARY.allocation.moveIn} />
             <SummaryItem label="Move Out" value={FINAL_SUMMARY.allocation.moveOut} align="items-end" />
+          </View>
+          <View className="pt-4 mt-4 border-t border-slate-50">
+            <SummaryItem label="Room Preference" value={FINAL_SUMMARY.allocation.roomPreference} />
+            <View className="mt-3">
+              <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                Comments
+              </Text>
+              <Text className="text-base font-bold text-slate-900">{FINAL_SUMMARY.allocation.comments}</Text>
+            </View>
           </View>
         </View>
 

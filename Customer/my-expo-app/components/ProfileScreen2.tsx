@@ -15,6 +15,21 @@ import BottomNav from "./BottomNav";
 import { useTheme } from "../context/ThemeContext";
 import { api, userApi } from "../utils/api";
 import { formatAddress } from "../utils/address";
+import { resolveFinalKycVerified } from "../utils/kyc";
+import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
+
+const isAadhaarVerificationExpired = (expiresAt?: string | null) => {
+  if (!expiresAt) return true;
+  const timestamp = new Date(expiresAt).getTime();
+  if (Number.isNaN(timestamp)) return true;
+  return Date.now() >= timestamp;
+};
+const formatExpiryDate = (expiresAt?: string | null) => {
+  if (!expiresAt) return "Not available";
+  const d = new Date(expiresAt);
+  if (Number.isNaN(d.getTime())) return "Not available";
+  return d.toLocaleDateString();
+};
 
 interface UserProfile {
   uniqueId: string;
@@ -34,6 +49,12 @@ interface UserProfile {
     profileImage?: string;
     aadhaar?: string;
     aadhaarLast4?: string;
+    aadhaarData?: {
+      name?: string;
+      dob?: string;
+      gender?: string;
+      address?: string;
+    };
     documents?: {
       aadharFront?: string;
       aadharBack?: string;
@@ -41,6 +62,10 @@ interface UserProfile {
       idBack?: string;
     };
     profileCompleted?: boolean;
+    /** Backend-stored KYC status: "verified" | "unverified". Used for label. */
+    kycStatus?: string;
+    aadhaarVerifiedAt?: string;
+    aadhaarExpiresAt?: string;
   };
 }
 
@@ -48,7 +73,9 @@ export default function ProfileScreen2({ navigation }: any) {
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [kycVerifiedFromKycService, setKycVerifiedFromKycService] = useState(false);
+  const [aadhaarVerifiedByKycService, setAadhaarVerifiedByKycService] = useState(false);
+  const [aadhaarDetailsFromKycService, setAadhaarDetailsFromKycService] = useState<any>(null);
+  const [aadhaarCheckoutVisible, setAadhaarCheckoutVisible] = useState(false);
 
   /* 🎨 THEME COLORS */
   const isFemale = theme === "female";
@@ -62,15 +89,19 @@ export default function ProfileScreen2({ navigation }: any) {
 
   useEffect(() => {
     fetchProfile();
-    // Also ask KYC service directly, like CompleteProfileScreen does, and just map to a simple flag.
+    // Hide verify CTA when KYC service says Aadhaar is already verified,
+    // even if user profile service status is not yet synced.
     (async () => {
       try {
         const res = await api.get("/api/kyc/digilocker/status");
-        if (res.data?.verified) {
-          setKycVerifiedFromKycService(true);
+        if (res?.data?.verified) {
+          setAadhaarVerifiedByKycService(true);
+          if (res?.data?.aadhaarDetails) {
+            setAadhaarDetailsFromKycService(res.data.aadhaarDetails);
+          }
         }
       } catch {
-        // If this fails, we silently ignore – fall back to profile.aadhaarStatus only.
+        // Ignore status errors here; profile fields still drive UI fallback.
       }
     })();
   }, []);
@@ -167,15 +198,34 @@ export default function ProfileScreen2({ navigation }: any) {
       ? `XXXX XXXX ${profileExtras.aadhaarLast4}`
       : "Not provided";
 
-  // Normalized Aadhaar/KYC status from backend (treat 'verified', 'approved', 'success' etc. as verified)
-  const aadhaarStatusRaw = (profile.aadhaarStatus || "").trim();
-  const aadhaarStatusNorm = aadhaarStatusRaw.toLowerCase();
+  const aadhaarDataForKyc = profileExtras.aadhaarData || aadhaarDetailsFromKycService;
+  const aadhaarResponse = aadhaarDataForKyc;
+  // Prefer backend-stored kycStatus for label; fallback to computed from profile + Aadhaar match.
+  const storedKycStatus = (profileExtras.kycStatus ?? "").toString().trim().toLowerCase();
   const isKycVerified =
-    kycVerifiedFromKycService ||
+    storedKycStatus === "verified"
+      ? true
+      : storedKycStatus === "unverified"
+        ? false
+        : resolveFinalKycVerified(profile, aadhaarDataForKyc);
+  const kycStatusLabel = isKycVerified ? "KYC Verified" : "KYC Unverified";
+  const hasBackendAadhaarData = Boolean(aadhaarDataForKyc);
+  const aadhaarStatusNorm = String(profile.aadhaarStatus || "").trim().toLowerCase();
+  const aadhaarAlreadyVerifiedInBackend =
     aadhaarStatusNorm === "verified" ||
     aadhaarStatusNorm === "approved" ||
     aadhaarStatusNorm === "success" ||
-    aadhaarStatusNorm === "completed";
+    aadhaarStatusNorm === "completed" ||
+    aadhaarStatusNorm === "true";
+  const aadhaarExpiry =
+    profileExtras.aadhaarExpiresAt ?? (aadhaarDetailsFromKycService?.aadhaarExpiresAt as string | undefined);
+  const aadhaarVerificationExpired = isAadhaarVerificationExpired(aadhaarExpiry);
+  const aadhaarValidityMessage = profileExtras.aadhaarData || aadhaarDetailsFromKycService
+    ? `KYC will be valid until ${formatExpiryDate(aadhaarExpiry)}`
+    : null;
+  const shouldShowVerifyButton =
+    aadhaarVerificationExpired || (!hasBackendAadhaarData && !aadhaarAlreadyVerifiedInBackend);
+  const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyButton;
 
   return (
     <View className="flex-1 bg-[#F4F6FF]">
@@ -286,14 +336,14 @@ export default function ProfileScreen2({ navigation }: any) {
           <View className="mb-3">
             <Text className="text-gray-500 text-sm mb-1">Address as per Aadhaar</Text>
             <Text className="text-base font-medium text-gray-900">
-              {formatAddress(profileExtras.addressAsPerAadhaar)}
+              {formatAddress(profileExtras.addressAsPerAadhaar as any)}
             </Text>
           </View>
 
           <View>
             <Text className="text-gray-500 text-sm mb-1">Current Address</Text>
             <Text className="text-base font-medium text-gray-900">
-              {formatAddress(profileExtras.currentAddress)}
+              {formatAddress(profileExtras.currentAddress as any)}
             </Text>
           </View>
         </View>
@@ -313,7 +363,7 @@ export default function ProfileScreen2({ navigation }: any) {
             {isKycVerified && (
               <View className="px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200">
                 <Text className="text-[11px] font-semibold text-emerald-700">
-                  Verified
+                  {kycStatusLabel}
                 </Text>
               </View>
             )}
@@ -321,31 +371,54 @@ export default function ProfileScreen2({ navigation }: any) {
 
           <KycRow label="Aadhaar (last 4 digits)" value={maskedAadhaar} />
           <KycRow
-            label="Aadhaar Status"
-            value={isKycVerified ? "Verified" : "Unverified"}
+            label="KYC Status"
+            value={kycStatusLabel}
             success={isKycVerified}
           />
 
+          {aadhaarValidityMessage && (
+            <View className="mt-3 p-3 rounded-2xl bg-indigo-50 border border-indigo-100">
+              <Text className="text-[11px] font-semibold text-indigo-700">
+                {aadhaarValidityMessage}
+              </Text>
+            </View>
+          )}
+
+         
+
           {!isKycVerified && (
             <View className="mt-4 p-3 rounded-2xl bg-amber-50 border border-amber-200">
-              <Text className="text-xs font-semibold text-amber-700 mb-1">
-                KYC Pending
-              </Text>
-              <Text className="text-[11px] text-amber-700 mb-3">
-                Your Aadhaar / KYC is not approved yet. Please complete verification to keep your stay records up to date.
-              </Text>
-              <TouchableOpacity
-                className="self-start px-4 py-2 rounded-xl bg-indigo-600"
-                activeOpacity={0.85}
-                onPress={() => navigation.navigate("CompleteProfile", { startKycImmediately: true })}
-              >
-                <Text className="text-white text-xs font-semibold">
-                  Verify Aadhaar / Complete KYC
+              
+              
+              {!shouldHideVerifyButton ? (
+                <TouchableOpacity
+                  className="self-start px-4 py-2 rounded-xl bg-indigo-600"
+                  activeOpacity={0.85}
+                  onPress={() => setAadhaarCheckoutVisible(true)}
+                >
+                  <Text className="text-white text-xs font-semibold">
+                    Verify Aadhaar / Complete KYC
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <Text className="text-[11px] text-amber-700">
+                  Aadhaar is already verified in backend. KYC remains unverified because profile details do not match.
                 </Text>
-              </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
+
+        <AadhaarKycCheckoutModal
+          visible={aadhaarCheckoutVisible}
+          onClose={() => setAadhaarCheckoutVisible(false)}
+          onProceed={() => {
+            setAadhaarCheckoutVisible(false);
+            navigation.navigate("CompleteProfile", { startKycImmediately: true });
+          }}
+          title="Aadhaar KYC"
+          subtitle="Review charges before verification"
+        />
 
         {/* 📄 UPLOADED DOCUMENTS (from Upload documents screen) */}
         <View className="bg-white rounded-2xl p-5 mb-4 shadow shadow-black/10">

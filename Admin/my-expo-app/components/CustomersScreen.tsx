@@ -22,6 +22,7 @@ import BottomNav from "./BottomNav";
 import { DUMMY_TENANTS } from "../data/dummyTenants";
 import { userApi, bookingApi } from "../utils/api";
 import { useProperty } from "../contexts/PropertyContext";
+import { resolveFinalKycVerified } from "../utils/kyc";
 
 /* =========================
    AVATAR WITH FALLBACK
@@ -82,19 +83,6 @@ export default function CustomersScreen() {
   const [enrollmentList, setEnrollmentList] = useState<any[]>([]);
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
 
-  const isVerifiedKycStatus = (value: any): boolean => {
-    if (typeof value !== "string") return false;
-    const normalized = value.trim().toLowerCase();
-    return (
-      normalized === "verified" ||
-      normalized === "approved" ||
-      normalized === "success" ||
-      normalized === "completed" ||
-      normalized === "done" ||
-      normalized === "true"
-    );
-  };
-
   // Fetch enrollment requests for the current property only (so customer enrolled in A doesn't show in B)
   useEffect(() => {
     if (tab !== "enrollment" || step !== "enrollment") return;
@@ -112,9 +100,11 @@ export default function CustomersScreen() {
             phone: r.phone || "—",
             photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
             kycStatus: "Requested",
-            roomPreference: r.payDepositLater ? "Pay deposit later" : "—",
+            roomPreference: r.roomPreference || "—",
             moveInDate: r.moveInDate,
+            moveOutDate: r.moveOutDate,
             securityDeposit: r.securityDeposit,
+            comments: r.comments || "",
             status: r.status === "requested" ? "Requested" : r.status,
             uniqueId: r.uniqueId,
             enrollmentRequestId: r.id,
@@ -152,9 +142,11 @@ export default function CustomersScreen() {
           phone: r.phone || "—",
           photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
           kycStatus: "Requested",
-          roomPreference: r.payDepositLater ? "Pay deposit later" : "—",
+          roomPreference: r.roomPreference || "—",
           moveInDate: r.moveInDate,
+          moveOutDate: r.moveOutDate,
           securityDeposit: r.securityDeposit,
+          comments: r.comments || "",
           status: r.status === "requested" ? "Requested" : r.status,
           uniqueId: r.uniqueId,
           enrollmentRequestId: r.id,
@@ -242,17 +234,20 @@ export default function CustomersScreen() {
       const response = await userApi.get(`/api/users/search/customers?query=${encodeURIComponent(searchQueryParam)}`);
 
       if (response?.data?.success && response.data.customers?.length > 0) {
-        const formattedUsers = response.data.customers.map((user: any) => ({
-          id: user.uniqueId,
-          uniqueId: user.uniqueId,
-          name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown',
-          phone: user.phone?.replace('+91', '') || user.phone || 'N/A',
-          kycStatus: isVerifiedKycStatus(user.aadhaarStatus) ? 'Verified' : 'Unverified',
-          photo: user.profileExtras?.profileImage || "https://ui-avatars.com/api/?name=" + encodeURIComponent(`${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User') + "&size=150&background=3B82F6&color=fff&bold=true",
-          email: user.email,
-          aadhaarStatus: user.aadhaarStatus,
-        }));
-        
+        const formattedUsers = response.data.customers.map((user: any) => {
+          const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+          return {
+            ...user,
+            id: user.id ?? user.uniqueId,
+            uniqueId: user.uniqueId,
+            name,
+            phone: user.phone?.replace('+91', '') || user.phone || 'N/A',
+            kycStatus: resolveFinalKycVerified(user) ? "Verified" : "Unverified",
+            photo: user.profileExtras?.profileImage || "https://ui-avatars.com/api/?name=" + encodeURIComponent(name || 'User') + "&size=150&background=3B82F6&color=fff&bold=true",
+            email: user.email,
+            aadhaarStatus: user.aadhaarStatus,
+          };
+        });
         setSearchResults(formattedUsers);
         
         if (formattedUsers.length === 0) {
@@ -511,6 +506,11 @@ export default function CustomersScreen() {
                             name: e.name,
                             phone: e.phone,
                             photo: e.photo,
+                            roomPreference: e.roomPreference,
+                            moveInDate: e.moveInDate,
+                            moveOutDate: e.moveOutDate,
+                            comments: e.comments,
+                            securityDeposit: e.securityDeposit,
                             enrollmentRequestId: e.enrollmentRequestId,
                             customerId: e.customerId,
                           },

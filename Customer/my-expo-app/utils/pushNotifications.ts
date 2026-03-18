@@ -9,10 +9,15 @@ import {
 } from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { userApi } from './api';
+import { appendCustomerPushInbox } from './customerInbox';
 
-// Must be at top level (global scope), not inside a component. Handles notifications when app is in background or quit.
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
-  console.log('[PushNotifications] Background message:', remoteMessage?.notification?.title ?? remoteMessage?.data?.title);
+  const title = String(
+    remoteMessage?.notification?.title ?? remoteMessage?.data?.title ?? 'Notification'
+  );
+  const body = String(remoteMessage?.notification?.body ?? remoteMessage?.data?.body ?? '');
+  console.log('[PushNotifications] Background message:', title);
+  await appendCustomerPushInbox(title, body);
 });
 
 /**
@@ -126,6 +131,7 @@ export function setupForegroundNotificationHandler(): void {
     onMessage(messagingInstance, (remoteMessage) => {
       const title = String(remoteMessage.notification?.title ?? remoteMessage.data?.title ?? 'Notification');
       const body = String(remoteMessage.notification?.body ?? remoteMessage.data?.body ?? '');
+      void appendCustomerPushInbox(title, body);
       Alert.alert(title, body);
     });
   } catch (err) {

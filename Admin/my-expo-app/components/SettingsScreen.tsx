@@ -4,6 +4,8 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useProperty } from "../contexts/PropertyContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { clearTokens } from "../utils/tokenDebug";
 
 const { width } = Dimensions.get("window");
 
@@ -26,7 +28,31 @@ export default function SettingsScreen() {
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Logout", style: "destructive", onPress: () => console.log("Logging out...") },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            // Clear auth tokens used across the app
+            await clearTokens();
+            // Clear app-scoped cached user/property selections
+            await AsyncStorage.multiRemove([
+              "userData",
+              "currentProperty",
+              "PUSH_FCM_TOKEN",
+            ]);
+          } catch {
+            // ignore
+          } finally {
+            setShowPropertyModal(false);
+            // Hard reset navigation so user can't go back
+            navigation.reset({
+              index: 0,
+              routes: [{ name: "Welcome" }],
+            });
+          }
+        },
+      },
     ]);
   };
 

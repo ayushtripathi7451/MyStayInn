@@ -14,24 +14,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { bookingApi } from "../utils/api";
 
-const TERMS_AND_CONDITIONS = [
-  "Notice period for vacating is 30 days; failure to give notice may attract penalty of 1 month's rent.",
-  "Rent is due on or before the 5th of every month.",
-  "Advance/Rent is non-refundable and non-transferable.",
-  "Outside visitors are not allowed without prior permission.",
-  "Guest accommodation charges: Rs. 600/- per day with/without food, with permission.",
-  "Maintenance charges: Rs. 1500/- while vacating.",
-  "Management is not responsible for personal belongings (Gold, Credit/Debit card, Mobile & Laptops, Cash etc.).",
-  "Lights & fans must be switched off before leaving the room.",
-  "Food consumption restricted to dining hall only.",
-  "Charges may apply for damage to PG property.",
-  "Key replacement charge: Rs. 500/- for duplicate.",
-  "Smoking & liquor prohibited inside the room.",
-  "Cooperation in keeping rooms clean is requested.",
-  "Disposal of garbage in dustbins only.",
-  "Keys and belongings must be returned to PG owner upon vacating.",
-];
-
 type PrefilledData = {
   pgInfo?: { pgName?: string; address?: string | Record<string, unknown>; contactNumbers?: string[] };
   guestPersonal?: {
@@ -377,21 +359,20 @@ export default function GuestEnrollmentFormScreen({ navigation }: any) {
           </View>
         </View>
 
-        {/* Terms & Conditions — use property rules when available (same as admin-saved rules), else fallback */}
-        <View className="px-4 py-4 border-t border-slate-300 mt-2">
-          <Text className="text-base font-bold text-slate-900 underline mb-3">TERMS & CONDITIONS</Text>
-          {(Array.isArray(data?.propertyRules?.items) && data.propertyRules.items.length > 0
-            ? data.propertyRules.items
-            : TERMS_AND_CONDITIONS
-          ).map((point, i) => (
-            <View key={i} className="flex-row mb-2">
-              <Text className="text-slate-700 font-semibold mr-2" style={{ minWidth: 20 }}>
-                {i + 1}.
-              </Text>
-              <Text className="flex-1 text-sm text-slate-700">{point}</Text>
-            </View>
-          ))}
-        </View>
+        {/* Terms & Conditions — show only when admin has submitted property rules */}
+        {Array.isArray(data?.propertyRules?.items) && data.propertyRules.items.length > 0 && (
+          <View className="px-4 py-4 border-t border-slate-300 mt-2">
+            <Text className="text-base font-bold text-slate-900 underline mb-3">TERMS & CONDITIONS</Text>
+            {data.propertyRules.items.map((point, i) => (
+              <View key={i} className="flex-row mb-2">
+                <Text className="text-slate-700 font-semibold mr-2" style={{ minWidth: 20 }}>
+                  {i + 1}.
+                </Text>
+                <Text className="flex-1 text-sm text-slate-700">{point}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Signature section */}
         <View className="px-4 py-6 border-t-2 border-slate-400 mt-2">

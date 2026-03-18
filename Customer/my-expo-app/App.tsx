@@ -1,5 +1,5 @@
 import './global.css';
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import { ScrollView, View, ActivityIndicator, TouchableOpacity, Text, RefreshControl } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Provider, useDispatch, useSelector } from 'react-redux';
@@ -17,6 +17,8 @@ import DueAmount from './components/DueAmount';
 import Tickets from './components/Tickets';
 import BottomNav from './components/BottomNav';
 import AnnouncementsSection from './components/AnnouncementsSection';
+import HomeRecentAnnouncements from './components/HomeRecentAnnouncements';
+import InboxDetailScreen from './components/InboxDetailScreen';
 import SettingsScreen from './components/SettingsScreen';
 import WelcomeScreen from './components/WelcomeScreen';
 import SplashScreen from './components/SplashScreen';
@@ -67,6 +69,7 @@ import MoveOutRequestScreen from './components/MoveOutRequestScreen';
 import MoveOutStatusScreen from './components/MoveOutStatusScreen';
 import GuestEnrollmentFormScreen from './components/GuestEnrollmentFormScreen';
 import { setupForegroundNotificationHandler, registerPushNotifications } from './utils/pushNotifications';
+import { bookingApi } from './utils/api';
 
 const Stack = createNativeStackNavigator(); // untyped stack (remove generic to avoid missing route key errors)
 
@@ -76,6 +79,7 @@ function HomeScreen({ navigation }: any) {
   const currentStay = useSelector((state: RootState) => state.currentStay.data);
   const currentStayLoading = useSelector((state: RootState) => state.currentStay.loading);
   const [refreshing, setRefreshing] = useState(false);
+  const lastAutoSignedBookingRef = useRef<string>("");
 
   // Single trigger when Home is focused (including first open); saga skips if cache is fresh
   useFocusEffect(
@@ -100,6 +104,58 @@ function HomeScreen({ navigation }: any) {
     }, [])
   );
 
+  // Auto-submit enrollment form for current stay (no customer-facing sign step on Home).
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const autoSignEnrollmentForm = async () => {
+        if (!currentStay) return;
+        try {
+          const res = await bookingApi.get('/api/bookings/guest-enrollment-form');
+          const form = res.data?.form;
+          if (!res.data?.success || !form) return;
+
+          const status = String(form.status || '').toLowerCase();
+          if (status === 'signed') return;
+
+          const bookingKey = String(form.bookingId || form.id || '');
+          if (bookingKey && bookingKey === lastAutoSignedBookingRef.current) return;
+
+          const parsedPrefilledData =
+            typeof form.prefilledData === 'string'
+              ? (() => {
+                  try {
+                    return JSON.parse(form.prefilledData);
+                  } catch {
+                    return null;
+                  }
+                })()
+              : form.prefilledData || null;
+
+          const candidateName = String(
+            parsedPrefilledData?.guestPersonal?.name || form.signatureName || 'Customer'
+          ).trim();
+          const signatureName = candidateName.length >= 2 ? candidateName : 'Customer';
+
+          await bookingApi.post('/api/bookings/guest-enrollment-form/sign', { signatureName });
+          if (isActive) {
+            lastAutoSignedBookingRef.current = bookingKey || 'signed';
+          }
+        } catch (e: any) {
+          if (e?.response?.status !== 404) {
+            console.warn('[Home] auto-sign enrollment failed:', e?.response?.data?.message || e?.message);
+          }
+        }
+      };
+
+      autoSignEnrollmentForm();
+      return () => {
+        isActive = false;
+      };
+    }, [currentStay])
+  );
+
   // ✅ Dynamic background
   const bgColor = theme === 'female' ? 'bg-[#FFF5FF]' : 'bg-[#F6F8FF]';
 
@@ -122,26 +178,13 @@ function HomeScreen({ navigation }: any) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }>
         <Header />
+        <HomeRecentAnnouncements />
         <InfoCards />
         <DueAmount />
-        {currentStay && (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('GuestEnrollmentFormScreen')}
-            className="mx-4 mt-4 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex-row items-center"
-          >
-            <View className="w-10 h-10 rounded-full bg-indigo-100 items-center justify-center">
-              <Text className="text-indigo-600 text-lg">✍</Text>
-            </View>
-            <View className="ml-3 flex-1">
-              <Text className="font-bold text-slate-900">Sign enrollment agreement</Text>
-              <Text className="text-sm text-slate-500">Review and sign your PG guest form</Text>
-            </View>
-            <Text className="text-slate-400">›</Text>
-          </TouchableOpacity>
-        )}
+        <AnnouncementsSection />
         <Tickets navigation={navigation} />
         <TicketPanel navigation={navigation} />
-        <AnnouncementsSection />
+        
         {/* <TicketDetailsScreen /> */}
         {/* <MoreDetails />
         <AdmissionDetails />
@@ -186,6 +229,7 @@ export default function App() {
             <Stack.Screen name="FoodScreen" component={FoodScreen} />
             <Stack.Screen name="CreateMPINScreen" component={CreateMPINScreen} />
             <Stack.Screen name="Notifications" component={NotificationScreen} />
+            <Stack.Screen name="InboxDetail" component={InboxDetailScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
             <Stack.Screen name="Profile2" component={ProfileScreen2} />
             <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />

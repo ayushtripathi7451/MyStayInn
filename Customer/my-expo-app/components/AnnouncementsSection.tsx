@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { View, Text, ActivityIndicator, ScrollView, AppState, TouchableOpacity } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { userApi } from "../utils/api";
 import AnnouncementCard, { type AnnouncementItem } from "./AnnouncementCard";
 
@@ -89,7 +89,7 @@ export default function AnnouncementsSection() {
   return (
     <View className="mt-6 mb-6">
       <View className="px-4 mb-3">
-        <Text className="text-xl font-semibold text-black">Announcements</Text>
+        <Text className="text-xl font-bold text-slate-800">Announcements</Text>
       </View>
       <ScrollView
         horizontal
@@ -97,7 +97,20 @@ export default function AnnouncementsSection() {
         contentContainerStyle={{ paddingHorizontal: 16, paddingRight: 20 }}
       >
         {announcements.map((a, i) => (
-          <AnnouncementCard key={`${a.id}-${i}`} announcement={a} horizontal />
+          <TouchableOpacity
+            key={`${a.id}-${i}`}
+            activeOpacity={0.9}
+            onPress={() =>
+              navigation.navigate("InboxDetail", {
+                title: a.title,
+                body: a.body,
+                sentAt: a.sentAt || new Date().toISOString(),
+                kind: "announcement",
+              })
+            }
+          >
+            <AnnouncementCard announcement={a} horizontal />
+          </TouchableOpacity>
         ))}
       </ScrollView>
     </View>

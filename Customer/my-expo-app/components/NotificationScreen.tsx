@@ -1,51 +1,46 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import BottomNav from "./BottomNav";
-import { userApi } from "../utils/api";
+import {
+  fetchAnnouncementRows,
+  getCustomerPushRows,
+  mergeInboxRows,
+  truncateInboxPreview,
+  INBOX_PREVIEW_MAX_CHARS,
+  type InboxRow,
+} from "../utils/customerInbox";
 
-type NotificationItem = {
-  id: string;
-  title: string;
-  body: string;
-  sentAt: string;
+type ListItem = InboxRow & {
   timeLabel: string;
-  icon: any;
-  color: string;
 };
 
 export default function NotificationScreen() {
   const navigation = useNavigation<any>();
   const [tab, setTab] = useState<"recent" | "past">("recent");
-  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [items, setItems] = useState<ListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadNotifications = React.useCallback(async () => {
+  const loadNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await userApi.get<{ success: boolean; announcements?: { id?: string; title?: string; body?: string; sentAt?: string }[] }>(
-        "/api/users/me/announcements"
-      );
-      const list = res.data?.success && Array.isArray(res.data.announcements) ? res.data.announcements : [];
-      const mapped: NotificationItem[] = list.map((a, idx) => {
-        const sentAt = a.sentAt || new Date().toISOString();
-        const date = new Date(sentAt);
+      const [ann, push] = await Promise.all([fetchAnnouncementRows(), getCustomerPushRows()]);
+      const merged = mergeInboxRows(ann, push);
+      const mapped: ListItem[] = merged.map((r) => {
+        const date = new Date(r.sentAt);
         const timeLabel = Number.isNaN(date.getTime())
           ? "—"
-          : date.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-        return {
-          id: a.id || `notif-${idx}`,
-          title: a.title || "Notification",
-          body: a.body || "",
-          sentAt,
-          timeLabel,
-          icon: "notifications-outline",
-          color: "#3b82f6",
-        };
+          : date.toLocaleString("en-GB", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+        return { ...r, timeLabel };
       });
-      mapped.sort((a, b) => (b.sentAt > a.sentAt ? 1 : b.sentAt < a.sentAt ? -1 : 0));
       setItems(mapped);
     } catch {
       setItems([]);
@@ -55,7 +50,7 @@ export default function NotificationScreen() {
   }, []);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadNotifications();
     }, [loadNotifications])
   );
@@ -63,33 +58,38 @@ export default function NotificationScreen() {
   const now = Date.now();
   const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
   const recentNotifications = useMemo(
-    () => items.filter((n) => {
-      const t = new Date(n.sentAt).getTime();
-      return !Number.isNaN(t) && t >= sevenDaysAgo;
-    }),
+    () =>
+      items.filter((n) => {
+        const t = new Date(n.sentAt).getTime();
+        return !Number.isNaN(t) && t >= sevenDaysAgo;
+      }),
     [items, sevenDaysAgo]
   );
   const pastNotifications = useMemo(
-    () => items.filter((n) => {
-      const t = new Date(n.sentAt).getTime();
-      return Number.isNaN(t) || t < sevenDaysAgo;
-    }),
+    () =>
+      items.filter((n) => {
+        const t = new Date(n.sentAt).getTime();
+        return Number.isNaN(t) || t < sevenDaysAgo;
+      }),
     [items, sevenDaysAgo]
   );
 
-  const activeList =
-    tab === "recent" ? recentNotifications : pastNotifications;
+  const activeList = tab === "recent" ? recentNotifications : pastNotifications;
 
-  /* ===================== UI ===================== */
+  const openDetail = (n: ListItem) => {
+    navigation.navigate("InboxDetail", {
+      title: n.title,
+      body: n.body,
+      sentAt: n.sentAt,
+      kind: n.kind,
+    });
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-[#F4F6FF]">
-      {/* ================= HEADER ================= */}
       <View className="bg-white rounded-b-3xl shadow-sm pt-10 pb-6 -mt-10">
         <View className="flex-row items-center justify-between px-6 pt-4">
-          <Text className="text-[28px] font-bold text-black">
-            Notifications
-          </Text>
+          <Text className="text-[28px] font-bold text-black">Notifications</Text>
 
           <TouchableOpacity
             onPress={() => navigation.navigate("Settings")}
@@ -99,19 +99,14 @@ export default function NotificationScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ================= TAB SWITCH ================= */}
         <View className="flex-row bg-[#EFF1F5] mx-6 rounded-full p-1 mt-4">
           <TouchableOpacity
             onPress={() => setTab("recent")}
-            className={`flex-1 py-2 rounded-full ${
-              tab === "recent" ? "bg-white shadow" : ""
-            }`}
+            className={`flex-1 py-2 rounded-full ${tab === "recent" ? "bg-white shadow" : ""}`}
           >
             <Text
               className={`text-center font-semibold ${
-                tab === "recent"
-                  ? "text-purple-600"
-                  : "text-gray-500"
+                tab === "recent" ? "text-purple-600" : "text-gray-500"
               }`}
             >
               Recent
@@ -120,15 +115,11 @@ export default function NotificationScreen() {
 
           <TouchableOpacity
             onPress={() => setTab("past")}
-            className={`flex-1 py-2 rounded-full ${
-              tab === "past" ? "bg-white shadow" : ""
-            }`}
+            className={`flex-1 py-2 rounded-full ${tab === "past" ? "bg-white shadow" : ""}`}
           >
             <Text
               className={`text-center font-semibold ${
-                tab === "past"
-                  ? "text-purple-600"
-                  : "text-gray-500"
+                tab === "past" ? "text-purple-600" : "text-gray-500"
               }`}
             >
               Past History
@@ -137,9 +128,8 @@ export default function NotificationScreen() {
         </View>
       </View>
 
-      {/* ================= NOTIFICATION LIST ================= */}
       <ScrollView
-        key={tab} // 🔥 Forces UI refresh when switching tabs
+        key={tab}
         className="mt-6 px-6"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
@@ -151,43 +141,31 @@ export default function NotificationScreen() {
           </View>
         ) : activeList.length === 0 ? (
           <View className="mt-20 items-center">
-            <Ionicons
-              name="notifications-off-outline"
-              size={40}
-              color="#9CA3AF"
-            />
-            <Text className="text-gray-400 mt-2">
-              No notifications found
-            </Text>
+            <Ionicons name="notifications-off-outline" size={40} color="#9CA3AF" />
+            <Text className="text-gray-400 mt-2">No notifications found</Text>
           </View>
         ) : (
           activeList.map((n) => (
-            <View
+            <TouchableOpacity
               key={n.id}
+              activeOpacity={0.85}
+              onPress={() => openDetail(n)}
               className="flex-row justify-between items-center bg-white px-4 py-4 rounded-2xl mb-3 border border-gray-100 shadow-sm"
             >
               <View className="flex-1 pr-3">
-                <Text className="text-[16px] font-semibold text-gray-800">
-                  {n.title}
-                </Text>
+                <Text className="text-[16px] font-semibold text-gray-800">{n.title}</Text>
                 {!!n.body && (
-                  <Text className="text-gray-600 text-[13px] mt-1">
-                    {n.body}
+                  <Text className="text-gray-600 text-[13px] mt-1" numberOfLines={3}>
+                    {truncateInboxPreview(n.body, INBOX_PREVIEW_MAX_CHARS)}
                   </Text>
                 )}
-                <Text className="text-gray-400 text-[12px] mt-1">
-                  {n.timeLabel}
-                </Text>
+                <Text className="text-gray-400 text-[12px] mt-1">{n.timeLabel}</Text>
               </View>
 
               <View className="w-9 h-9 rounded-full bg-gray-100 justify-center items-center">
-                <Ionicons
-                  name={n.icon}
-                  size={20}
-                  color={n.color}
-                />
+                <Ionicons name="notifications-outline" size={20} color="#3b82f6" />
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>

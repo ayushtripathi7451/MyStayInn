@@ -86,7 +86,7 @@ export default function TicketsScreen({ navigation }: any) {
         >
           <Ionicons name="chevron-back" size={22} color="#000" />
         </TouchableOpacity>
-        <Text className="ml-4 text-2xl font-semibold">Tickets</Text>
+        <Text className="ml-4 text-2xl font-semibold">Helpdesk</Text>
       </View>
 
       {/* TAB SWITCHER - same layout as Admin */}

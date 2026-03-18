@@ -107,7 +107,7 @@ export default function DueAmount() {
   return (
     <View className="px-4 mt-6">
       <View className="flex-row justify-between items-end mb-4">
-        <Text className="text-2xl font-bold text-gray-800">Due Amount</Text>
+        <Text className="text-xl font-bold text-slate-800">Due Amount</Text>
       </View>
 
       <View className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20">
@@ -124,11 +124,14 @@ export default function DueAmount() {
             </View>
           ) : dueItems.length === 0 ? (
             <View className="py-2 px-6 items-center justify-center">
-              
-
               <Text className="text-white/80 text-center leading-5 text-[14px]">
-                You have no pending dues. 
+                You have no pending dues.
               </Text>
+              {!!raw?.booking?.rentInfoMessage && (
+                <Text className="text-white/90 text-center text-[13px] mt-3 leading-5 px-2">
+                  {String(raw.booking.rentInfoMessage)}
+                </Text>
+              )}
 
               <TouchableOpacity
                 onPress={refresh}

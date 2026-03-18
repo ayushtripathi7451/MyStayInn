@@ -23,9 +23,62 @@ import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
 import { api, userApi } from "../utils/api";
 import type { StructuredAddress } from "../utils/address";
+import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
+
+const isAadhaarVerificationExpired = (expiresAt?: string | null) => {
+  if (!expiresAt) return true;
+  const timestamp = new Date(expiresAt).getTime();
+  if (Number.isNaN(timestamp)) return true;
+  return Date.now() >= timestamp;
+};
+const formatExpiryDate = (expiresAt?: string | null) => {
+  if (!expiresAt) return "Not available";
+  const d = new Date(expiresAt);
+  if (Number.isNaN(d.getTime())) return "Not available";
+  return d.toLocaleDateString();
+};
 
 const ADDRESS_API = "https://api.countrystatecity.in/v1/countries/IN";
 const ADDRESS_API_KEY = "925c2205399e5d13f37b6d9c78f7806f6b0bdbca1ae59a4a5ba3ff62041dabb3";
+
+const INDIAN_STATES_FALLBACK: { name: string; iso2: string }[] = [
+  { name: "Andaman and Nicobar Islands", iso2: "AN" },
+  { name: "Andhra Pradesh", iso2: "AP" },
+  { name: "Arunachal Pradesh", iso2: "AR" },
+  { name: "Assam", iso2: "AS" },
+  { name: "Bihar", iso2: "BR" },
+  { name: "Chandigarh", iso2: "CH" },
+  { name: "Chhattisgarh", iso2: "CT" },
+  { name: "Dadra and Nagar Haveli and Daman and Diu", iso2: "DH" },
+  { name: "Delhi", iso2: "DL" },
+  { name: "Goa", iso2: "GA" },
+  { name: "Gujarat", iso2: "GJ" },
+  { name: "Haryana", iso2: "HR" },
+  { name: "Himachal Pradesh", iso2: "HP" },
+  { name: "Jammu and Kashmir", iso2: "JK" },
+  { name: "Jharkhand", iso2: "JH" },
+  { name: "Karnataka", iso2: "KA" },
+  { name: "Kerala", iso2: "KL" },
+  { name: "Ladakh", iso2: "LA" },
+  { name: "Lakshadweep", iso2: "LD" },
+  { name: "Madhya Pradesh", iso2: "MP" },
+  { name: "Maharashtra", iso2: "MH" },
+  { name: "Manipur", iso2: "MN" },
+  { name: "Meghalaya", iso2: "ML" },
+  { name: "Mizoram", iso2: "MZ" },
+  { name: "Nagaland", iso2: "NL" },
+  { name: "Odisha", iso2: "OR" },
+  { name: "Puducherry", iso2: "PY" },
+  { name: "Punjab", iso2: "PB" },
+  { name: "Rajasthan", iso2: "RJ" },
+  { name: "Sikkim", iso2: "SK" },
+  { name: "Tamil Nadu", iso2: "TN" },
+  { name: "Telangana", iso2: "TG" },
+  { name: "Tripura", iso2: "TR" },
+  { name: "Uttar Pradesh", iso2: "UP" },
+  { name: "Uttarakhand", iso2: "UT" },
+  { name: "West Bengal", iso2: "WB" },
+];
 
 const emptyAddress = (): StructuredAddress => ({
   line1: "",
@@ -121,6 +174,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
   const [aadhaarVerified, setAadhaarVerified] = useState(false);
   const [aadhaarDetails, setAadhaarDetails] = useState<any>(null);
   const [fullKycResponse, setFullKycResponse] = useState<any>(null);
+  const [aadhaarCheckoutVisible, setAadhaarCheckoutVisible] = useState(false);
   
   const [dob, setDob] = useState("");
   const [gender, setGender] = useState("");
@@ -156,8 +210,15 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
         const res = await fetch(`${ADDRESS_API}/states`, {
           headers: { "X-CSCAPI-KEY": ADDRESS_API_KEY },
         });
-        const data = await res.json();
-        if (!cancelled) setStateList((data || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+        const data = await res.json().catch(() => null);
+        const list = Array.isArray(data) && data.length ? data : null;
+        if (!cancelled) {
+          setStateList(
+            (list || INDIAN_STATES_FALLBACK).sort((a: any, b: any) =>
+              (a.name || "").localeCompare(b.name || "")
+            )
+          );
+        }
       } catch (_) {}
       if (!cancelled) setAddressLoading((p) => ({ ...p, states: false }));
     })();
@@ -338,7 +399,12 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           console.log("Auto-populated gender:", genderDisplay);
         }
         
-        // Prefill from profileExtras if available (DOB, addresses, etc.)
+        // Prefill from profileExtras if available (DOB, addresses, Aadhaar last-4, etc.)
+        if (extras.aadhaarLast4) {
+          setAadhaarLast4(String(extras.aadhaarLast4));
+        } else if (extras.aadhaar) {
+          setAadhaarLast4(String(extras.aadhaar).slice(-4));
+        }
         if (extras.dob) {
           setDob(extras.dob);
           setSelectedDate(new Date(extras.dob));
@@ -367,10 +433,26 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           setProfileImage(extras.profileImage);
         }
 
-        // Check if Aadhaar is already verified – fetch full KYC response for display
-        if (user.aadhaarStatus === 'verified') {
+        // Check if Aadhaar/KYC is already verified – multiple sources:
+        // 1. backend aadhaarStatus
+        // 2. stored kycStatus / kycVerified in profileExtras
+        // 3. aadhaarData already stored in profileExtras (means DigiLocker succeeded before)
+        const isAlreadyVerified =
+          user.aadhaarStatus === "verified" ||
+          user.aadhaarStatus === "approved" ||
+          extras.kycStatus === "verified" ||
+          extras.kycVerified === true ||
+          (Boolean(extras.aadhaarData) && !isAadhaarVerificationExpired(extras.aadhaarExpiresAt));
+
+        if (isAlreadyVerified) {
           setAadhaarVerified(true);
-          checkKycStatus();
+          // Restore aadhaarDetails from stored data so match ticks work without a new DigiLocker call
+          if (extras.aadhaarData) {
+            setAadhaarDetails(extras.aadhaarData);
+          } else {
+            // Try live KYC service as fallback
+            checkKycStatus();
+          }
         }
       }
     } catch (error: any) {
@@ -580,6 +662,14 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
   const aadhaarDob = (aadhaarDetails?.dob || "").trim();
   const aadhaarGender = aadhaarDetails?.gender === "M" ? "Male" : aadhaarDetails?.gender === "F" ? "Female" : "";
   const aadhaarAddress = (aadhaarDetails?.address || "").trim();
+  const aadhaarExpiry =
+    fullKycResponse?.aadhaarExpiresAt ||
+    fullKycResponse?.aadhaarDetails?.aadhaarExpiresAt ||
+    aadhaarDetails?.aadhaarExpiresAt ||
+    null;
+  const aadhaarValidityMessage = aadhaarDetails
+    ? `KYC will be valid until ${formatExpiryDate(aadhaarExpiry)}`
+    : null;
   const ourAddressStr = [addressAsPerAadhaar.line1, addressAsPerAadhaar.line2, addressAsPerAadhaar.city, addressAsPerAadhaar.state, addressAsPerAadhaar.pincode].filter(Boolean).join(", ");
   const matchFullName = Boolean(
     aadhaarVerified && aadhaarName && norm(fullName) === norm(aadhaarName)
@@ -666,6 +756,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
   // Overall KYC match: only require personal identity fields (name, DOB, gender) to match.
   // Address can still differ without blocking "KYC Verified".
   const kycAllMatch = Boolean(aadhaarVerified && matchFullName && matchDob && matchGender);
+  const kycStatusLabel = kycAllMatch ? "KYC Verified" : "KYC Unverified";
 
   const MatchTick = ({ show }: { show: boolean }) =>
     show ? (
@@ -775,6 +866,21 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
     const [derivedFirst, ...rest] = normalizedFullName.split(" ");
     const derivedLast = rest.join(" ");
 
+    // Include aadhaarData from DigiLocker so user-service can store and expose it
+    // for My Profile and Admin Verify Details screens (KYC match ticks, Aadhaar detail display).
+    const aadhaarDataPayload = aadhaarDetails
+      ? {
+          name: aadhaarDetails.name,
+          dob: aadhaarDetails.dob,
+          gender: aadhaarDetails.gender,
+          aadhaarMasked: aadhaarDetails.aadhaarMasked,
+          address: aadhaarDetails.address,
+          addressObject: aadhaarDetails.addressObject,
+          care_of: aadhaarDetails.care_of,
+          year_of_birth: aadhaarDetails.year_of_birth,
+        }
+      : undefined;
+
     navigation.navigate("CompleteProfileDocs", {
       profileData: {
         firstName: derivedFirst,
@@ -786,6 +892,9 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
         currentAddress: sameAsAadhar ? { ...addressAsPerAadhaar } : { ...currentAddress },
         profileImage,
         aadhaarVerified,
+        kycStatus: kycAllMatch ? "verified" : "unverified",
+        kycVerified: kycAllMatch,
+        ...(aadhaarDataPayload && { aadhaarData: aadhaarDataPayload }),
       },
     });
   };
@@ -959,15 +1068,20 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
             {/* Aadhaar Verification */}
             <View className="flex-row items-center justify-between mb-2">
               <Text className="text-gray-700 font-semibold">Aadhaar Verification</Text>
-              {aadhaarVerified && (
-                <Text className={`text-xs font-semibold ${kycAllMatch ? "text-green-700" : "text-amber-700"}`}>
-                  {kycAllMatch ? "KYC Verified" : "KYC Not Verified"}
-                </Text>
-              )}
+              <Text className={`text-xs font-semibold ${kycAllMatch ? "text-green-700" : "text-amber-700"}`}>
+                {kycStatusLabel}
+              </Text>
             </View>
+            {aadhaarValidityMessage && (
+              <View className="mb-3 p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                <Text className="text-[11px] font-semibold text-indigo-700">
+                  {aadhaarValidityMessage}
+                </Text>
+              </View>
+            )}
             {!aadhaarVerified ? (
               <TouchableOpacity
-                onPress={handleAadhaarVerification}
+                onPress={() => setAadhaarCheckoutVisible(true)}
                 disabled={verifyingAadhaar}
                 className={`px-4 py-4 rounded-xl flex-row items-center justify-center ${verifyingAadhaar ? 'bg-gray-300' : 'bg-indigo-600'}`}
               >
@@ -984,9 +1098,9 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 )}
               </TouchableOpacity>
             ) : (
-              <View className="px-4 py-4 rounded-xl flex-row items-center justify-center bg-green-600">
+              <View className={`px-4 py-4 rounded-xl flex-row items-center justify-center ${kycAllMatch ? "bg-green-600" : "bg-amber-600"}`}>
                 <Ionicons name="shield-checkmark" size={20} color="white" />
-                <Text className="text-white font-bold ml-2">Aadhaar Verified</Text>
+                <Text className="text-white font-bold ml-2">{kycStatusLabel}</Text>
               </View>
             )}
 
@@ -1151,6 +1265,17 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
             </View>
           </View>
 
+          <AadhaarKycCheckoutModal
+            visible={aadhaarCheckoutVisible}
+            onClose={() => setAadhaarCheckoutVisible(false)}
+            onProceed={() => {
+              setAadhaarCheckoutVisible(false);
+              handleAadhaarVerification().catch(() => {});
+            }}
+            title="Aadhaar KYC"
+            subtitle="Review charges before verification"
+          />
+
           {/* State / City modals */}
           <Modal visible={stateModalVisible} animationType="slide" transparent>
             <View className="flex-1 justify-end bg-black/50">
@@ -1166,7 +1291,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 ) : (
                   <FlatList
                     data={stateList}
-                    keyExtractor={(item) => item.iso2}
+                    keyExtractor={(item, idx) => String(item?.iso2 || item?.name || idx)}
                     renderItem={({ item }) => (
                       <TouchableOpacity
                         className="py-4 border-b border-gray-100"
