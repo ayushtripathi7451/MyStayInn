@@ -147,6 +147,23 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
             </Text>
           </View>
 
+          {property.propertyId ? (
+            <View className="mt-1 flex-row items-center">
+              <Ionicons name="pricetag-outline" size={14} color="#64748B" />
+              <Text className="ml-1 text-slate-600 text-[13px] font-medium">
+                {property.propertyId}
+              </Text>
+            </View>
+          ) : null}
+
+          <View className="flex-row items-center mt-2">
+            <View className={`${property.isSecurityPaid ? "bg-emerald-500/20" : "bg-amber-500/20"} px-2 py-0.5 rounded-full`}>
+              <Text className={`text-xs font-semibold ${property.isSecurityPaid ? "text-emerald-700" : "text-amber-700"}`}>
+                {property.status}
+              </Text>
+            </View>
+          </View>
+
           {property.address ? (
             <View className="flex-row items-center mt-2">
               <Ionicons name="location-outline" size={16} color="#6B7280" />
@@ -234,17 +251,7 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
               {formatDate(property.checkInDate)}
             </Text>
           </View>
-          {property.propertyId && (
-            <View className="flex-row items-center justify-between">
-              <View className="flex-row items-center">
-                <Ionicons name="pricetag-outline" size={16} color="#6B7280" />
-                <Text className="ml-2 text-gray-600 text-[13px]">Property ID</Text>
-              </View>
-              <Text className="text-[13px] font-semibold text-slate-700">
-                {property.propertyId}
-              </Text>
-            </View>
-          )}
+          
         </View>
 
         {/* Room & stay info */}
@@ -432,9 +439,9 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
             hasDue ? "bg-gray-300" : "bg-red-500"
           }`}
           activeOpacity={hasDue ? 1 : 0.85}
-          disabled={!hasDue}
+          disabled={hasDue}
           onPress={() => {
-            if (hasDue) {
+            if (!hasDue) {
               navigation.navigate("MoveOutRequestScreen", { property });
             }
           }}

@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "../context/ThemeContext";
 import { api, userApi } from "../utils/api";
@@ -74,7 +75,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
 
       // Launch image picker with cropping
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images"],
         allowsEditing: true,
         aspect: [4, 3], // Good aspect ratio for documents
         quality: 0.8,
@@ -122,32 +123,76 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
     aadharBack &&
     (!requiresExtraId || (idFront && idBack));
 
+  const uploadImageIfLocal = async (uri: string | null, key: string): Promise<string | null> => {
+    if (!uri) return null;
+    if (!uri.startsWith("file://")) return uri;
+    try {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: "base64",
+      });
+      const ext = uri.toLowerCase().endsWith(".png") ? ".png" : ".jpg";
+      const body = { image: base64, filename: `${key}${ext}` };
+      let res: any;
+      try {
+        res = await api.post("/api/auth/upload", body);
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          res = await api.post("/api/upload", body);
+        } else throw e;
+      }
+      if (res?.data?.success && res.data?.url) return res.data.url;
+    } catch (e) {
+      console.error("Upload failed for", key, e);
+    }
+    return null;
+  };
+
   /* ---------------- SUBMIT ---------------- */
   const onSubmit = async () => {
     if (!validate()) return;
 
     try {
       const token = await AsyncStorage.getItem("USER_TOKEN");
-      
       if (!token) {
         Alert.alert("Error", "Authentication token not found. Please login again.");
         return;
       }
 
-      // Combine profile data with documents
+      const rawProfileImage = (profileData?.profileImage as string | null) || null;
+      const profileImageUrl = await uploadImageIfLocal(rawProfileImage, "profileImage");
+      const aadharFrontUrl = await uploadImageIfLocal(aadharFront, "aadharFront");
+      const aadharBackUrl = await uploadImageIfLocal(aadharBack, "aadharBack");
+      const idFrontUrl = requiresExtraId ? await uploadImageIfLocal(idFront, "idFront") : null;
+      const idBackUrl = requiresExtraId ? await uploadImageIfLocal(idBack, "idBack") : null;
+
+      // If user selected a profile image, ensure we successfully uploaded it (don't silently drop it).
+      if (rawProfileImage && rawProfileImage.startsWith("file://") && !profileImageUrl) {
+        Alert.alert("Error", "Could not upload profile photo. Please try again.");
+        return;
+      }
+
+      if (!aadharFrontUrl || !aadharBackUrl) {
+        Alert.alert("Error", "Could not upload Aadhaar images. Please try again.");
+        return;
+      }
+      if (requiresExtraId && (!idFrontUrl || !idBackUrl)) {
+        Alert.alert("Error", "Could not upload ID images. Please try again.");
+        return;
+      }
+
       const payload = {
-        ...profileData, // firstName, lastName, aadhaar, dob, gender, addresses, profileImage
+        ...profileData,
         emergencyContactName: contactName,
         emergencyContactPhone: `${countryCode}${contactNumber}`,
         profession,
+        ...(profileImageUrl ? { profileImage: profileImageUrl } : {}),
         documents: {
-          aadharFront,
-          aadharBack,
-          ...(requiresExtraId && { idFront, idBack }),
+          aadharFront: aadharFrontUrl,
+          aadharBack: aadharBackUrl,
+          ...(requiresExtraId && idFrontUrl && idBackUrl && { idFront: idFrontUrl, idBack: idBackUrl }),
         },
       };
 
-      // Token is added automatically by interceptor
       const response = await userApi.post("/api/users/complete-profile", payload);
 
       if (response.data.success) {

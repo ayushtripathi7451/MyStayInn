@@ -11,24 +11,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { bookingApi } from "../utils/api";
 
-const TERMS_AND_CONDITIONS = [
-  "Notice period for vacating is 30 days; failure to give notice may attract penalty of 1 month's rent.",
-  "Rent is due on or before the 5th of every month.",
-  "Advance/Rent is non-refundable and non-transferable.",
-  "Outside visitors are not allowed without prior permission.",
-  "Guest accommodation charges: Rs. 600/- per day with/without food, with permission.",
-  "Maintenance charges: Rs. 1500/- while vacating.",
-  "Management is not responsible for personal belongings (Gold, Credit/Debit card, Mobile & Laptops, Cash etc.).",
-  "Lights & fans must be switched off before leaving the room.",
-  "Food consumption restricted to dining hall only.",
-  "Charges may apply for damage to PG property.",
-  "Key replacement charge: Rs. 500/- for duplicate.",
-  "Smoking & liquor prohibited inside the room.",
-  "Cooperation in keeping rooms clean is requested.",
-  "Disposal of garbage in dustbins only.",
-  "Keys and belongings must be returned to PG owner upon vacating.",
-];
-
 type PrefilledData = {
   pgInfo?: { pgName?: string; address?: string | Record<string, unknown>; contactNumbers?: string[] };
   guestPersonal?: {
@@ -47,6 +29,7 @@ type PrefilledData = {
   emergency?: { emergencyContactName?: string; emergencyContactNumber?: string };
   roomAllotment?: { date?: string; guestRoomAllotment?: string; guestPhotoUrl?: string };
   termsAndConditions?: string;
+  propertyRules?: { items?: string[] } | null;
 };
 
 /** Safely convert API value to string for display (handles address objects). */
@@ -244,15 +227,21 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
           </View>
         </View>
 
-        {/* Form body: same layout as customer app */}
+        {/* Form body: header row with date + photo */}
         <View className="px-4 py-5">
-          <View className="flex-row justify-between mb-1">
-            <View className="flex-1" />
-            <View className="flex-1 items-end">
-              <Text className="text-xs text-slate-600">Date:</Text>
-              <View className="border-b border-slate-300 w-24 pb-0.5" style={{ borderStyle: "dotted" }}>
+          <View className="flex-row justify-between mb-4 items-start">
+            <View className="flex-1">
+              <Text className="text-xs text-slate-600 mb-1">Date</Text>
+              <View className="border-b border-slate-300 w-28 pb-0.5" style={{ borderStyle: "dotted" }}>
                 <Text className="text-sm text-slate-900">{toDisplayValue(room?.date) || " "}</Text>
               </View>
+            </View>
+            <View className="w-24 h-28 border border-slate-300 rounded items-center justify-center bg-slate-50 ml-4">
+              {room?.guestPhotoUrl ? (
+                <Image source={{ uri: room.guestPhotoUrl }} className="w-full h-full rounded" resizeMode="cover" />
+              ) : (
+                <Text className="text-xs text-slate-400 text-center px-1">Guest Photo</Text>
+              )}
             </View>
           </View>
           <FormRowPair label1="Name" value1={guest?.name} label2="Mob." value2={guest?.mobile} />
@@ -299,7 +288,7 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
           <FormRow label="Deposit Received Amt Rs." value={payment?.depositReceivedAmount} />
           <FormRow label="Monthly Rent Amt Rs." value={payment?.monthlyRentAmount} />
 
-          <View className="mt-4 flex-row gap-4">
+          <View className="mt-2 flex-row gap-4">
             <View className="flex-1">
               <Text className="text-xs text-slate-600 font-medium mb-1">Guest Room allotment</Text>
               <View
@@ -309,28 +298,23 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
                 <Text className="text-sm text-slate-900">{toDisplayValue(room?.guestRoomAllotment) || " "}</Text>
               </View>
             </View>
-            <View className="w-24 h-28 border border-slate-300 rounded items-center justify-center bg-slate-50">
-              {room?.guestPhotoUrl ? (
-                <Image source={{ uri: room.guestPhotoUrl }} className="w-full h-full rounded" resizeMode="cover" />
-              ) : (
-                <Text className="text-xs text-slate-400">Photo</Text>
-              )}
-            </View>
           </View>
         </View>
 
-        {/* Terms & Conditions – same 15 points as customer app */}
-        <View className="px-4 py-4 border-t border-slate-300 mt-2">
-          <Text className="text-base font-bold text-slate-900 underline mb-3">TERMS & CONDITIONS</Text>
-          {TERMS_AND_CONDITIONS.map((point, i) => (
-            <View key={i} className="flex-row mb-2">
-              <Text className="text-slate-700 font-semibold mr-2" style={{ minWidth: 20 }}>
-                {i + 1}.
-              </Text>
-              <Text className="flex-1 text-sm text-slate-700">{point}</Text>
-            </View>
-          ))}
-        </View>
+        {/* Terms & Conditions — show only when admin has submitted property rules */}
+        {Array.isArray(data?.propertyRules?.items) && data.propertyRules.items.length > 0 && (
+          <View className="px-4 py-4 border-t border-slate-300 mt-2">
+            <Text className="text-base font-bold text-slate-900 underline mb-3">TERMS & CONDITIONS</Text>
+            {data.propertyRules.items.map((point, i) => (
+              <View key={i} className="flex-row mb-2">
+                <Text className="text-slate-700 font-semibold mr-2" style={{ minWidth: 20 }}>
+                  {i + 1}.
+                </Text>
+                <Text className="flex-1 text-sm text-slate-700">{point}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Signature section – read-only, same layout as customer */}
         <View className="px-4 py-6 border-t-2 border-slate-400 mt-2">
@@ -360,7 +344,11 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
           )}
         </View>
 
-        <View className="h-12" />
+        <View className="px-4 py-4 items-center">
+          <Text className="text-[10px] text-slate-400">
+            Generated by <Text className="font-semibold">MyStayInn</Text>
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

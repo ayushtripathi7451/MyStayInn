@@ -52,7 +52,7 @@ export const bookingApi = axios.create({
   },
 });
 
-// Transaction service (port 3006) - payments, Cashfree payment links
+// Transaction service (configured via backend .env; here it's running on 3003) - payments, Cashfree payment links
 export const transactionApi = axios.create({
   baseURL: `http://${API_HOST}:3003`,
   headers: {

@@ -44,20 +44,24 @@ export default function TicketsScreen({ navigation }: any) {
       String(p.id) === currentProperty?.id ||
       p.name === currentProperty?.name
   );
-  const uniqueId = match?.uniqueId ?? list[0]?.uniqueId ?? currentProperty?.id;
-  // Match tickets by property name first (customer sends propertyRef = selected property name/label), then by uniqueId/id
-  propertyMatchValuesRef.current = [currentProperty?.name, uniqueId, currentProperty?.id].filter(Boolean) as string[];
+  // Do not fallback to first property; that can leak other property tickets.
+  const uniqueId = match?.uniqueId ?? currentProperty?.id;
+  // Match by the active property's known keys only.
+  propertyMatchValuesRef.current = [currentProperty?.name, uniqueId, currentProperty?.id]
+    .filter(Boolean)
+    .map((v) => String(v).trim()) as string[];
 
   const fetchTickets = useCallback(async () => {
     const propertyMatchValues = propertyMatchValuesRef.current;
+    const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
     const filter = (items: TicketItem[]) => {
       if (!propertyMatchValues.length) return items;
+      const keys = propertyMatchValues.map(normalize);
       return items.filter((t) => {
         const ref = (t.propertyRef || "").trim();
         if (!ref) return false;
-        return propertyMatchValues.some(
-          (v) => ref === v || ref.startsWith(v) || (v && (ref.includes(v) || v.includes(ref)))
-        );
+        const normRef = normalize(ref);
+        return keys.some((k) => normRef === k || normRef.startsWith(`${k} - room`));
       });
     };
     try {

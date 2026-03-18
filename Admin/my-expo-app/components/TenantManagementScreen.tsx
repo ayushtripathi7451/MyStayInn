@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Image,
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
@@ -15,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { bookingApi, moveOutApi } from "../utils/api";
 import { useProperty } from "../contexts/PropertyContext";
 import { useProperties } from "../src/hooks";
+import { getInactiveTenants, InactiveTenantSnapshot } from "../utils/inactiveTenantsStore";
 
 interface BookingWithDetails {
   id: string;
@@ -65,10 +65,11 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
   );
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "room" | "floor" | "pending_dues" | "move_out_requested">("all");
+  const [filterType, setFilterType] = useState<"all" | "room" | "floor" | "pending_dues" | "move_out_requested" | "inactive">("all");
   const [filterRoom, setFilterRoom] = useState<string | null>(null);
   const [filterFloor, setFilterFloor] = useState<string | null>(null);
   const [bookings, setBookings] = useState<BookingWithDetails[]>([]);
+  const [inactiveTenants, setInactiveTenants] = useState<InactiveTenantSnapshot[]>([]);
   const [moveOutCustomerIds, setMoveOutCustomerIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,6 +80,7 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
       setError(null);
       if (!propertyId || !propertyMatchValues.length) {
         setBookings([]);
+        setInactiveTenants([]);
         setMoveOutCustomerIds(new Set());
         setLoading(false);
         setRefreshing(false);
@@ -109,9 +111,24 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
       requested.forEach((r: any) => r.customerId && ids.add(String(r.customerId)));
       accepted.forEach((r: any) => r.customerId && ids.add(String(r.customerId)));
       setMoveOutCustomerIds(ids);
+      const inactive = await getInactiveTenants();
+      setInactiveTenants(
+        inactive.filter((tenant) =>
+          bookingBelongsToProperty(
+            {
+              room: {
+                propertyId: tenant.propertyId,
+                propertyName: tenant.propertyName,
+              },
+            } as BookingWithDetails,
+            propertyMatchValues
+          )
+        )
+      );
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || "Failed to load tenants");
       setBookings([]);
+      setInactiveTenants([]);
       setMoveOutCustomerIds(new Set());
     } finally {
       setLoading(false);
@@ -144,6 +161,28 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
   };
   const dueAmount = (b: BookingWithDetails) => (!b.isSecurityPaid && b.securityDeposit > 0 ? b.securityDeposit : 0);
   const hasMoveOutRequested = (b: BookingWithDetails) => moveOutCustomerIds.has(String(b.customerId));
+  const openInactiveDetail = (tenant: InactiveTenantSnapshot) => {
+    navigation.navigate("TenantDetailScreen", {
+      tenantId: tenant.id,
+      uniqueId: tenant.uniqueId,
+      customer: tenant,
+      booking: tenant.roomId
+        ? {
+            id: tenant.moveOutRequestId || tenant.id,
+            roomId: tenant.roomId,
+            roomNumber: tenant.roomNumber,
+            floor: tenant.floor,
+            propertyName: tenant.propertyName,
+            moveInDate: tenant.moveInDate,
+            rentAmount: "0",
+            securityDeposit: tenant.securityDeposit,
+            isSecurityPaid: true,
+            status: "inactive",
+          }
+        : null,
+      initialTab: "details",
+    });
+  };
 
   const uniqueRooms = Array.from(new Set(bookings.map((b) => roomNumber(b)).filter(Boolean))).sort();
   const uniqueFloors = Array.from(new Set(bookings.map((b) => floorDisplay(b)).filter((x) => x !== "—"))).sort();
@@ -162,16 +201,20 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
     if (filterType === "move_out_requested") return hasMoveOutRequested(b);
     return true;
   });
+  const filteredInactive = inactiveTenants.filter((tenant) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      tenant.name.toLowerCase().includes(q) ||
+      tenant.uniqueId.toLowerCase().includes(q) ||
+      String(tenant.phone || "").toLowerCase().includes(q) ||
+      String(tenant.roomNumber || "").toLowerCase().includes(q)
+    );
+  });
 
   const activeCount = bookings.length;
   const totalDues = bookings.reduce((sum, b) => sum + dueAmount(b), 0);
-  const occupancyRate = 0; // Would need total rooms from property to compute
-
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "—";
-    const d = new Date(dateString);
-    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  };
+  const inactiveCount = inactiveTenants.length;
 
   const openTenantDetail = (b: BookingWithDetails) => {
     navigation.navigate("TenantDetailScreen", {
@@ -261,6 +304,13 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
           </View>
           <View className="flex-1 bg-white rounded-[20px] p-4 shadow-sm border border-white">
             <View className="flex-row items-center mb-2">
+              <Ionicons name="archive-outline" size={20} color="#64748B" />
+              <Text className="ml-2 text-slate-600 font-bold text-sm">Inactive</Text>
+            </View>
+            <Text className="text-2xl font-black text-slate-900">{inactiveCount}</Text>
+          </View>
+          <View className="flex-1 bg-white rounded-[20px] p-4 shadow-sm border border-white">
+            <View className="flex-row items-center mb-2">
               <Ionicons name="card-outline" size={20} color="#DC2626" />
               <Text className="ml-2 text-red-600 font-bold text-sm">Total Dues</Text>
             </View>
@@ -287,6 +337,7 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
               { key: "floor" as const, label: "Floor" },
               { key: "pending_dues" as const, label: "Pending dues" },
               { key: "move_out_requested" as const, label: "Move-out requested" },
+              { key: "inactive" as const, label: "Inactive" },
             ].map(({ key, label }) => (
               <TouchableOpacity
                 key={key}
@@ -331,7 +382,39 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
         </View>
 
         <View className="mt-4">
-          {filtered.map((b) => {
+          {filterType === "inactive" && (
+            filteredInactive.length > 0 ? filteredInactive.map((tenant) => (
+              <TouchableOpacity
+                key={tenant.moveOutRequestId || tenant.uniqueId}
+                activeOpacity={0.8}
+                onPress={() => openInactiveDetail(tenant)}
+                className="bg-white rounded-[24px] p-6 mb-4 shadow-sm border border-white"
+              >
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center flex-1">
+                    <View className="w-12 h-12 rounded-xl bg-slate-200 items-center justify-center">
+                      <Text className="text-slate-600 font-bold text-lg">{(tenant.firstName || tenant.name || "T").charAt(0)}</Text>
+                    </View>
+                    <View className="ml-4 flex-1">
+                      <Text className="text-lg font-black text-slate-900">{tenant.name}</Text>
+                      <Text className="text-slate-500 text-sm">Room {tenant.roomNumber ?? "—"} • {tenant.propertyName ?? "—"}</Text>
+                      <Text className="text-xs text-blue-600 font-bold mt-1">{tenant.uniqueId}</Text>
+                    </View>
+                  </View>
+                  <View className="px-3 py-1 rounded-full bg-slate-100">
+                    <Text className="text-slate-600 font-bold text-xs uppercase">Inactive</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            )) : (
+              <View className="bg-white rounded-[24px] p-8 mt-4 items-center">
+                <Ionicons name="archive-outline" size={48} color="#94A3B8" />
+                <Text className="text-slate-500 font-bold text-lg mt-4">No inactive tenants</Text>
+                <Text className="text-slate-400 text-center mt-2">Completed move-outs will appear here.</Text>
+              </View>
+            )
+          )}
+          {filterType !== "inactive" && filtered.map((b) => {
             const due = dueAmount(b);
             const moveOut = hasMoveOutRequested(b);
             return (
@@ -376,7 +459,7 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
           })}
         </View>
 
-        {filtered.length === 0 && (
+        {filterType !== "inactive" && filtered.length === 0 && (
           <View className="bg-white rounded-[24px] p-8 mt-4 items-center">
             <Ionicons name="people-outline" size={48} color="#94A3B8" />
             <Text className="text-slate-500 font-bold text-lg mt-4">No tenants found</Text>

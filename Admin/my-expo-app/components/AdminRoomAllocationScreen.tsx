@@ -43,11 +43,33 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
   const [rentPeriod, setRentPeriod] = useState<'month' | 'day'>('month');
 
   const customer = route?.params?.customer;
+  const parseDate = (value: any): Date | null => {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const formatCustomerDate = (value: any): string => {
+    const d = parseDate(value);
+    if (!d) return "—";
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+  const requestedMoveIn = parseDate(customer?.moveInDate);
+  const requestedMoveOut = parseDate(customer?.moveOutDate);
+  const requestedSecurityDeposit =
+    customer?.securityDeposit != null && !Number.isNaN(Number(customer.securityDeposit))
+      ? String(Number(customer.securityDeposit))
+      : "";
 
   const [allocationData, setAllocationData] = useState({
-    moveIn: new Date(),
-    moveOut: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
-    securityDeposit: "5000",
+    moveIn: requestedMoveIn || null,
+    moveOut: requestedMoveOut || null,
+    securityDeposit: requestedSecurityDeposit || "5000",
+    roomPreference: customer?.roomPreference || "",
+    comments: customer?.comments || "",
     selectedRoom: null as Room | null,
     onlinePayment: "0",
     cashPayment: "",
@@ -82,7 +104,11 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
         return;
       }
       if (prop.rules?.securityDeposit != null) {
-        setAllocationData(prev => ({ ...prev, securityDeposit: String(prop.rules.securityDeposit) }));
+        setAllocationData(prev => ({
+          ...prev,
+          securityDeposit:
+            requestedSecurityDeposit || String(prop.rules.securityDeposit),
+        }));
       }
       const roomList = Array.isArray(prop.rooms) ? prop.rooms : [];
       const available = roomList.filter((r: any) => r.isAvailable !== false);
@@ -98,12 +124,15 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
       }));
       setAvailableRooms(rooms);
       if (rooms.length > 0) {
-        setAllocationData(prev => ({
+        // Do not preselect a room/bed. Admin must explicitly select.
+        setAllocationData((prev) => ({
           ...prev,
-          selectedRoom: rooms[0],
-          onlinePayment: rooms[0].pricePerMonth,
+          selectedRoom: null,
+          onlinePayment: "0",
+          cashPayment: "",
         }));
-        setSelectedBeds([rooms[0].beds[0]]);
+        setSelectedBeds([]);
+        setSplitPayment(false);
       } else {
         Alert.alert("No Rooms", "No available rooms in this property. Add rooms first.");
       }
@@ -238,6 +267,51 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
       ) : (
         <>
           <ScrollView showsVerticalScrollIndicator={false} className="px-5">
+
+        {/* SECTION 1B: CUSTOMER REQUEST DETAILS */}
+        <View className="bg-white rounded-[32px] p-6 mt-6 shadow-sm border border-white">
+          <Text className="text-[12px] font-black text-slate-900 uppercase tracking-[2px] mb-4">
+            Customer Request
+          </Text>
+          <View className="flex-row justify-between mb-4">
+            <View className="w-[48%]">
+              <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                Requested Move In
+              </Text>
+              <Text className="text-slate-900 font-bold">
+                {customer?.moveInDate ? formatCustomerDate(customer.moveInDate) : "Not provided"}
+              </Text>
+            </View>
+            <View className="w-[48%]">
+              <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                Requested Move Out
+              </Text>
+              <Text className="text-slate-900 font-bold">
+                {customer?.moveOutDate ? formatCustomerDate(customer.moveOutDate) : "Not provided"}
+              </Text>
+            </View>
+          </View>
+          <View className="mb-4">
+            <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+              Room Preference
+            </Text>
+            <View className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
+              <Text className="text-slate-900 font-medium">
+                {customer?.roomPreference?.trim?.() ? String(customer.roomPreference) : "No preference provided"}
+              </Text>
+            </View>
+          </View>
+          <View>
+            <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+              Comments
+            </Text>
+            <View className="bg-slate-50 border border-slate-100 rounded-2xl p-4 h-28">
+              <Text className="text-slate-900" style={{ textAlignVertical: "top" as any }}>
+                {customer?.comments?.trim?.() ? String(customer.comments) : "No comments provided"}
+              </Text>
+            </View>
+          </View>
+        </View>
         
         {/* SECTION 1: DATES & SECURITY */}
         <View className="bg-white rounded-[32px] p-6 mt-6 shadow-sm border border-white">
@@ -246,10 +320,33 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
               <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Move In</Text>
               <ScrollableDatePicker
                 selectedDate={allocationData.moveIn}
-                onDateChange={(date) => setAllocationData({ ...allocationData, moveIn: date })}
+                onDateChange={(date) => {
+                  setAllocationData({
+                    ...allocationData,
+                    moveIn: date,
+                    moveOut:
+                      allocationData.moveOut && allocationData.moveOut < date
+                        ? null
+                        : allocationData.moveOut,
+                  });
+                }}
                 mode="date"
-                placeholder="Select move in date"
+                placeholder="Select"
               />
+              {allocationData.moveIn && (
+                <TouchableOpacity
+                  onPress={() =>
+                    setAllocationData({
+                      ...allocationData,
+                      moveIn: null,
+                      moveOut: null,
+                    })
+                  }
+                  className="mt-2"
+                >
+                  <Text className="text-xs font-semibold text-red-500">Clear move in date</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <View className="w-[48%]">
@@ -258,11 +355,20 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
                 selectedDate={allocationData.moveOut}
                 onDateChange={(date) => setAllocationData({ ...allocationData, moveOut: date })}
                 mode="date"
-                placeholder="Select move out date"
-                minimumDate={allocationData.moveIn}
+                placeholder="Select "
+                minimumDate={allocationData.moveIn || undefined}
               />
+              {allocationData.moveOut && (
+                <TouchableOpacity
+                  onPress={() => setAllocationData({ ...allocationData, moveOut: null })}
+                  className="mt-2"
+                >
+                  <Text className="text-xs font-semibold text-red-500">Clear move out date</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
+          <Text className="text-xs text-slate-500 mb-2">Move-in is mandatory. Move-out is optional.</Text>
 
           <View className="flex-row justify-between items-center mb-2">
             <Text className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Security Deposit</Text>
@@ -283,6 +389,8 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
             <Text className="ml-3 text-slate-700 font-bold">Mark as Paid</Text>
           </TouchableOpacity>
         </View>
+
+       
 
         {/* SECTION 2: AVAILABLE ROOMS SELECTION */}
         <View className="bg-white rounded-[32px] p-6 mt-6 shadow-sm border border-white">
@@ -373,6 +481,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
             onChangeText={handleCashPaymentChange}
             editable={splitPayment}
             placeholder="Enter cash amount"
+            placeholderTextColor={splitPayment ? "#4B5563" : "#9CA3AF"}
             className={`border border-slate-200 rounded-2xl p-4 font-bold mb-4 ${
               splitPayment ? 'bg-slate-50 text-slate-900' : 'bg-slate-100 text-slate-400'
             }`}
@@ -433,7 +542,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
                       onlinePayment: item.pricePerMonth,
                       cashPayment: ""
                     });
-                    setSelectedBeds([item.beds[0]]); // Reset to first bed in array
+                    setSelectedBeds([]); // Do not preselect bed; admin selects explicitly
                     setSplitPayment(false); // Reset split payment
                     setShowRoomPicker(false);
                   }}
@@ -603,9 +712,9 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
             propertyId,
             enrollmentRequestId: customer?.enrollmentRequestId,
           })}
-          disabled={!allocationData.selectedRoom || selectedBeds.length === 0}
+          disabled={!allocationData.selectedRoom || selectedBeds.length === 0 || !allocationData.moveIn}
           className={`h-16 rounded-[22px] justify-center items-center shadow-lg ${
-            allocationData.selectedRoom && selectedBeds.length > 0
+            allocationData.selectedRoom && selectedBeds.length > 0 && allocationData.moveIn
               ? "bg-[#1E33FF] shadow-blue-300"
               : "bg-slate-300"
           }`}

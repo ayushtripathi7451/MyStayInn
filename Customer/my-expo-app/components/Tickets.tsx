@@ -14,7 +14,7 @@ export default function Tickets({ navigation }: { navigation?: any }) {
   const content = (
     <View className="mt-4 mb-6 px-4">
       <View className="flex-row items-center justify-between mb-4">
-        <Text className="text-2xl font-bold text-black tracking-tight">My Tickets</Text>
+        <Text className="text-xl font-bold text-slate-800">My Tickets</Text>
       </View>
 
       <View

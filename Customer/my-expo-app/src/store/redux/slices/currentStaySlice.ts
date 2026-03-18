@@ -4,6 +4,7 @@ export interface CurrentStayProperty {
   id: string;
   name: string;
   status: string;
+  isSecurityPaid?: boolean;
   roomNumber: string;
   monthlyRent: number;
   checkInDate: string;

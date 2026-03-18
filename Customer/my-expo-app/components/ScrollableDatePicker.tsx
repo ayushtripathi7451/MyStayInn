@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, Dimensions } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 interface ScrollableDatePickerProps {
@@ -7,13 +7,11 @@ interface ScrollableDatePickerProps {
   onDateChange: (date: Date) => void;
   minimumDate?: Date;
   maximumDate?: Date;
-  mode?: 'date' | 'time' | 'datetime';
+  mode?: "date" | "time" | "datetime";
   placeholder?: string;
   disabled?: boolean;
   containerStyle?: string;
 }
-
-const { height: screenHeight } = Dimensions.get("window");
 
 function toDate(value: Date | string | number | undefined): Date {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -27,29 +25,34 @@ export default function ScrollableDatePicker({
   onDateChange,
   minimumDate,
   maximumDate,
-  mode = 'date',
+  mode = "date",
   placeholder = "Select date",
   disabled = false,
-  containerStyle = ""
+  containerStyle = "",
 }: ScrollableDatePickerProps) {
   const safeDate = toDate(selectedDate);
-  const hasSelectedDate = !!selectedDate;
   const [isVisible, setIsVisible] = useState(false);
-  const [tempDate, setTempDate] = useState(safeDate);
 
-  // Generate arrays for scrollable pickers
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
   ];
-  const getDaysInMonth = (year: number, month: number) => {
-    return new Date(year, month + 1, 0).getDate();
-  };
+  const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
 
-  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
-  const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
+  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
+  const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, "0"));
 
   const [selectedYear, setSelectedYear] = useState(safeDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(safeDate.getMonth());
@@ -65,7 +68,6 @@ export default function ScrollableDatePicker({
 
   useEffect(() => {
     const d = toDate(selectedDate);
-    setTempDate(d);
     setSelectedYear(d.getFullYear());
     setSelectedMonth(d.getMonth());
     setSelectedDay(d.getDate());
@@ -73,37 +75,32 @@ export default function ScrollableDatePicker({
     setSelectedMinute(d.getMinutes());
   }, [selectedDate]);
 
+  const hasSelectedDate = !!selectedDate;
+
   const formatDisplayDate = () => {
     if (!hasSelectedDate) return placeholder;
     const d = toDate(selectedDate);
-    if (mode === 'time') {
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (mode === 'datetime') {
-      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      return d.toLocaleDateString();
+    if (mode === "time") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (mode === "datetime") {
+      return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     }
+    return d.toLocaleDateString();
   };
 
-  const scrollToIndex = (scrollRef: React.RefObject<ScrollView>, index: number, itemHeight: number = 50) => {
-    scrollRef.current?.scrollTo({
-      y: index * itemHeight,
-      animated: true
-    });
+  const scrollToIndex = (scrollRef: React.RefObject<ScrollView>, index: number, itemHeight = 50) => {
+    scrollRef.current?.scrollTo({ y: index * itemHeight, animated: true });
   };
 
   const openPicker = () => {
     if (disabled) return;
     setIsVisible(true);
-    
-    // Scroll to current values when opening
     setTimeout(() => {
-      if (mode !== 'time') {
+      if (mode !== "time") {
         scrollToIndex(yearScrollRef, years.indexOf(selectedYear));
         scrollToIndex(monthScrollRef, selectedMonth);
         scrollToIndex(dayScrollRef, selectedDay - 1);
       }
-      if (mode !== 'date') {
+      if (mode !== "date") {
         scrollToIndex(hourScrollRef, selectedHour);
         scrollToIndex(minuteScrollRef, selectedMinute);
       }
@@ -113,12 +110,16 @@ export default function ScrollableDatePicker({
   const handleConfirm = () => {
     let newDate: Date;
     const base = toDate(selectedDate);
-    if (mode === 'time') {
+    if (mode === "time") {
       newDate = new Date(base);
       newDate.setHours(selectedHour, selectedMinute);
     } else {
       newDate = new Date(selectedYear, selectedMonth, selectedDay, selectedHour, selectedMinute);
     }
+
+    if (minimumDate && newDate < minimumDate) newDate = toDate(minimumDate);
+    if (maximumDate && newDate > maximumDate) newDate = toDate(maximumDate);
+
     onDateChange(newDate);
     setIsVisible(false);
   };
@@ -150,28 +151,22 @@ export default function ScrollableDatePicker({
           decelerationRate="fast"
           contentContainerStyle={{ paddingVertical: 95 }}
         >
-          {data.map((item, index) => (
-            <TouchableOpacity
-              key={index}
-              onPress={() => {
-                onSelect(typeof item === 'string' ? (label === 'Month' ? index : parseInt(item)) : item);
-                scrollToIndex(scrollRef, index);
-              }}
-              className={`h-12 justify-center items-center ${
-                selectedValue === (typeof item === 'string' && label === 'Month' ? index : item)
-                  ? 'bg-blue-100 border border-blue-300 rounded-lg mx-2'
-                  : ''
-              }`}
-            >
-              <Text className={`text-base ${
-                selectedValue === (typeof item === 'string' && label === 'Month' ? index : item)
-                  ? 'text-blue-600 font-bold'
-                  : 'text-gray-700'
-              }`}>
-                {item}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {data.map((item, index) => {
+            const selectedKey = typeof item === "string" && label === "Month" ? index : item;
+            const isSelected = selectedValue === selectedKey;
+            return (
+              <TouchableOpacity
+                key={index}
+                onPress={() => {
+                  onSelect(typeof item === "string" ? (label === "Month" ? index : parseInt(item, 10)) : item);
+                  scrollToIndex(scrollRef, index);
+                }}
+                className={`h-12 justify-center items-center ${isSelected ? "bg-blue-100 border border-blue-300 rounded-lg mx-2" : ""}`}
+              >
+                <Text className={`text-base ${isSelected ? "text-blue-600 font-bold" : "text-gray-700"}`}>{item}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
     </View>
@@ -180,12 +175,9 @@ export default function ScrollableDatePicker({
   const daysInSelectedMonth = getDaysInMonth(selectedYear, selectedMonth);
   const days = Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
 
-  // Adjust selected day if it's invalid for the new month
   useEffect(() => {
-    if (selectedDay > daysInSelectedMonth) {
-      setSelectedDay(daysInSelectedMonth);
-    }
-  }, [selectedYear, selectedMonth, daysInSelectedMonth]);
+    if (selectedDay > daysInSelectedMonth) setSelectedDay(daysInSelectedMonth);
+  }, [selectedYear, selectedMonth, selectedDay, daysInSelectedMonth]);
 
   return (
     <>
@@ -193,58 +185,43 @@ export default function ScrollableDatePicker({
         onPress={openPicker}
         disabled={disabled}
         className={`flex-row items-center justify-between px-4 py-3 rounded-xl border ${
-          disabled 
-            ? 'bg-gray-200 border-gray-200 opacity-50' 
-            : 'bg-white border-gray-300'
+          disabled ? "bg-gray-200 border-gray-200 opacity-50" : "bg-white border-gray-300"
         } ${containerStyle}`}
         activeOpacity={0.7}
       >
-        <Text className={`flex-1 ${
-          disabled ? 'text-gray-400' : 'text-gray-900'
-        } font-medium`}>
+        <Text className={`flex-1 ${disabled ? "text-gray-400" : "text-gray-900"} font-medium`}>
           {formatDisplayDate()}
         </Text>
-        <Ionicons 
-          name={mode === 'time' ? 'time-outline' : 'calendar-outline'} 
-          size={20} 
-          color={disabled ? "#9CA3AF" : "#6B7280"} 
-        />
+        <Ionicons name={mode === "time" ? "time-outline" : "calendar-outline"} size={20} color={disabled ? "#9CA3AF" : "#6B7280"} />
       </TouchableOpacity>
 
-      <Modal
-        visible={isVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={handleCancel}
-      >
+      <Modal visible={isVisible} transparent animationType="slide" onRequestClose={handleCancel}>
         <View className="flex-1 justify-end bg-black/50">
           <View className="bg-white rounded-t-3xl p-6 max-h-[70%]">
-            {/* Header */}
             <View className="flex-row justify-between items-center mb-6">
               <TouchableOpacity onPress={handleCancel}>
                 <Text className="text-blue-600 font-semibold text-lg">Cancel</Text>
               </TouchableOpacity>
               <Text className="text-lg font-bold text-gray-900">
-                {mode === 'time' ? 'Select Time' : mode === 'datetime' ? 'Select Date & Time' : 'Select Date'}
+                {mode === "time" ? "Select Time" : mode === "datetime" ? "Select Date & Time" : "Select Date"}
               </Text>
               <TouchableOpacity onPress={handleConfirm}>
                 <Text className="text-blue-600 font-semibold text-lg">Done</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Scrollable Columns */}
             <View className="flex-row">
-              {mode !== 'time' && (
+              {mode !== "time" && (
                 <>
-                  {renderScrollableColumn(years, selectedYear, setSelectedYear, yearScrollRef, 'Year')}
-                  {renderScrollableColumn(months, selectedMonth, setSelectedMonth, monthScrollRef, 'Month')}
-                  {renderScrollableColumn(days, selectedDay, setSelectedDay, dayScrollRef, 'Day')}
+                  {renderScrollableColumn(years, selectedYear, setSelectedYear, yearScrollRef, "Year")}
+                  {renderScrollableColumn(months, selectedMonth, setSelectedMonth, monthScrollRef, "Month")}
+                  {renderScrollableColumn(days, selectedDay, setSelectedDay, dayScrollRef, "Day")}
                 </>
               )}
-              {mode !== 'date' && (
+              {mode !== "date" && (
                 <>
-                  {renderScrollableColumn(hours, selectedHour, setSelectedHour, hourScrollRef, 'Hour')}
-                  {renderScrollableColumn(minutes, selectedMinute, setSelectedMinute, minuteScrollRef, 'Min')}
+                  {renderScrollableColumn(hours, selectedHour, setSelectedHour, hourScrollRef, "Hour")}
+                  {renderScrollableColumn(minutes, selectedMinute, setSelectedMinute, minuteScrollRef, "Min")}
                 </>
               )}
             </View>

@@ -1,5 +1,5 @@
 import { call, put, select } from 'redux-saga/effects';
-import { userApi } from '../../../utils/api';
+import { userApi, bookingApi } from '../../../utils/api';
 import { setCurrentStay, setCurrentStayLoading, setCurrentStayError } from '../redux/slices/currentStaySlice';
 import type { RootState } from '../redux';
 import type { CurrentStayProperty } from '../redux/slices/currentStaySlice';
@@ -13,18 +13,20 @@ export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty 
   const b = currentStay.booking;
   const r = currentStay.room;
   const p = currentStay.property;
-  const address = [p?.address, p?.city, p?.state, p?.pincode].filter(Boolean).join(', ') || '';
+  const address = [p?.city, p?.state].filter(Boolean).join(', ') || '';
+  const isSecurityPaid = Boolean(b.isSecurityPaid);
   return {
     id: b.id,
     bookingId: b.id,
     name: r.propertyName || p?.name || 'Property',
-    status: 'Approved',
+    status: isSecurityPaid ? 'Approved' : 'Pending Payment',
+    isSecurityPaid,
     roomNumber: r.roomNumber,
     monthlyRent: Number(b.rentAmount) || 0,
     checkInDate: typeof b.moveInDate === 'string' ? b.moveInDate : b.moveInDate?.substring?.(0, 10) || '',
     address,
     roomId: r.id,
-    propertyId: p?.id,
+    propertyId: p?.uniqueId || p?.id,
     moveOutDate: b.moveOutDate,
     bgColor: 'bg-[#FFE8E8]',
     propertyType: p?.propertyType,
@@ -50,7 +52,7 @@ let currentStayFetchInFlight = false;
  */
 export function* refreshCurrentStaySaga(
   action: RefreshCurrentStayAction
-): Generator<unknown, void, RootState> {
+): Generator<any, void, any> {
   const force = action.payload?.force === true;
 
   if (currentStayFetchInFlight && !force) return;
@@ -76,7 +78,33 @@ export function* refreshCurrentStaySaga(
   try {
     const res = yield call([userApi, 'get'], '/api/users/me/current-stay');
     const body = res?.data ?? {};
-    const currentStay = body.currentStay ?? body.data?.currentStay ?? null;
+    let currentStay = body.currentStay ?? body.data?.currentStay ?? null;
+    if (currentStay?.booking) {
+      try {
+        const clientNow = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (device date)
+        const duesRes = yield call([bookingApi, 'get'], '/api/bookings/me/effective-dues', { params: { now: clientNow } });
+        const d = duesRes?.data?.dues;
+        if (duesRes?.data?.success && d) {
+          currentStay = {
+            ...currentStay,
+            booking: {
+              ...currentStay.booking,
+              onlinePaymentRecv: d.onlinePaymentRecv,
+              cashPaymentRecv: d.cashPaymentRecv,
+              isRentOnlinePaid: d.isRentOnlinePaid,
+              isRentCashPaid: d.isRentCashPaid,
+              isSecurityPaid: d.isSecurityPaid,
+              securityDeposit: d.securityDeposit,
+              currentDue: d.currentDue,
+              rentPeriod: d.rentPeriod ?? currentStay.booking.rentPeriod,
+              rentInfoMessage: d.rentInfoMessage ?? null,
+            },
+          };
+        }
+      } catch {
+        /* booking-service optional */
+      }
+    }
     const data = mapCurrentStayToProperty(currentStay);
     yield put(setCurrentStay({ data, raw: currentStay }));
   } catch (e: any) {

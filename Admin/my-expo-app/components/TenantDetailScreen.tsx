@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { userApi, bookingApi, propertyApi } from "../utils/api";
 import { formatAddress } from "../utils/address";
+import { resolveFinalKycVerified } from "../utils/kyc";
 
 interface TenantDetailScreenProps {
   navigation: any;
@@ -31,12 +32,20 @@ interface ProfileUser {
   emergencyName?: string;
   emergencyPhone?: string;
   aadhaarStatus?: string;
+  kycStatus?: string;
+  status?: string;
   profileExtras?: {
     dob?: string;
     addressAsPerAadhaar?: string;
     currentAddress?: string;
     profileImage?: string;
     aadhaar?: string;
+    kycStatus?: string;
+    aadhaarData?: {
+      name?: string;
+      dob?: string;
+      gender?: string;
+    };
     documents?: { aadharFront?: string; aadharBack?: string; idFront?: string; idBack?: string };
   };
 }
@@ -67,11 +76,24 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
   const params = route?.params ?? {};
   const { tenantId, uniqueId, customer: passedCustomer, booking: passedBooking } = normaliseCustomerFromParams(params);
   const initialTab = params?.initialTab || "details";
+  const isInactiveRoute = String(params?.customer?.status || params?.customerData?.status || passedCustomer?.status || "").toLowerCase() === "inactive";
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<ProfileUser | null>(null);
+  const [profile, setProfile] = useState<ProfileUser | null>(
+    passedCustomer
+      ? {
+          id: passedCustomer.id,
+          uniqueId: passedCustomer.uniqueId,
+          firstName: passedCustomer.firstName,
+          lastName: passedCustomer.lastName,
+          phone: passedCustomer.phone,
+          email: passedCustomer.email,
+        }
+      : null
+  );
   const [booking, setBooking] = useState<any>(passedBooking || null);
+  const [bookingHistory, setBookingHistory] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fetchDetails = useCallback(async () => {
@@ -83,91 +105,76 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
     setLoading(true);
     setError(null);
     try {
-      // 1) Get customer by numeric id (works for all tenants). Use for fallback profile and to get uniqueId.
-      let customerById: any = null;
-      try {
-        const byIdRes = await userApi.get(`/api/users/${tenantId}`);
-        if (byIdRes.data?.success && byIdRes.data?.customer) {
-          customerById = byIdRes.data.customer;
-        }
-      } catch (_) {}
+      const hintedUid = uniqueId || passedCustomer?.uniqueId || null;
 
-      const uid = uniqueId || passedCustomer?.uniqueId || customerById?.uniqueId || null;
+      const [byIdRes, profileByHintRes, bookRes] = await Promise.all([
+        userApi.get(`/api/users/${tenantId}`).catch(() => null),
+        hintedUid ? userApi.get(`/api/users/${hintedUid}/profile`).catch(() => null) : Promise.resolve(null),
+        bookingApi.get(`/api/bookings/customer/${tenantId}`).catch(() => null),
+      ]);
 
-      // 2) Prefer full profile by uniqueId (more fields than customer-by-id)
-      if (uid) {
-        try {
-          const profileRes = await userApi.get(`/api/users/${uid}/profile`);
-          if (profileRes.data?.success && profileRes.data?.user) {
-            setProfile(profileRes.data.user);
-          }
-        } catch (_) {}
-      }
+      const customerById = byIdRes?.data?.success && byIdRes?.data?.customer ? byIdRes.data.customer : null;
+      const resolvedUid = hintedUid || customerById?.uniqueId || null;
 
-      // 3) If no profile yet, use passedCustomer or customer from step 1 so we never show "Tenant not found" when API succeeded
-      setProfile((prev) => {
-        if (prev) return prev;
-        if (passedCustomer) {
-          return {
-            id: passedCustomer.id,
-            uniqueId: passedCustomer.uniqueId,
-            firstName: passedCustomer.firstName,
-            lastName: passedCustomer.lastName,
-            phone: passedCustomer.phone,
-            email: passedCustomer.email,
+      const profileRes =
+        profileByHintRes ||
+        (resolvedUid ? await userApi.get(`/api/users/${resolvedUid}/profile`).catch(() => null) : null);
+
+      const nextProfile: ProfileUser | null =
+        profileRes?.data?.success && profileRes?.data?.user
+          ? profileRes.data.user
+          : passedCustomer
+          ? {
+              id: passedCustomer.id,
+              uniqueId: passedCustomer.uniqueId,
+              firstName: passedCustomer.firstName,
+              lastName: passedCustomer.lastName,
+              phone: passedCustomer.phone,
+              email: passedCustomer.email,
+            }
+          : customerById
+          ? {
+              id: customerById.id,
+              uniqueId: customerById.uniqueId,
+              firstName: customerById.firstName,
+              lastName: customerById.lastName,
+              phone: customerById.phone,
+              email: customerById.email,
+              sex: customerById.sex,
+              profileExtras: customerById.profileExtras || undefined,
+            }
+          : null;
+
+      const bookings = bookRes?.data?.bookings ?? [];
+      setBookingHistory(bookings);
+
+      let nextBooking = isInactiveRoute ? null : passedBooking || null;
+      if (!isInactiveRoute && (!passedBooking || passedBooking.status === "inactive") && bookings.length > 0) {
+        const active = bookings.find((b: any) => b.status === "active");
+        if (active) {
+          const roomRes = await propertyApi.get(`/api/properties/rooms/${active.roomId}`).catch(() => null);
+          const room = roomRes?.data?.success && roomRes?.data?.room ? roomRes.data.room : null;
+          nextBooking = {
+            id: active.id,
+            roomId: active.roomId,
+            roomNumber: room?.roomNumber != null ? String(room.roomNumber) : undefined,
+            moveInDate: active.moveInDate,
+            rentAmount: active.rentAmount,
+            securityDeposit: Number(active.securityDeposit ?? 0),
+            isSecurityPaid: Boolean(active.isSecurityPaid),
+            propertyName: room?.propertyName,
           };
         }
-        if (customerById) {
-          return {
-            id: customerById.id,
-            uniqueId: customerById.uniqueId,
-            firstName: customerById.firstName,
-            lastName: customerById.lastName,
-            phone: customerById.phone,
-            email: customerById.email,
-            sex: customerById.sex,
-            profileExtras: customerById.profileExtras || undefined,
-          };
-        }
-        return null;
-      });
-
-      // 4) Booking (if not passed from list)
-      if (!passedBooking) {
-        try {
-          const bookRes = await bookingApi.get(`/api/bookings/customer/${tenantId}`);
-          const bookings = bookRes.data?.bookings ?? [];
-          const active = bookings.find((b: any) => b.status === "active");
-          if (active) {
-            let roomNumber: string | undefined = undefined;
-            let propertyName: string | undefined = undefined;
-            try {
-              const roomRes = await propertyApi.get(`/api/properties/rooms/${active.roomId}`);
-              if (roomRes.data?.success && roomRes.data?.room) {
-                roomNumber = roomRes.data.room.roomNumber != null ? String(roomRes.data.room.roomNumber) : undefined;
-                propertyName = roomRes.data.room.propertyName;
-              }
-            } catch (_) {}
-
-            setBooking({
-              id: active.id,
-              roomId: active.roomId,
-              roomNumber,
-              moveInDate: active.moveInDate,
-              rentAmount: active.rentAmount,
-              securityDeposit: Number(active.securityDeposit ?? 0),
-              isSecurityPaid: Boolean(active.isSecurityPaid),
-              propertyName,
-            });
-          }
-        } catch (_) {}
       }
+
+      setProfile(nextProfile);
+      setBooking(nextBooking);
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || "Failed to load tenant");
     } finally {
       setLoading(false);
     }
-  }, [tenantId, uniqueId, passedCustomer, passedBooking]);
+  }, [tenantId, uniqueId, passedCustomer, passedBooking, isInactiveRoute]);
 
   useEffect(() => {
     fetchDetails();
@@ -177,20 +184,6 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
     if (!dateString) return "—";
     const d = new Date(dateString);
     return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Active":
-      case "Paid":
-      case "Verified":
-        return "text-green-600 bg-green-50";
-      case "Moved Out":
-      case "Pending":
-        return "text-slate-600 bg-slate-50";
-      default:
-        return "text-slate-600 bg-slate-50";
-    }
   };
 
   const handleAction = (action: string) => {
@@ -221,7 +214,7 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
     }
   };
 
-  if (loading && !profile && !passedCustomer) {
+  if (loading && !passedCustomer) {
     return (
       <SafeAreaView className="flex-1 bg-[#F1F5F9] items-center justify-center">
         <ActivityIndicator size="large" color="#1E33FF" />
@@ -235,10 +228,12 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
   const documents = profileExtras.documents || {};
   const hasAnyDocument = !!(documents.aadharFront || documents.aadharBack || documents.idFront || documents.idBack);
   const dueAmount = booking && !booking.isSecurityPaid && booking.securityDeposit > 0 ? booking.securityDeposit : 0;
+  const isKycVerified = resolveFinalKycVerified(profile);
+  const kycStatusLabel = isKycVerified ? "Verified" : "Unverified";
 
   const hasAddress = (formatAddress(profileExtras.addressAsPerAadhaar) !== "Not provided" || formatAddress(profileExtras.currentAddress) !== "Not provided");
   const hasDetails = !!(profile?.phone || profile?.email || profileExtras.dob || profile?.profession || hasAddress || profile?.emergencyName || profile?.emergencyPhone || booking);
-  const hasPayments = !!booking;
+  const hasPayments = !!bookingHistory.length || !!booking;
   const hasDocuments = hasAnyDocument;
 
   const tabs = [
@@ -248,6 +243,12 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
   ].filter((t) => t.show);
 
   const hasAnyData = !!(profile || passedCustomer || booking);
+  const isInactiveTenant =
+    isInactiveRoute ||
+    profile?.status === "inactive" ||
+    passedCustomer?.status === "inactive" ||
+    booking?.status === "inactive" ||
+    bookingHistory.every((b) => b.status !== "active");
   if (!hasAnyData) {
     return (
       <SafeAreaView className="flex-1 bg-[#F1F5F9] justify-center px-6">
@@ -289,10 +290,15 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
                 <Text className="text-slate-500">
                   {booking?.roomNumber ? `Room ${booking.roomNumber}` : "—"} • {profile?.uniqueId || tenantId || "—"}
                 </Text>
+                <Text className={`mt-1 text-xs font-bold uppercase ${isKycVerified ? "text-green-600" : "text-amber-600"}`}>
+                  KYC {kycStatusLabel}
+                </Text>
               </View>
             </View>
-            <View className="px-3 py-1 rounded-full bg-green-50">
-              <Text className="text-green-600 font-bold text-xs uppercase">Active</Text>
+            <View className={`px-3 py-1 rounded-full ${isInactiveTenant ? "bg-slate-100" : "bg-green-50"}`}>
+              <Text className={`font-bold text-xs uppercase ${isInactiveTenant ? "text-slate-600" : "text-green-600"}`}>
+                {isInactiveTenant ? "Inactive" : "Active"}
+              </Text>
             </View>
           </View>
 
@@ -300,10 +306,11 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
             <TouchableOpacity className="flex-1 bg-green-500 py-3 rounded-xl" onPress={() => handleAction("call")}>
               <Text className="text-center font-bold text-white text-sm">Call</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity className="flex-1 bg-orange-500 py-3 rounded-xl" onPress={() => handleAction("moveout")}>
-              <Text className="text-center font-bold text-white text-sm">Move Out</Text>
-            </TouchableOpacity>
+            {!isInactiveTenant && (
+              <TouchableOpacity className="flex-1 bg-orange-500 py-3 rounded-xl" onPress={() => handleAction("moveout")}>
+                <Text className="text-center font-bold text-white text-sm">Move Out</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -323,6 +330,25 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
 
         {currentTab === "details" && (
           <View className="space-y-4 mt-4">
+            {booking?.id && (
+              <View className="bg-white rounded-[24px] p-6 mb-4 shadow-sm border border-white">
+                <Text className="text-lg font-black text-slate-900 mb-3">Enrollment Form</Text>
+                <Text className="text-slate-600 mb-4">
+                  View the tenant enrollment agreement submitted for this booking.
+                </Text>
+                <TouchableOpacity
+                  className="bg-blue-500 py-3 rounded-xl"
+                  onPress={() =>
+                    navigation.navigate("AdminGuestEnrollmentFormScreen", {
+                      bookingId: booking.id,
+                    })
+                  }
+                >
+                  <Text className="text-center text-white font-bold text-sm">View Enrollment Form</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {(profile?.phone || profile?.email || profileExtras.dob || profile?.profession) && (
               <View className="bg-white rounded-[24px] p-6 mb-4 shadow-sm border border-white">
                 <Text className="text-lg font-black text-slate-900 mb-4">Personal Information</Text>
@@ -351,6 +377,10 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
                       <Text className="font-bold text-slate-900">{profile.profession}</Text>
                     </View>
                   )}
+                  <View className="flex-row justify-between">
+                    <Text className="text-slate-500 font-medium">KYC Status</Text>
+                    <Text className={`font-bold ${isKycVerified ? "text-green-600" : "text-amber-600"}`}>{kycStatusLabel}</Text>
+                  </View>
                 </View>
               </View>
             )}
@@ -443,20 +473,33 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
           <View className="mt-4">
             <View className="bg-white rounded-[24px] p-6 shadow-sm border border-white">
               <Text className="text-lg font-black text-slate-900 mb-4">Payments</Text>
-              {booking ? (
+              {bookingHistory.length > 0 ? (
                 <View className="space-y-3">
-                  <View className="flex-row items-center justify-between py-3 border-b border-slate-100">
-                    <View>
-                      <Text className="font-bold text-slate-900">Security Deposit</Text>
-                      <Text className="text-slate-500 text-sm">{booking.moveInDate ? formatDate(booking.moveInDate) : "—"}</Text>
-                    </View>
-                    <View className="items-end">
-                      <Text className="font-bold text-slate-900">₹{Number(booking.securityDeposit || 0).toLocaleString()}</Text>
-                      <View className={`px-2 py-1 rounded-full mt-1 ${booking.isSecurityPaid ? "bg-green-100" : "bg-amber-100"}`}>
-                        <Text className={`text-xs font-bold ${booking.isSecurityPaid ? "text-green-700" : "text-amber-700"}`}>{booking.isSecurityPaid ? "Paid" : "Pending"}</Text>
+                  {bookingHistory.map((item: any, index: number) => {
+                    const roomResLabel = item.roomNumber || item.room?.roomNumber || "—";
+                    const deposit = Number(item.securityDeposit || 0);
+                    const amountPaid = item.isSecurityPaid ? "Paid" : "Pending";
+                    return (
+                      <View key={item.id || index} className="py-3 border-b border-slate-100">
+                        <View className="flex-row items-center justify-between">
+                          <View>
+                            <Text className="font-bold text-slate-900">
+                              {item.status === "active" ? "Active stay" : "Past stay"} - Room {roomResLabel}
+                            </Text>
+                            <Text className="text-slate-500 text-sm">
+                              {item.moveInDate ? formatDate(item.moveInDate) : "—"}
+                            </Text>
+                          </View>
+                          <View className="items-end">
+                            <Text className="font-bold text-slate-900">₹{deposit.toLocaleString()}</Text>
+                            <View className={`px-2 py-1 rounded-full mt-1 ${item.isSecurityPaid ? "bg-green-100" : "bg-amber-100"}`}>
+                              <Text className={`text-xs font-bold ${item.isSecurityPaid ? "text-green-700" : "text-amber-700"}`}>{amountPaid}</Text>
+                            </View>
+                          </View>
+                        </View>
                       </View>
-                    </View>
-                  </View>
+                    );
+                  })}
                   <View className="flex-row items-center justify-between py-3">
                     <Text className="font-bold text-slate-900">Current due</Text>
                     <Text className={`font-bold ${dueAmount > 0 ? "text-red-600" : "text-green-600"}`}>₹{dueAmount.toLocaleString()}</Text>

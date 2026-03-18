@@ -11,18 +11,20 @@ function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null 
   const b = currentStay.booking;
   const r = currentStay.room;
   const p = currentStay.property;
-  const address = [p?.address, p?.city, p?.state, p?.pincode].filter(Boolean).join(", ") || "";
+  const address = [p?.city, p?.state].filter(Boolean).join(", ") || "";
+  const isSecurityPaid = Boolean(b.isSecurityPaid);
   return {
     id: b.id,
     bookingId: b.id,
     name: r.propertyName || p?.name || "Property",
-    status: "Approved",
+    status: isSecurityPaid ? "Approved" : "Pending Payment",
+    isSecurityPaid,
     roomNumber: r.roomNumber,
     monthlyRent: Number(b.rentAmount) || 0,
     checkInDate: typeof b.moveInDate === "string" ? b.moveInDate : b.moveInDate?.substring?.(0, 10) || "",
     address,
     roomId: r.id,
-    propertyId: p?.id,
+    propertyId: p?.uniqueId || p?.id,
     moveOutDate: b.moveOutDate,
     bgColor: "bg-[#FFE8E8]",
     propertyType: p?.propertyType,
@@ -99,8 +101,8 @@ export default function PropertyListScreen() {
                       <Text className="text-slate-500 text-sm">Room {property.roomNumber}</Text>
                     </View>
                   </View>
-                  <View className="bg-green-50 px-3 py-1 rounded-full">
-                    <Text className="text-green-600 font-bold text-xs uppercase">{property.status}</Text>
+                  <View className={`px-3 py-1 rounded-full ${property.isSecurityPaid ? "bg-green-50" : "bg-amber-50"}`}>
+                    <Text className={`font-bold text-xs uppercase ${property.isSecurityPaid ? "text-green-600" : "text-amber-700"}`}>{property.status}</Text>
                   </View>
                 </View>
 

@@ -64,8 +64,10 @@ export default function InfoCards() {
                     {property.name}
                   </Text>
                   <View className="flex-row items-center mt-1">
-                    <View className="bg-emerald-500/20 px-2 py-0.5 rounded-full">
-                      <Text className="text-xs font-semibold text-emerald-700">{property.status}</Text>
+                    <View className={`${property.isSecurityPaid ? "bg-emerald-500/20" : "bg-amber-500/20"} px-2 py-0.5 rounded-full`}>
+                      <Text className={`text-xs font-semibold ${property.isSecurityPaid ? "text-emerald-700" : "text-amber-700"}`}>
+                        {property.status}
+                      </Text>
                     </View>
                   </View>
                 </View>

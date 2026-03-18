@@ -16,6 +16,7 @@ import BottomNav from "./BottomNav";
 import { userApi, propertyApi, bookingApi } from "../utils/api";
 import { useProperty } from "../contexts/PropertyContext";
 import { useProperties } from "../src/hooks";
+import { getInactiveTenants } from "../utils/inactiveTenantsStore";
 
 type FilterType = "FLOOR" | "ROOM" | "DUE" | "A_Z" | "Z_A" | "INACTIVE" | "MOVEOUT_REQUESTED";
 
@@ -110,6 +111,7 @@ export default function AdminCustomerModule({ navigation }: any) {
   const [properties, setProperties] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
+  const [inactiveTenants, setInactiveTenants] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   // Fetch data; refetch when selected property changes so tenants are property-scoped
@@ -123,11 +125,14 @@ export default function AdminCustomerModule({ navigation }: any) {
       console.log("[SearchScreen] Fetching data for property:", propertyId ?? "all");
 
       const params = propertyId ? { propertyId } : {};
-      const [customersRes, propertiesRes, roomsRes, bookingsRes] = await Promise.all([
+      const [customersRes, propertiesRes, roomsRes, bookingsRes, inactiveRes] = await Promise.all([
         userApi.get("/api/users/list/all-customers"),
         propertyApi.get("/api/properties/list"),
         propertyApi.get("/api/properties/rooms/all"),
         bookingApi.get("/api/bookings/list/active-with-details", { params }),
+        bookingApi
+          .get("/api/bookings/list/inactive-for-property", { params })
+          .catch(() => ({ data: { success: false, tenants: [] as any[] } })),
       ]);
 
       if (customersRes.data.success && customersRes.data.customers) {
@@ -142,6 +147,25 @@ export default function AdminCustomerModule({ navigation }: any) {
       if (bookingsRes.data.success && Array.isArray(bookingsRes.data.bookings)) {
         setBookings(bookingsRes.data.bookings);
       }
+      const fromServer =
+        inactiveRes?.data?.success && Array.isArray(inactiveRes.data.tenants)
+          ? inactiveRes.data.tenants
+          : [];
+      const fromLocal = await getInactiveTenants();
+      const serverKey = new Set(
+        fromServer.flatMap((t: any) => [t.uniqueId, t.id].filter(Boolean).map(String))
+      );
+      const merged = [
+        ...fromServer,
+        ...fromLocal.filter((t: any) => {
+          const uid = t.uniqueId ? String(t.uniqueId) : "";
+          const id = t.id != null ? String(t.id) : "";
+          if (uid && serverKey.has(uid)) return false;
+          if (id && serverKey.has(id)) return false;
+          return true;
+        }),
+      ];
+      setInactiveTenants(merged);
     } catch (error: any) {
       console.error("[SearchScreen] Error fetching data:", error);
       Alert.alert("Error", "Failed to load data. Please check backend connections.");
@@ -156,10 +180,44 @@ export default function AdminCustomerModule({ navigation }: any) {
     return bookings.filter((b) => bookingBelongsToProperty(b, propertyMatchValues));
   }, [bookings, propertyMatchValues]);
 
+  const inactiveForProperty = useMemo(() => {
+    if (!propertyMatchValues.length) return [];
+    const norm = (s: string) => s.toLowerCase().trim();
+    return inactiveTenants.filter((tenant: any) => {
+      const refs = [tenant.propertyId, tenant.propertyName].filter(Boolean).map((x) => String(x).trim());
+      return refs.some((ref) =>
+        propertyMatchValues.some((v) => {
+          if (!v || !ref) return false;
+          const vn = norm(v);
+          const rn = norm(ref);
+          return rn === vn || ref === v || ref.startsWith(v) || ref.includes(v) || v.includes(ref);
+        })
+      );
+    });
+  }, [inactiveTenants, propertyMatchValues]);
+
+  /** Anyone with an active booking on this property (by user id, mystay id, or booking.customerId). */
+  const activeBookingKeysForProperty = useMemo(() => {
+    const keys = new Set<string>();
+    bookingsForProperty.forEach((b: any) => {
+      if (b.customerId != null) keys.add(String(b.customerId));
+      if (b.customer?.id != null) keys.add(String(b.customer.id));
+      if (b.customer?.uniqueId) keys.add(String(b.customer.uniqueId));
+    });
+    return keys;
+  }, [bookingsForProperty]);
+
   const customers = useMemo(() => {
-    return apiCustomers
+    const activeCustomers = apiCustomers
       .map(cust => {
-        const customerBooking = bookingsForProperty.find(b => b.customer && (b.customer.id === cust.id || b.customer.uniqueId === cust.uniqueId));
+        const custIdStr = cust.id != null ? String(cust.id) : "";
+        const customerBooking = bookingsForProperty.find((b: any) => {
+          if (b.customerId != null && String(b.customerId) === custIdStr) return true;
+          if (!b.customer) return false;
+          return (
+            String(b.customer.id) === custIdStr || b.customer.uniqueId === cust.uniqueId
+          );
+        });
         const normalizedPhone = (cust.phone || '').replace(/\D/g, '').slice(-10);
         let tenantStatus = 'Inactive';
         let tenantColor = '#999';
@@ -203,7 +261,56 @@ export default function AdminCustomerModule({ navigation }: any) {
         };
       })
       .filter(item => item.bookingId != null);
-  }, [apiCustomers, bookingsForProperty]);
+
+    // Build a set of IDs / uniqueIds that currently have an active booking
+    const activeTenantIds = new Set(
+      activeCustomers
+        .map((c) => c.id)
+        .filter((id) => id != null),
+    );
+    const activeTenantMystayIds = new Set(
+      activeCustomers
+        .map((c) => c.mystayId)
+        .filter((id) => id != null),
+    );
+
+    const inactiveCustomers = inactiveForProperty
+      .filter((tenant: any) => {
+        const id = tenant.id != null ? String(tenant.id) : "";
+        const uniqueId = tenant.uniqueId ? String(tenant.uniqueId) : "";
+        if (id && activeBookingKeysForProperty.has(id)) return false;
+        if (uniqueId && activeBookingKeysForProperty.has(uniqueId)) return false;
+        if (id && activeTenantIds.has(tenant.id)) return false;
+        if (uniqueId && activeTenantMystayIds.has(uniqueId)) return false;
+        return true;
+      })
+      .map((tenant: any) => ({
+        id: tenant.id,
+        mystayId: tenant.uniqueId,
+        name: tenant.name,
+        phone: tenant.phone || "Not Provided",
+        room: tenant.roomNumber || "N/A",
+        floor: tenant.floor || "N/A",
+        due: Number(tenant.currentDue || 0),
+        status: "inactive",
+        photo:
+          tenant.profileImage ||
+          "https://ui-avatars.com/api/?name=" +
+            encodeURIComponent(tenant.name || "User") +
+            "&size=150&background=3B82F6&color=fff&bold=true",
+        moveOutRequested: false,
+        email: tenant.email || "N/A",
+        sex: tenant.sex || "N/A",
+        tenantStatus: "Inactive",
+        tenantColor: "#64748b",
+        userType: "inactive",
+        bedNumbers: null,
+        isSingleOccupancy: false,
+        bookingId: tenant.moveOutRequestId || tenant.id,
+      }));
+
+    return [...activeCustomers, ...inactiveCustomers];
+  }, [apiCustomers, bookingsForProperty, inactiveForProperty, activeBookingKeysForProperty]);
 
   // Rooms for current property: from API if they have property info, else from bookings in this property
   const roomsForProperty = useMemo(() => {
