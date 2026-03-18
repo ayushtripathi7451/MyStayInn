@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "../context/ThemeContext";
 import { useCurrentStay } from "../src/hooks";
@@ -85,7 +84,7 @@ export default function DueAmount() {
   const { theme } = useTheme();
   const navigation = useNavigation<any>();
   const { raw, loading, refresh } = useCurrentStay();
-  const [payingId, setPayingId] = useState<string | null>(null);
+  const [payingId] = useState<string | null>(null);
   const dueItems = useMemo(() => deriveDueItemsFromRaw(raw), [raw]);
   const totalDue = useMemo(() => dueItems.reduce((sum, i) => sum + (Number(i.amount) || 0), 0), [dueItems]);
 

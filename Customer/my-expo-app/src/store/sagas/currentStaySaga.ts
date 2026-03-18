@@ -81,7 +81,13 @@ export function* refreshCurrentStaySaga(
     let currentStay = body.currentStay ?? body.data?.currentStay ?? null;
     if (currentStay?.booking) {
       try {
-        const clientNow = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (device date)
+        // IMPORTANT: use device *local* date (not UTC) so 1st-of-month rules
+        // don't shift to previous day in positive timezones (e.g., IST).
+        const d0 = new Date();
+        const yyyy = d0.getFullYear();
+        const mm = String(d0.getMonth() + 1).padStart(2, '0');
+        const dd = String(d0.getDate()).padStart(2, '0');
+        const clientNow = `${yyyy}-${mm}-${dd}`; // YYYY-MM-DD (device local date)
         const duesRes = yield call([bookingApi, 'get'], '/api/bookings/me/effective-dues', { params: { now: clientNow } });
         const d = duesRes?.data?.dues;
         if (duesRes?.data?.success && d) {
