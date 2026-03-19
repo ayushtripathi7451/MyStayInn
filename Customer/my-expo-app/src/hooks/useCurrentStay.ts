@@ -25,7 +25,8 @@ export function useCurrentStay(): {
   const lastFetchedAt = useSelector((s: RootState) => s.currentStay.lastFetchedAt);
 
   const refresh = useCallback(
-    (force?: boolean) => dispatch(refreshCurrentStay(force)),
+    (force?: boolean) =>
+      dispatch(refreshCurrentStay(force ? { force: true } : undefined)),
     [dispatch]
   );
 

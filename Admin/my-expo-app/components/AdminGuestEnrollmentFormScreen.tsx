@@ -205,6 +205,16 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
       </View>
 
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        {/* MyStayInn Branding */}
+        <View className="px-4 pt-6 pb-4 items-center border-b border-slate-200">
+          <Image
+            source={require("../assets/my-stay-logo.png")}
+            className="w-16 h-16 mb-2"
+            resizeMode="contain"
+          />
+          <Text className="text-2xl font-bold text-[#1E33FF]">MyStayInn</Text>
+        </View>
+
         {/* Header: PG name, address, contact – same as customer app */}
         <View className="px-4 pt-6 pb-4 border-b border-slate-300">
           <Text className="text-xl font-bold text-slate-900 text-center" style={{ fontFamily: "serif" }}>

@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 
-export default function TopSwitchCard({ mode, setMode, navigation }: any) {
+export default function TopSwitchCard({ mode, setMode, navigation, firstName = "User" }: any) {
   return (
     <View
       className="mx-6 rounded-[32px] p-6 mt-8"
@@ -63,7 +63,7 @@ export default function TopSwitchCard({ mode, setMode, navigation }: any) {
     
   </Text>
   <Text className="text-gray-500 text-right mt-2 text-[13px]">
-        Not Ayush?{" "}
+        Not {firstName}?{" "}
         <Text
           className="font-semibold text-blue-600"
           onPress={() => navigation.navigate("Welcome")}

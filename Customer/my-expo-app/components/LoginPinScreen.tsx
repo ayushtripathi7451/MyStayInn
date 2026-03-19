@@ -17,33 +17,18 @@ import TopSwitchCard from "./TopSwitchCard";
 import PinLoginCard from "./PinLoginCard";
 import BiometricsCard from "./BiometricsCard";
 import { useTheme } from "../context/ThemeContext";
+import { useUser } from "../src/hooks";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function LoginPinScreen({ navigation }: any) {
   const [globalPinFocus, setGlobalPinFocus] = useState(false);
   const [mode, setMode] = useState<"pin" | "biometric">("pin");
-  const [firstName, setFirstName] = useState("User");
   const { theme } = useTheme();
+  const { name } = useUser();
+  const displayName = name || "User";
 
-  useEffect(() => {
-    // Fetch user's first name from AsyncStorage
-    const getUserName = async () => {
-      try {
-        const userData = await AsyncStorage.getItem("userData");
-        if (userData) {
-          const user = JSON.parse(userData);
-          setFirstName(user.firstName || "User");
-        }
-      } catch (error) {
-        console.error("Error fetching user name:", error);
-      }
-    };
-
-    getUserName();
-  }, []);
-
-  const gradientColors =
+  const gradientColors: [string, string] =
     theme === "female"
       ? ["#FF5FA2", "#FF2E75"]
       : ["#6D7BFF", "#0040FF"];
@@ -77,7 +62,7 @@ export default function LoginPinScreen({ navigation }: any) {
                 {/* WELCOME TEXT */}
                 <View className="px-6">
                   <Text className="text-white text-3xl font-semibold">
-                    Welcome, {firstName} 👋
+                    Welcome, {displayName} 👋
                   </Text>
                 </View>
 
@@ -86,6 +71,7 @@ export default function LoginPinScreen({ navigation }: any) {
                   mode={mode}
                   setMode={setMode}
                   navigation={navigation}
+                  firstName={displayName}
                 />
 
                 {/* LOGIN FORM & BACKGROUND CONTAINER */}

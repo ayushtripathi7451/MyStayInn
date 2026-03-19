@@ -19,10 +19,14 @@ interface BookingWithDetails {
   isSecurityPaid: boolean;
   isSecurityPaidOnline?: boolean;
   rentAmount: string;
+  scheduledOnlineRent?: number;
+  scheduledCashRent?: number;
   onlinePaymentRecv?: number;
   cashPaymentRecv?: number;
   isRentOnlinePaid?: boolean;
   isRentCashPaid?: boolean;
+  rentOnlinePaidYearMonth?: string | null;
+  rentCashPaidYearMonth?: string | null;
   status?: 'active' | 'completed' | 'cancelled';
 }
 
@@ -39,6 +43,7 @@ interface DueItem {
   dueType: string;
   dueKind: DueKind;
   date: string;
+  monthLabel?: string;
   isMovedOut?: boolean;
 }
 
@@ -52,7 +57,13 @@ interface TransactionItem {
   amount: number;
   type: string;
   date: string;
+  monthLabel?: string;
   isMovedOut?: boolean;
+}
+
+// Helper function for year-month formatting
+function yearMonth(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export default function PaymentManagementScreen({ route }: any) {
@@ -83,11 +94,16 @@ export default function PaymentManagementScreen({ route }: any) {
             securityDeposit: b.securityDeposit != null ? Number(b.securityDeposit) : 0,
             isSecurityPaid: toBool(b.isSecurityPaid),
             isSecurityPaidOnline: toBool(b.isSecurityPaidOnline),
+            scheduledOnlineRent: b.scheduledOnlineRent != null ? Number(b.scheduledOnlineRent) : 0,
+            scheduledCashRent: b.scheduledCashRent != null ? Number(b.scheduledCashRent) : 0,
             onlinePaymentRecv: b.onlinePaymentRecv != null ? Number(b.onlinePaymentRecv) : 0,
             cashPaymentRecv: b.cashPaymentRecv != null ? Number(b.cashPaymentRecv) : 0,
             isRentOnlinePaid: toBool(b.isRentOnlinePaid),
             isRentCashPaid: toBool(b.isRentCashPaid),
+            rentOnlinePaidYearMonth: b.rentOnlinePaidYearMonth || null,
+            rentCashPaidYearMonth: b.rentCashPaidYearMonth || null,
             moveInDate: b.moveInDate != null ? (typeof b.moveInDate === "string" ? b.moveInDate : new Date(b.moveInDate).toISOString?.() ?? String(b.moveInDate)) : "",
+            moveOutDate: b.moveOutDate != null ? (typeof b.moveOutDate === "string" ? b.moveOutDate : new Date(b.moveOutDate).toISOString?.() ?? String(b.moveOutDate)) : null,
             status: b.status ?? "active",
           }))
         );
@@ -131,9 +147,103 @@ export default function PaymentManagementScreen({ route }: any) {
   const roomNumber = (b: BookingWithDetails) => b.room?.roomNumber ?? "—";
   const propertyName = (b: BookingWithDetails) => b.room?.propertyName ?? "—";
 
+  // Calculate first due month based on move-in date
+  const getFirstDueMonth = (moveInDate: string): string | null => {
+    if (!moveInDate) return null;
+    const moveIn = new Date(moveInDate);
+    if (isNaN(moveIn.getTime())) return null;
+    
+    const moveInDay = moveIn.getDate();
+    const moveInYm = yearMonth(moveIn);
+    const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
+    return moveInDay <= 10 ? moveInYm : nextMonthYm;
+  };
+
+  // Get the last month to show dues for (either current month or move-out month)
+  const getLastDueMonth = (b: BookingWithDetails): string => {
+    const current = new Date();
+    const currentYm = yearMonth(current);
+    
+    // If moved out, use move-out month as the last due month
+    if (b.moveOutDate && b.status === "completed") {
+      const moveOutDate = new Date(b.moveOutDate);
+      if (!isNaN(moveOutDate.getTime())) {
+        return yearMonth(moveOutDate);
+      }
+    }
+    
+    return currentYm;
+  };
+
+  // Generate all unpaid months for a booking (only up to move-out date)
+  const generateUnpaidMonths = (b: BookingWithDetails): DueItem[] => {
+    const items: DueItem[] = [];
+    const monthlyRent = b.scheduledOnlineRent || Number(b.rentAmount) || 0;
+    const lastPaidYm = b.rentOnlinePaidYearMonth;
+    
+    if (monthlyRent <= 0) return items;
+
+    const firstDueYm = getFirstDueMonth(b.moveInDate);
+    if (!firstDueYm) return items;
+
+    const lastDueYm = getLastDueMonth(b);
+    
+    // Parse dates
+    const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
+    const [lastDueYear, lastDueMonth] = lastDueYm.split('-').map(Number);
+    const [lastPaidYear, lastPaidMonth] = lastPaidYm ? lastPaidYm.split('-').map(Number) : [firstYear, firstMonth - 1];
+    
+    // Start from the month after last paid
+    let year = firstYear;
+    let month = firstMonth;
+    
+    if (lastPaidYm) {
+      if (year < lastPaidYear || (year === lastPaidYear && month <= lastPaidMonth)) {
+        year = lastPaidYear;
+        month = lastPaidMonth + 1;
+        if (month > 12) {
+          month = 1;
+          year++;
+        }
+      }
+    }
+    
+    // Generate months until last due month (move-out or current)
+    while (year < lastDueYear || (year === lastDueYear && month <= lastDueMonth)) {
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
+        month: "short", 
+        year: "numeric" 
+      });
+      
+      items.push({
+        id: `${b.id}-rent-${year}-${month}`,
+        bookingId: b.id,
+        customerId: b.customerId,
+        name: customerName(b),
+        roomNumber: roomNumber(b),
+        propertyName: propertyName(b),
+        amount: monthlyRent,
+        dueType: "Rent (online)",
+        dueKind: "rent_online",
+        date: b.moveInDate,
+        monthLabel,
+        isMovedOut: b.status === "completed",
+      });
+      
+      month++;
+      if (month > 12) {
+        month = 1;
+        year++;
+      }
+    }
+    
+    return items;
+  };
+
+  // Generate due items (unpaid) - only up to move-out date
   const dueCustomers: DueItem[] = [];
-  const isMovedOutBooking = (b: BookingWithDetails) => b.status === "completed";
   bookings.forEach((b) => {
+    // Security deposit (only once, always show if not paid regardless of move-out)
     if (!b.isSecurityPaid && (b.securityDeposit ?? 0) > 0) {
       dueCustomers.push({
         id: `${b.id}-security`,
@@ -146,26 +256,17 @@ export default function PaymentManagementScreen({ route }: any) {
         dueType: "Security deposit",
         dueKind: "security_deposit",
         date: b.moveInDate,
-        isMovedOut: isMovedOutBooking(b),
+        monthLabel: formatDate(b.moveInDate),
+        isMovedOut: b.status === "completed",
       });
     }
-    const onlineRecv = b.onlinePaymentRecv ?? 0;
-    const cashRecv = b.cashPaymentRecv ?? 0;
-    if (onlineRecv > 0 && !b.isRentOnlinePaid) {
-      dueCustomers.push({
-        id: `${b.id}-rent-online`,
-        bookingId: b.id,
-        customerId: b.customerId,
-        name: customerName(b),
-        roomNumber: roomNumber(b),
-        propertyName: propertyName(b),
-        amount: onlineRecv,
-        dueType: "Rent (online)",
-        dueKind: "rent_online",
-        date: b.moveInDate,
-        isMovedOut: isMovedOutBooking(b),
-      });
-    }
+    
+    // Rent online - generate all unpaid months up to move-out date
+    const unpaidRentMonths = generateUnpaidMonths(b);
+    dueCustomers.push(...unpaidRentMonths);
+    
+    // Cash rent (simplified - assumes single amount)
+    const cashRecv = b.scheduledCashRent ?? b.cashPaymentRecv ?? 0;
     if (cashRecv > 0 && !b.isRentCashPaid) {
       dueCustomers.push({
         id: `${b.id}-rent-cash`,
@@ -178,14 +279,16 @@ export default function PaymentManagementScreen({ route }: any) {
         dueType: "Rent (cash)",
         dueKind: "rent_cash",
         date: b.moveInDate,
-        isMovedOut: isMovedOutBooking(b),
+        monthLabel: formatDate(b.moveInDate),
+        isMovedOut: b.status === "completed",
       });
     }
   });
 
+  // Generate transaction items (paid) - only up to move-out date
   const transactions: TransactionItem[] = [];
-  const isMovedOut = (b: BookingWithDetails) => b.status === "completed";
   bookings.forEach((b) => {
+    // Paid security deposit
     if (b.isSecurityPaid && (b.securityDeposit ?? 0) > 0) {
       transactions.push({
         id: `${b.id}-security`,
@@ -195,28 +298,38 @@ export default function PaymentManagementScreen({ route }: any) {
         roomNumber: roomNumber(b),
         propertyName: propertyName(b),
         amount: b.securityDeposit ?? 0,
-        type: "Security deposit (online)", // Security deposit is always paid online (Cashfree) by user
+        type: "Security deposit",
         date: b.moveInDate,
-        isMovedOut: isMovedOut(b),
+        monthLabel: formatDate(b.moveInDate),
+        isMovedOut: b.status === "completed",
       });
     }
-    const onlineRecv = b.onlinePaymentRecv ?? 0;
-    const cashRecv = b.cashPaymentRecv ?? 0;
-    if (onlineRecv > 0 && b.isRentOnlinePaid) {
+    
+    // Paid rent online (tracked by paid year-month)
+    if (b.rentOnlinePaidYearMonth && (b.scheduledOnlineRent || Number(b.rentAmount) > 0)) {
+      const [year, month] = b.rentOnlinePaidYearMonth.split('-').map(Number);
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
+        month: "short", 
+        year: "numeric" 
+      });
+      
       transactions.push({
-        id: `${b.id}-rent-online`,
+        id: `${b.id}-rent-${b.rentOnlinePaidYearMonth}`,
         bookingId: b.id,
         customerId: b.customerId,
         name: customerName(b),
         roomNumber: roomNumber(b),
         propertyName: propertyName(b),
-        amount: onlineRecv,
-        type: "Rent (online)",
+        amount: b.scheduledOnlineRent || Number(b.rentAmount) || 0,
+        type: `Rent (online) - ${monthLabel}`,
         date: b.moveInDate,
-        isMovedOut: isMovedOut(b),
+        monthLabel,
+        isMovedOut: b.status === "completed",
       });
     }
-    if (cashRecv > 0 && b.isRentCashPaid) {
+    
+    // Paid rent cash
+    if (b.isRentCashPaid && (b.scheduledCashRent ?? b.cashPaymentRecv ?? 0) > 0) {
       transactions.push({
         id: `${b.id}-rent-cash`,
         bookingId: b.id,
@@ -224,10 +337,11 @@ export default function PaymentManagementScreen({ route }: any) {
         name: customerName(b),
         roomNumber: roomNumber(b),
         propertyName: propertyName(b),
-        amount: cashRecv,
+        amount: b.scheduledCashRent ?? b.cashPaymentRecv ?? 0,
         type: "Rent (cash)",
         date: b.moveInDate,
-        isMovedOut: isMovedOut(b),
+        monthLabel: formatDate(b.moveInDate),
+        isMovedOut: b.status === "completed",
       });
     }
   });
@@ -297,11 +411,18 @@ export default function PaymentManagementScreen({ route }: any) {
     >
       <View className="flex-row justify-between items-center">
         <View className="flex-1">
-          <Text className="text-base font-semibold text-gray-800">{item.name}</Text>
+          <View className="flex-row items-center gap-2">
+            <Text className="text-base font-semibold text-gray-800">{item.name}</Text>
+            {item.isMovedOut && (
+              <View className="bg-slate-100 px-2 py-0.5 rounded">
+                <Text className="text-slate-600 text-xs font-medium">Moved out</Text>
+              </View>
+            )}
+          </View>
           <Text className="text-sm text-gray-500 mt-1">
             Room {item.roomNumber} • {item.propertyName}
           </Text>
-          <Text className="text-xs text-gray-400 mt-1">{item.type} • {formatDate(item.date)}</Text>
+          <Text className="text-xs text-gray-400 mt-1">{item.type} • {item.monthLabel || formatDate(item.date)}</Text>
         </View>
         <View className="items-end">
           <Text className="text-lg font-bold text-green-600">₹{item.amount.toLocaleString()}</Text>
@@ -317,10 +438,11 @@ export default function PaymentManagementScreen({ route }: any) {
     const isRentCash = item.dueKind === "rent_cash";
     const isSecurityDeposit = item.dueKind === "security_deposit";
     const isMarking = markingPaidBookingId === item.bookingId;
+    
     return (
       <TouchableOpacity
         key={item.id}
-        className="bg-white p-4 rounded-2xl mb-3 border border-gray-100"
+        className="bg-white p-4 rounded-2xl mb-3 border border-gray-100 opacity-100"
         onPress={() =>
           navigation.navigate("TenantDetailScreen", {
             tenantId: item.customerId,
@@ -329,14 +451,14 @@ export default function PaymentManagementScreen({ route }: any) {
         }
         activeOpacity={0.7}
       >
-        <View className="flex-row items-center">
+        <View className="flex-row items-start">
           {!isRentCash && (
             <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation();
                 handleCustomerSelect(item.id);
               }}
-              className={`w-5 h-5 rounded border-2 mr-3 items-center justify-center ${
+              className={`w-5 h-5 rounded border-2 mr-3 items-center justify-center mt-1 ${
                 selectedCustomers.includes(item.id) ? "bg-blue-500 border-blue-500" : "border-gray-300"
               }`}
             >
@@ -359,7 +481,9 @@ export default function PaymentManagementScreen({ route }: any) {
             <Text className="text-sm text-gray-500 mt-1">
               Room {item.roomNumber} • {item.propertyName}
             </Text>
-            <Text className="text-xs text-gray-400 mt-1">{item.dueType} • Allocated {formatDate(item.date)}</Text>
+            <Text className="text-xs text-gray-400 mt-1">
+              {item.dueType} • {item.monthLabel || `Allocated ${formatDate(item.date)}`}
+            </Text>
           </View>
 
           <View className="items-end">

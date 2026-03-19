@@ -207,97 +207,114 @@ export default function AdminCustomerModule({ navigation }: any) {
     return keys;
   }, [bookingsForProperty]);
 
-  const customers = useMemo(() => {
-    const activeCustomers = apiCustomers
-      .map(cust => {
-        const custIdStr = cust.id != null ? String(cust.id) : "";
-        const customerBooking = bookingsForProperty.find((b: any) => {
-          if (b.customerId != null && String(b.customerId) === custIdStr) return true;
-          if (!b.customer) return false;
-          return (
-            String(b.customer.id) === custIdStr || b.customer.uniqueId === cust.uniqueId
-          );
-        });
-        const normalizedPhone = (cust.phone || '').replace(/\D/g, '').slice(-10);
-        let tenantStatus = 'Inactive';
-        let tenantColor = '#999';
-        let room = "N/A";
-        let floor = "N/A";
-        let due = 0;
+  // In AdminCustomerModule.tsx, update the customers useMemo section:
 
-        if (customerBooking && customerBooking.room) {
-          tenantStatus = 'Active Tenant';
-          tenantColor = '#22c55e';
-          room = customerBooking.room.roomNumber != null ? String(customerBooking.room.roomNumber) : "N/A";
-          floor = getFloorLabel(Number(customerBooking.room.floor));
-          due = getTotalDueFromBooking(customerBooking);
-        } else if (cust.isActive && customerBooking) {
-          tenantStatus = 'Active Tenant';
-          tenantColor = '#22c55e';
-          due = getTotalDueFromBooking(customerBooking);
-        }
+const customers = useMemo(() => {
+  const activeCustomers = apiCustomers
+    .map(cust => {
+      const custIdStr = cust.id != null ? String(cust.id) : "";
+      const customerBooking = bookingsForProperty.find((b: any) => {
+        if (b.customerId != null && String(b.customerId) === custIdStr) return true;
+        if (!b.customer) return false;
+        return (
+          String(b.customer.id) === custIdStr || b.customer.uniqueId === cust.uniqueId
+        );
+      });
+      const normalizedPhone = (cust.phone || '').replace(/\D/g, '').slice(-10);
+      let tenantStatus = 'Inactive';
+      let tenantColor = '#999';
+      let room = "N/A";
+      let floor = "N/A";
+      let due = 0;
 
-        const fullName = `${cust.firstName || ''} ${cust.lastName || ''}`.trim() || 'Unknown Customer';
+      if (customerBooking && customerBooking.room) {
+        tenantStatus = 'Active Tenant';
+        tenantColor = '#22c55e';
+        room = customerBooking.room.roomNumber != null ? String(customerBooking.room.roomNumber) : "N/A";
+        floor = getFloorLabel(Number(customerBooking.room.floor));
+        due = getTotalDueFromBooking(customerBooking);
+      } else if (cust.isActive && customerBooking) {
+        tenantStatus = 'Active Tenant';
+        tenantColor = '#22c55e';
+        due = getTotalDueFromBooking(customerBooking);
+      }
 
-        return {
-          id: cust.id,
-          mystayId: cust.uniqueId,
-          name: fullName,
-          phone: normalizedPhone || 'Not Provided',
-          room,
-          floor,
-          due,
-          status: customerBooking ? "active" : (cust.isActive ? "active" : "inactive"),
-          photo: cust.profileExtras?.profileImage || "https://ui-avatars.com/api/?name=" + encodeURIComponent(fullName) + "&size=150&background=3B82F6&color=fff&bold=true",
-          moveOutRequested: false,
-          email: cust.email || 'N/A',
-          sex: cust.sex || 'N/A',
-          tenantStatus,
-          tenantColor,
-          userType: cust.userType,
-          bedNumbers: customerBooking?.bedNumbers || null,
-          isSingleOccupancy: customerBooking?.isSingleOccupancy || false,
-          bookingId: customerBooking?.id || null,
-        };
-      })
-      .filter(item => item.bookingId != null);
+      const fullName = `${cust.firstName || ''} ${cust.lastName || ''}`.trim() || 'Unknown Customer';
+      
+      // Fix: Get profile image from profileExtras
+      const profileImage = cust.profileExtras?.profileImage;
+      
+      // Fix: Create proper avatar URL if no profile image
+      const photo = profileImage 
+        ? profileImage 
+        : `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName)}&size=150&background=3B82F6&color=fff&bold=true&length=2`;
 
-    // Build a set of IDs / uniqueIds that currently have an active booking
-    const activeTenantIds = new Set(
-      activeCustomers
-        .map((c) => c.id)
-        .filter((id) => id != null),
-    );
-    const activeTenantMystayIds = new Set(
-      activeCustomers
-        .map((c) => c.mystayId)
-        .filter((id) => id != null),
-    );
+      return {
+        id: cust.id,
+        mystayId: cust.uniqueId,
+        name: fullName,
+        phone: normalizedPhone || 'Not Provided',
+        room,
+        floor,
+        due,
+        status: customerBooking ? "active" : (cust.isActive ? "active" : "inactive"),
+        photo, // Use the constructed photo URL
+        moveOutRequested: false,
+        email: cust.email || 'N/A',
+        sex: cust.sex || 'N/A',
+        tenantStatus,
+        tenantColor,
+        userType: cust.userType,
+        bedNumbers: customerBooking?.bedNumbers || null,
+        isSingleOccupancy: customerBooking?.isSingleOccupancy || false,
+        bookingId: customerBooking?.id || null,
+        profileExtras: cust.profileExtras, // Pass through profileExtras
+      };
+    })
+    .filter(item => item.bookingId != null);
 
-    const inactiveCustomers = inactiveForProperty
-      .filter((tenant: any) => {
-        const id = tenant.id != null ? String(tenant.id) : "";
-        const uniqueId = tenant.uniqueId ? String(tenant.uniqueId) : "";
-        if (id && activeBookingKeysForProperty.has(id)) return false;
-        if (uniqueId && activeBookingKeysForProperty.has(uniqueId)) return false;
-        if (id && activeTenantIds.has(tenant.id)) return false;
-        if (uniqueId && activeTenantMystayIds.has(uniqueId)) return false;
-        return true;
-      })
-      .map((tenant: any) => ({
+  // Build a set of IDs / uniqueIds that currently have an active booking
+  const activeTenantIds = new Set(
+    activeCustomers
+      .map((c) => c.id)
+      .filter((id) => id != null),
+  );
+  const activeTenantMystayIds = new Set(
+    activeCustomers
+      .map((c) => c.mystayId)
+      .filter((id) => id != null),
+  );
+
+  const inactiveCustomers = inactiveForProperty
+    .filter((tenant: any) => {
+      const id = tenant.id != null ? String(tenant.id) : "";
+      const uniqueId = tenant.uniqueId ? String(tenant.uniqueId) : "";
+      if (id && activeBookingKeysForProperty.has(id)) return false;
+      if (uniqueId && activeBookingKeysForProperty.has(uniqueId)) return false;
+      if (id && activeTenantIds.has(tenant.id)) return false;
+      if (uniqueId && activeTenantMystayIds.has(uniqueId)) return false;
+      return true;
+    })
+    .map((tenant: any) => {
+      const tenantName = tenant.name || "User";
+      // Fix: Get profile image from tenant data
+      const profileImage = tenant.profileImage || tenant.profileExtras?.profileImage;
+      
+      // Fix: Create proper avatar URL
+      const photo = profileImage 
+        ? profileImage 
+        : `https://ui-avatars.com/api/?name=${encodeURIComponent(tenantName)}&size=150&background=3B82F6&color=fff&bold=true&length=2`;
+
+      return {
         id: tenant.id,
         mystayId: tenant.uniqueId,
-        name: tenant.name,
+        name: tenantName,
         phone: tenant.phone || "Not Provided",
         room: tenant.roomNumber || "N/A",
         floor: tenant.floor || "N/A",
         due: Number(tenant.currentDue || 0),
         status: "inactive",
-        photo:
-          tenant.profileImage ||
-          "https://ui-avatars.com/api/?name=" +
-            encodeURIComponent(tenant.name || "User") +
-            "&size=150&background=3B82F6&color=fff&bold=true",
+        photo,
         moveOutRequested: false,
         email: tenant.email || "N/A",
         sex: tenant.sex || "N/A",
@@ -307,10 +324,12 @@ export default function AdminCustomerModule({ navigation }: any) {
         bedNumbers: null,
         isSingleOccupancy: false,
         bookingId: tenant.moveOutRequestId || tenant.id,
-      }));
+        profileExtras: tenant.profileExtras,
+      };
+    });
 
-    return [...activeCustomers, ...inactiveCustomers];
-  }, [apiCustomers, bookingsForProperty, inactiveForProperty, activeBookingKeysForProperty]);
+  return [...activeCustomers, ...inactiveCustomers];
+}, [apiCustomers, bookingsForProperty, inactiveForProperty, activeBookingKeysForProperty]);
 
   // Rooms for current property: from API if they have property info, else from bookings in this property
   const roomsForProperty = useMemo(() => {
@@ -388,78 +407,86 @@ export default function AdminCustomerModule({ navigation }: any) {
 
   // Display card with customer info
   const CustomerCard = ({ item }: any) => (
-    <TouchableOpacity
-      onPress={() => 
-        navigation.navigate("TenantDetailScreen", { 
-          customerId: item.id,
-          customerData: item 
-        })
-      }
-      className="bg-white p-4 mb-3 rounded-2xl border border-gray-100 shadow-sm"
-    >
-      <View className="flex-row justify-between items-start">
-        <View className="flex-row items-center flex-1">
+  <TouchableOpacity
+    onPress={() => 
+      navigation.navigate("TenantDetailScreen", { 
+        customerId: item.id,
+        customerData: item 
+      })
+    }
+    className="bg-white p-4 mb-3 rounded-2xl border border-gray-100 shadow-sm"
+  >
+    <View className="flex-row justify-between items-start">
+      <View className="flex-row items-center flex-1">
+        {/* Improved Image component with error handling */}
+        <View className="w-12 h-12 rounded-xl mr-3 overflow-hidden bg-blue-100">
           <Image
             source={{ uri: item.photo }}
-            className="w-12 h-12 rounded-xl mr-3"
-          />
-          <View className="flex-1">
-            <View className="flex-row items-center justify-between pr-2">
-              <Text className="text-lg font-bold text-gray-900">{item.name}</Text>
-              <View 
-                className="px-3 py-1 rounded-full"
-                style={{ backgroundColor: item.tenantColor + '20' }}
-              >
-                <Text 
-                  className="text-xs font-bold"
-                  style={{ color: item.tenantColor }}
-                >
-                  {item.tenantStatus}
-                </Text>
-              </View>
-            </View>
-            <Text className="text-gray-500 text-sm mt-1">{item.phone}</Text>
-            <Text className="text-xs text-blue-600 font-bold mt-1">{item.mystayId}</Text>
-            
-            {/* Room and Bed Information */}
-            {item.room !== "N/A" && (
-              <View className="flex-row items-center mt-2">
-                <Ionicons name="bed" size={14} color="#666" />
-                <Text className="text-sm text-gray-600 ml-1">
-                  {item.floor} • Room {item.room}
-                  {item.bedNumbers && item.bedNumbers.length > 0 && (
-                    <Text className="font-bold"> • Bed{item.bedNumbers.length > 1 ? 's' : ''} {item.bedNumbers.join(', ')}</Text>
-                  )}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-        <View className="items-end ml-2">
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              navigation.navigate("SendNotificationScreen", {
-                selectedTenants: [item.id],
-              });
+            className="w-full h-full"
+            resizeMode="cover"
+            onError={(e) => {
+              console.log('Image failed to load:', item.photo);
+              // You could set a fallback here if needed
             }}
-            className="bg-blue-500 w-10 h-10 rounded-xl items-center justify-center mb-2"
-          >
-            <Ionicons name="notifications" size={18} color="white" />
-          </TouchableOpacity>
-
-          <Text className="text-gray-400 text-[10px] uppercase font-bold">Due</Text>
-          <Text
-            className={`text-lg font-bold ${
-              item.due > 0 ? "text-red-500" : "text-green-600"
-            }`}
-          >
-            ₹{item.due}
-          </Text>
+          />
+        </View>
+        <View className="flex-1">
+          <View className="flex-row items-center justify-between pr-2">
+            <Text className="text-lg font-bold text-gray-900">{item.name}</Text>
+            <View 
+              className="px-3 py-1 rounded-full"
+              style={{ backgroundColor: item.tenantColor + '20' }}
+            >
+              <Text 
+                className="text-xs font-bold"
+                style={{ color: item.tenantColor }}
+              >
+                {item.tenantStatus}
+              </Text>
+            </View>
+          </View>
+          <Text className="text-gray-500 text-sm mt-1">{item.phone}</Text>
+          <Text className="text-xs text-blue-600 font-bold mt-1">{item.mystayId}</Text>
+          
+          {/* Room and Bed Information */}
+          {item.room !== "N/A" && (
+            <View className="flex-row items-center mt-2">
+              <Ionicons name="bed-outline" size={14} color="#666" />
+              <Text className="text-sm text-gray-600 ml-1">
+                {item.floor} • Room {item.room}
+                {item.bedNumbers && item.bedNumbers.length > 0 && (
+                  <Text className="font-bold"> • Bed{item.bedNumbers.length > 1 ? 's' : ''} {item.bedNumbers.join(', ')}</Text>
+                )}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
-    </TouchableOpacity>
-  );
+      <View className="items-end ml-2">
+        <TouchableOpacity
+          onPress={(e) => {
+            e.stopPropagation();
+            navigation.navigate("SendNotificationScreen", {
+              selectedTenants: [item.id],
+            });
+          }}
+          className="bg-blue-500 w-10 h-10 rounded-xl items-center justify-center mb-2"
+        >
+          <Ionicons name="notifications-outline" size={18} color="white" />
+        </TouchableOpacity>
+
+        <Text className="text-gray-400 text-[10px] uppercase font-bold">Due</Text>
+        <Text
+          className={`text-lg font-bold ${
+            item.due > 0 ? "text-red-500" : "text-green-600"
+          }`}
+        >
+          ₹{item.due}
+        </Text>
+      </View>
+    </View>
+  </TouchableOpacity>
+);
 
   return (
     <View className="flex-1 bg-white">

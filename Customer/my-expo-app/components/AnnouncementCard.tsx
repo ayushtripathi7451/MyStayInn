@@ -15,6 +15,13 @@ interface AnnouncementCardProps {
 }
 
 const CARD_WIDTH_HORIZONTAL = 300;
+const PREVIEW_MAX_CHARS = 120;
+
+function truncateText(text: string, maxChars: number): string {
+  const s = String(text || "").trim();
+  if (s.length <= maxChars) return s;
+  return `${s.slice(0, maxChars).trim()}…`;
+}
 
 export default function AnnouncementCard({ announcement, horizontal }: AnnouncementCardProps) {
   const sentDate = announcement.sentAt
@@ -42,9 +49,9 @@ export default function AnnouncementCard({ announcement, horizontal }: Announcem
         {announcement.title}
       </Text>
 
-      {/* Description */}
+      {/* Description - truncated for preview */}
       <Text className="text-gray-500 text-[14px] mt-2 leading-[20px]" numberOfLines={4}>
-        {announcement.body}
+        {truncateText(announcement.body, PREVIEW_MAX_CHARS)}
       </Text>
     </>
   );

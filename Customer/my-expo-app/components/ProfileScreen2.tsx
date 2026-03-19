@@ -54,6 +54,8 @@ interface UserProfile {
       dob?: string;
       gender?: string;
       address?: string;
+      validUntil?: string; // Add this
+      verifiedAt?: string; // Add this
     };
     documents?: {
       aadharFront?: string;
@@ -66,6 +68,7 @@ interface UserProfile {
     kycStatus?: string;
     aadhaarVerifiedAt?: string;
     aadhaarExpiresAt?: string;
+    aadhaarValidUntil?: string; // Add this field
   };
 }
 
@@ -88,55 +91,111 @@ export default function ProfileScreen2({ navigation }: any) {
   const softBg = isFemale ? "bg-[#FFE4F2]" : "bg-[#EEF2FF]";
 
   useEffect(() => {
-    fetchProfile();
-    // Hide verify CTA when KYC service says Aadhaar is already verified,
-    // even if user profile service status is not yet synced.
-    (async () => {
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      // Fetch profile first
+      await fetchProfile();
+      
+      // Then fetch KYC status
       try {
         const res = await api.get("/api/kyc/digilocker/status");
+        console.log("KYC Status Response:", JSON.stringify(res.data, null, 2));
+        
         if (res?.data?.verified) {
           setAadhaarVerifiedByKycService(true);
           if (res?.data?.aadhaarDetails) {
-            setAadhaarDetailsFromKycService(res.data.aadhaarDetails);
+            console.log("Aadhaar Details from KYC service:", JSON.stringify(res.data.aadhaarDetails, null, 2));
+            setAadhaarDetailsFromKycService({
+              ...res.data.aadhaarDetails,
+              validUntil: res.data.validUntil || res.data.aadhaarDetails.validUntil,
+              verifiedAt: res.data.verifiedAt || res.data.aadhaarDetails.verifiedAt,
+            });
           }
+        } else {
+          // Reset if not verified
+          setAadhaarVerifiedByKycService(false);
+          setAadhaarDetailsFromKycService(null);
         }
-      } catch {
-        // Ignore status errors here; profile fields still drive UI fallback.
+      } catch (error) {
+        console.error("Error fetching KYC status:", error);
+        setAadhaarVerifiedByKycService(false);
+        setAadhaarDetailsFromKycService(null);
       }
-    })();
-  }, []);
-
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const response = await userApi.get("/api/users/me");
-
-      if (response.data.success) {
-        setProfile(response.data.user);
-        console.log("Profile data:", JSON.stringify(response.data.user, null, 2));
-      }
-    } catch (error: any) {
-      console.error("Failed to fetch profile:", error);
-      
-      if (error.response?.status === 401) {
-        Alert.alert(
-          "Session Expired",
-          "Please login again to continue.",
-          [
-            {
-              text: "OK",
-              onPress: () => navigation.replace("LoginPin"),
-            },
-          ]
-        );
-      } else {
-        Alert.alert("Error", "Failed to load profile data");
-      }
+    } catch (error) {
+      console.error("Error loading profile data:", error);
     } finally {
       setLoading(false);
     }
   };
 
+  loadData();
+}, []); // Empty dependency array - runs once on mount
+
+  const fetchProfile = async () => {
+  try {
+    const response = await userApi.get("/api/users/me");
+
+    if (response.data.success) {
+      setProfile(response.data.user);
+      console.log("Profile data:", JSON.stringify(response.data.user, null, 2));
+    }
+  } catch (error: any) {
+    console.error("Failed to fetch profile:", error);
+    
+    if (error.response?.status === 401) {
+      Alert.alert(
+        "Session Expired",
+        "Please login again to continue.",
+        [
+          {
+            text: "OK",
+            onPress: () => navigation.replace("LoginPin"),
+          },
+        ]
+      );
+    } else {
+      Alert.alert("Error", "Failed to load profile data");
+    }
+    throw error; // Re-throw to be caught by the main useEffect
+  }
+};
+
+// Add this function to refresh data when returning from KYC
+const refreshData = async () => {
+  setLoading(true);
+  try {
+    await fetchProfile();
+    
+    const res = await api.get("/api/kyc/digilocker/status");
+    if (res?.data?.verified) {
+      setAadhaarVerifiedByKycService(true);
+      if (res?.data?.aadhaarDetails) {
+        console.log("Aadhaar Details from KYC service:", JSON.stringify(res.data.aadhaarDetails, null, 2));
+        setAadhaarDetailsFromKycService({
+          ...res.data.aadhaarDetails,
+          validUntil: res.data.validUntil || res.data.aadhaarDetails.validUntil,
+          verifiedAt: res.data.verifiedAt || res.data.aadhaarDetails.verifiedAt,
+          // Store the raw response as well for debugging
+          _rawResponse: res.data,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error refreshing data:", error);
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Add focus listener to refresh when returning to this screen
+useEffect(() => {
+  const unsubscribe = navigation.addListener('focus', () => {
+    refreshData();
+  });
+
+  return unsubscribe;
+}, [navigation]);
   const handleLogout = async () => {
     Alert.alert(
       "Logout",
@@ -217,15 +276,34 @@ export default function ProfileScreen2({ navigation }: any) {
     aadhaarStatusNorm === "success" ||
     aadhaarStatusNorm === "completed" ||
     aadhaarStatusNorm === "true";
-  const aadhaarExpiry =
-    profileExtras.aadhaarExpiresAt ?? (aadhaarDetailsFromKycService?.aadhaarExpiresAt as string | undefined);
-  const aadhaarVerificationExpired = isAadhaarVerificationExpired(aadhaarExpiry);
-  const aadhaarValidityMessage = profileExtras.aadhaarData || aadhaarDetailsFromKycService
-    ? `KYC will be valid until ${formatExpiryDate(aadhaarExpiry)}`
-    : null;
-  const shouldShowVerifyButton =
-    aadhaarVerificationExpired || (!hasBackendAadhaarData && !aadhaarAlreadyVerifiedInBackend);
-  const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyButton;
+    const aadhaarExpiry = 
+  // First check profileExtras from user profile
+  (profileExtras as any)?.aadhaarExpiresAt ?? 
+  (profileExtras as any)?.aadhaarValidUntil ?? 
+  // Then check KYC service data
+  aadhaarDetailsFromKycService?.validUntil ??
+  aadhaarDetailsFromKycService?.aadhaarExpiresAt ??
+  // Finally check if there's any validUntil in aadhaarData
+  (aadhaarDataForKyc as any)?.validUntil ??
+  null;
+
+console.log("🔍 aadhaarExpiry value:", aadhaarExpiry);
+console.log("🔍 aadhaarDetailsFromKycService:", aadhaarDetailsFromKycService);
+console.log("🔍 profileExtras:", profileExtras);
+
+console.log("Final aadhaarExpiry value:", aadhaarExpiry);
+
+// Add these missing variables
+const aadhaarVerificationExpired = isAadhaarVerificationExpired(aadhaarExpiry);
+const aadhaarValidityMessage = aadhaarExpiry 
+  ? `KYC will be valid until ${formatExpiryDate(aadhaarExpiry)}`
+  : null;
+
+console.log("🔍 aadhaarValidityMessage:", aadhaarValidityMessage)
+
+const shouldShowVerifyButton =
+  aadhaarVerificationExpired || (!hasBackendAadhaarData && !aadhaarAlreadyVerifiedInBackend);
+const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyButton;
 
   return (
     <View className="flex-1 bg-[#F4F6FF]">

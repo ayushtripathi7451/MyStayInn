@@ -67,8 +67,13 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
       let totalCash = 0;
       let pending = 0;
 
+      // Filter bookings by current month only
       bookings.forEach((b: any) => {
         const monthKey = toMonthKey(b.moveInDate);
+        
+        // Only include bookings from current month
+        if (monthKey !== m0) return;
+        
         const sec = Number(b.securityDeposit ?? 0);
         const onlineAmt = Number(b.onlinePaymentRecv ?? 0);
         const cashAmt = Number(b.cashPaymentRecv ?? 0);
@@ -90,10 +95,19 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         }
       });
 
-      const monthlyTotal = monthlyExpenses.reduce((s: number, m: any) => s + (Number(m.amount) || 0), 0);
-      const totalExpense = expenses
-        .filter((e: any) => (e.month_year || '') <= m0)
-        .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0) + monthlyTotal;
+      // Filter expenses by current month only
+      const currentMonthExpenses = expenses.filter((e: any) => (e.month_year || '') === m0);
+      const currentMonthExpenseTotal = currentMonthExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+      
+      // Monthly fixed expenses (recurring) - include all that started on or before current month
+      const monthlyTotal = monthlyExpenses
+        .filter((m: any) => {
+          const startKey = m.startMonthKey;
+          return !startKey || m0 >= startKey;
+        })
+        .reduce((s: number, m: any) => s + (Number(m.amount) || 0), 0);
+      
+      const totalExpense = currentMonthExpenseTotal + monthlyTotal;
 
       const profitVal = Math.round(totalCollected - totalExpense);
 

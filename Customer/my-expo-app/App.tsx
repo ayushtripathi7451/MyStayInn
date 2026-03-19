@@ -71,7 +71,7 @@ import GuestEnrollmentFormScreen from './components/GuestEnrollmentFormScreen';
 import { setupForegroundNotificationHandler, registerPushNotifications } from './utils/pushNotifications';
 import { bookingApi } from './utils/api';
 
-const Stack = createNativeStackNavigator(); // untyped stack (remove generic to avoid missing route key errors)
+const Stack = createNativeStackNavigator();
 
 function HomeScreen({ navigation }: any) {
   const { theme } = useTheme();
@@ -80,11 +80,37 @@ function HomeScreen({ navigation }: any) {
   const currentStayLoading = useSelector((state: RootState) => state.currentStay.loading);
   const [refreshing, setRefreshing] = useState(false);
   const lastAutoSignedBookingRef = useRef<string>("");
+  
+  const getLocalYMD = () => {
+    const d0 = new Date();
+    const yyyy = d0.getFullYear();
+    const mm = String(d0.getMonth() + 1).padStart(2, '0');
+    const dd = String(d0.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  
+  const lastLocalDayRef = useRef<string>(getLocalYMD());
 
-  // Single trigger when Home is focused (including first open); saga skips if cache is fresh
+  // If user changes device date while app stays open, update dues immediately with force refresh
+  useEffect(() => {
+    const t = setInterval(() => {
+      const today = getLocalYMD();
+      if (today !== lastLocalDayRef.current) {
+        console.log('[HomeScreen] Date changed from', lastLocalDayRef.current, 'to', today);
+        lastLocalDayRef.current = today;
+        // Send as object with force: true to bypass cache
+        dispatch(refreshCurrentStay({ force: true }));
+      }
+    }, 5000); // Check every 5 seconds for better responsiveness
+
+    return () => clearInterval(t);
+  }, [dispatch]);
+
+  // Single trigger when Home is focused (including first open)
   useFocusEffect(
     useCallback(() => {
-      dispatch(refreshCurrentStay());
+      // Send as object (force defaults to false in saga, will use cache if fresh)
+      dispatch(refreshCurrentStay({ force: false }));
     }, [dispatch])
   );
 
@@ -92,19 +118,21 @@ function HomeScreen({ navigation }: any) {
     if (!currentStayLoading && refreshing) setRefreshing(false);
   }, [currentStayLoading, refreshing]);
 
+  // Pull to refresh
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    dispatch(refreshCurrentStay(true));
+    // Send as object with force: true to bypass cache
+    dispatch(refreshCurrentStay({ force: true }));
   }, [dispatch]);
 
-  // Register for push every time Home is focused (backend uses JWT to resolve user; retries if first attempt failed)
+  // Register for push every time Home is focused
   useFocusEffect(
     useCallback(() => {
       registerPushNotifications().catch(() => {});
     }, [])
   );
 
-  // Auto-submit enrollment form for current stay (no customer-facing sign step on Home).
+  // Auto-submit enrollment form for current stay
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -156,7 +184,7 @@ function HomeScreen({ navigation }: any) {
     }, [currentStay])
   );
 
-  // ✅ Dynamic background
+  // Dynamic background based on theme
   const bgColor = theme === 'female' ? 'bg-[#FFF5FF]' : 'bg-[#F6F8FF]';
 
   // Prevent blank UI: show loading only on initial load when we have no cached data
@@ -184,11 +212,6 @@ function HomeScreen({ navigation }: any) {
         <AnnouncementsSection />
         <Tickets navigation={navigation} />
         <TicketPanel navigation={navigation} />
-        
-        {/* <TicketDetailsScreen /> */}
-        {/* <MoreDetails />
-        <AdmissionDetails />
-        <PaymentHistory /> */}
       </ScrollView>
       <BottomNav />
     </SafeAreaView>
@@ -205,55 +228,55 @@ export default function App() {
       <SafeAreaProvider>
         <ThemeProvider>
           <NavigationContainer>
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Splash" component={SplashScreen} />
-            <Stack.Screen name="Welcome" component={WelcomeScreen} />
-            <Stack.Screen name="LoginPin" component={LoginPinScreen} />
-            <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="Settings" component={SettingsScreen} />
-            <Stack.Screen name="Signup" component={SignupScreen} />
-            <Stack.Screen name="BasicInfo" component={BasicInfoScreen} />
-            <Stack.Screen name="Email" component={EmailScreen} />
-            <Stack.Screen name="VerifyEmailScreen" component={VerifyEmailScreen} />
-            <Stack.Screen name="CreatePassword" component={CreatePasswordScreen} />
-            <Stack.Screen name="Success" component={SuccessScreen} />
-            <Stack.Screen name="Reactivate" component={ReactivateScreen} />
-            <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-            <Stack.Screen name="ResetPasswordSent" component={ResetPasswordSentScreen} />
-            <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
-            <Stack.Screen name="Facilities" component={FacilitiesScreen} />
-            <Stack.Screen name="Floors" component={FloorsScreen} />
-            <Stack.Screen name="Rooms" component={RoomsScreen} />
-            <Stack.Screen name="Verify" component={VerifyScreen} />
-            <Stack.Screen name="RulesScreen" component={RulesScreen} />
-            <Stack.Screen name="FoodScreen" component={FoodScreen} />
-            <Stack.Screen name="CreateMPINScreen" component={CreateMPINScreen} />
-            <Stack.Screen name="Notifications" component={NotificationScreen} />
-            <Stack.Screen name="InboxDetail" component={InboxDetailScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="Profile2" component={ProfileScreen2} />
-            <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
-            <Stack.Screen name="CompleteProfileDocs" component={CompleteProfileDocsScreen} />
-            <Stack.Screen name="SearchAdmin" component={SearchAdminScreen} />
-            <Stack.Screen name="AdminDetails" component={AdminDetailsScreen} />
-            <Stack.Screen name="LocationResults" component={LocationResultsScreen} />
-            <Stack.Screen name="SearchResultDetails" component={SearchResultDetailsScreen} />
-            <Stack.Screen name="TicketsScreen" component={TicketsScreen} />
-            <Stack.Screen name="TicketChat" component={TicketChat} />
-            <Stack.Screen name="CreateRequest" component={CreateRequestScreen} />
-            <Stack.Screen name="ReloginMobileScreen" component={ReloginMobileScreen} />
-            <Stack.Screen name="PaymentDueScreen" component={PaymentDueScreen} />
-            <Stack.Screen name="DepositCheckoutScreen" component={DepositCheckoutScreen} />
-            <Stack.Screen name="CreateNewMPIN" component={CreateNewMPIN} />
-            <Stack.Screen name="PropertyDetailsScreen" component={PropertyDetailsScreen} />
-            <Stack.Screen name="PropertyListScreen" component={PropertyListScreen} />
-            
-            {/* Move-Out Management Screens */}
-            <Stack.Screen name="MoveOutRequestScreen" component={MoveOutRequestScreen} />
-            <Stack.Screen name="MoveOutStatusScreen" component={MoveOutStatusScreen} />
-            {/* Guest Enrollment Form (PG agreement) – sign after allocation */}
-            <Stack.Screen name="GuestEnrollmentFormScreen" component={GuestEnrollmentFormScreen} />
-          </Stack.Navigator>
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="Splash" component={SplashScreen} />
+              <Stack.Screen name="Welcome" component={WelcomeScreen} />
+              <Stack.Screen name="LoginPin" component={LoginPinScreen} />
+              <Stack.Screen name="Home" component={HomeScreen} />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="Signup" component={SignupScreen} />
+              <Stack.Screen name="BasicInfo" component={BasicInfoScreen} />
+              <Stack.Screen name="Email" component={EmailScreen} />
+              <Stack.Screen name="VerifyEmailScreen" component={VerifyEmailScreen} />
+              <Stack.Screen name="CreatePassword" component={CreatePasswordScreen} />
+              <Stack.Screen name="Success" component={SuccessScreen} />
+              <Stack.Screen name="Reactivate" component={ReactivateScreen} />
+              <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+              <Stack.Screen name="ResetPasswordSent" component={ResetPasswordSentScreen} />
+              <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+              <Stack.Screen name="Facilities" component={FacilitiesScreen} />
+              <Stack.Screen name="Floors" component={FloorsScreen} />
+              <Stack.Screen name="Rooms" component={RoomsScreen} />
+              <Stack.Screen name="Verify" component={VerifyScreen} />
+              <Stack.Screen name="RulesScreen" component={RulesScreen} />
+              <Stack.Screen name="FoodScreen" component={FoodScreen} />
+              <Stack.Screen name="CreateMPINScreen" component={CreateMPINScreen} />
+              <Stack.Screen name="Notifications" component={NotificationScreen} />
+              <Stack.Screen name="InboxDetail" component={InboxDetailScreen} />
+              <Stack.Screen name="Profile" component={ProfileScreen} />
+              <Stack.Screen name="Profile2" component={ProfileScreen2} />
+              <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+              <Stack.Screen name="CompleteProfileDocs" component={CompleteProfileDocsScreen} />
+              <Stack.Screen name="SearchAdmin" component={SearchAdminScreen} />
+              <Stack.Screen name="AdminDetails" component={AdminDetailsScreen} />
+              <Stack.Screen name="LocationResults" component={LocationResultsScreen} />
+              <Stack.Screen name="SearchResultDetails" component={SearchResultDetailsScreen} />
+              <Stack.Screen name="TicketsScreen" component={TicketsScreen} />
+              <Stack.Screen name="TicketChat" component={TicketChat} />
+              <Stack.Screen name="CreateRequest" component={CreateRequestScreen} />
+              <Stack.Screen name="ReloginMobileScreen" component={ReloginMobileScreen} />
+              <Stack.Screen name="PaymentDueScreen" component={PaymentDueScreen} />
+              <Stack.Screen name="DepositCheckoutScreen" component={DepositCheckoutScreen} />
+              <Stack.Screen name="CreateNewMPIN" component={CreateNewMPIN} />
+              <Stack.Screen name="PropertyDetailsScreen" component={PropertyDetailsScreen} />
+              <Stack.Screen name="PropertyListScreen" component={PropertyListScreen} />
+              
+              {/* Move-Out Management Screens */}
+              <Stack.Screen name="MoveOutRequestScreen" component={MoveOutRequestScreen} />
+              <Stack.Screen name="MoveOutStatusScreen" component={MoveOutStatusScreen} />
+              {/* Guest Enrollment Form (PG agreement) – sign after allocation */}
+              <Stack.Screen name="GuestEnrollmentFormScreen" component={GuestEnrollmentFormScreen} />
+            </Stack.Navigator>
           </NavigationContainer>
         </ThemeProvider>
       </SafeAreaProvider>

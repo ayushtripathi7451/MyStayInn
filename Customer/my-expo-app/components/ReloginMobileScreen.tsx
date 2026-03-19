@@ -18,10 +18,14 @@ import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../utils/api";
 import { setConfirmation } from "../utils/firebaseConfirmation";
+import * as Clipboard from "expo-clipboard";
+import { useUser } from "../src/hooks";
 
 export default function MobileOTPLoginScreen({ navigation }: any) {
   const mobileRef = useRef<TextInput>(null);
   const otpRef = useRef<TextInput>(null);
+  const { name } = useUser();
+  const displayName = name || "User";
 
   const [countryCode, setCountryCode] = useState("+91");
   const [mobile, setMobile] = useState("");
@@ -31,24 +35,33 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
   const [canResend, setCanResend] = useState(false);
   const [loading, setLoading] = useState(false);
   const [confirmation, setConfirmationState] = useState<any>(null);
-  const [firstName, setFirstName] = useState("User");
+  const lastOtpRef = useRef("");
 
-  useEffect(() => {
-    // Fetch user's first name from AsyncStorage
-    const getUserName = async () => {
-      try {
-        const userData = await AsyncStorage.getItem("userData");
-        if (userData) {
-          const user = JSON.parse(userData);
-          setFirstName(user.firstName || "User");
-        }
-      } catch (error) {
-        console.error("Error fetching user name:", error);
-      }
-    };
+useEffect(() => {
+  if (step !== "otp") return;
 
-    getUserName();
-  }, []);
+  const interval = setInterval(async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      const match = text.match(/\b\d{6}\b/);
+      const code = match?.[0];
+
+      if (!code) return;
+      if (code === otp || code === lastOtpRef.current) return;
+
+      lastOtpRef.current = code;
+      setOtp(code);
+    } catch (e) {}
+  }, 1200);
+
+  return () => clearInterval(interval);
+}, [step, otp]);
+
+useEffect(() => {
+  if (otp.length === 6) {
+    handleVerifyOTP();
+  }
+}, [otp]);
 
   useEffect(() => {
     let interval: any;
@@ -206,7 +219,7 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
             {/* ✅ TITLE CARD */}
             <View className="mx-6 rounded-[30px] p-6 mt-10 bg-white shadow-lg">
               <Text className="text-[26px] font-semibold mb-2 text-black">
-                {step === "mobile" ? `Welcome Back, ${firstName} 👋` : "Verify OTP"}
+                {step === "mobile" ? `Welcome Back👋` : "Verify OTP"}
               </Text>
               <Text className="text-gray-500 text-[14px]">
                 {step === "mobile"
@@ -286,15 +299,18 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
                   <>
                     <Text className="text-white text-center mb-4 font-medium">Enter 6-digit OTP</Text>
                     <TextInput
-                      ref={otpRef}
-                      value={otp}
-                      onChangeText={(t) => setOtp(t.replace(/[^0-9]/g, "").slice(0, 6))}
-                      keyboardType="number-pad"
-                      maxLength={6}
-                      className="bg-white/10 border-2 border-white text-white text-2xl rounded-xl px-4 py-3 mb-5 text-center tracking-[10px]"
-                      placeholder="••••••"
-                      placeholderTextColor="rgba(255,255,255,0.5)"
-                    />
+  ref={otpRef}
+  value={otp}
+  onChangeText={(t) => setOtp(t.replace(/[^0-9]/g, "").slice(0, 6))}
+  keyboardType="number-pad"
+  maxLength={6}
+  textContentType="oneTimeCode"
+  autoComplete="sms-otp"
+  importantForAutofill="yes"
+  className="bg-white/10 border-2 border-white text-white text-2xl rounded-xl px-4 py-3 mb-5 text-center tracking-[10px]"
+  placeholder="••••••"
+  placeholderTextColor="rgba(255,255,255,0.5)"
+/>
                     <View className="items-center mb-6">
                       {!canResend ? (
                         <Text className="text-white/80 text-sm">

@@ -11,7 +11,7 @@ import {
   InteractionManager,
 } from "react-native";
 import { File, Paths } from "expo-file-system";
-import * as FileSystem from "expo-file-system";
+import * as FileSystemLegacy from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,6 +26,7 @@ import { analyticsApi, bookingApi, expenseApi, moveOutApi, propertyApi, userApi 
 import { resolveFinalKycVerified } from "../utils/kyc";
 
 /* -------------------- CONSTANTS -------------------- */
+// const { EncodingType } = FileSystem;
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -87,23 +88,40 @@ const escapeHtml = (value: any) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-let myStayLogoDataUriCache: string | null = null;
+    let myStayLogoDataUriCache: string | null = null;
 
 async function getMyStayLogoDataUri(): Promise<string> {
-  if (myStayLogoDataUriCache) return myStayLogoDataUriCache;
+  if (myStayLogoDataUriCache) {
+    console.log("Returning cached logo");
+    return myStayLogoDataUriCache;
+  }
+
   try {
+    console.log("Loading logo from assets...");
     const asset = Asset.fromModule(require("../assets/my-stay-logo.png"));
     await asset.downloadAsync();
+
     const uri = asset.localUri || asset.uri;
-    if (!uri) return "";
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      // Some Expo versions don't export EncodingType typings, but still accept "base64"
-      encoding: "base64" as any,
+    console.log("Asset URI:", uri);
+
+    if (!uri) {
+      console.log("No URI available");
+      return "";
+    }
+
+    // Use the legacy API with explicit import
+    const base64 = await FileSystemLegacy.readAsStringAsync(uri, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
     });
+
+    console.log("Base64 length:", base64.length);
+
     const dataUri = `data:image/png;base64,${base64}`;
     myStayLogoDataUriCache = dataUri;
+    console.log("Logo cached successfully");
     return dataUri;
-  } catch {
+  } catch (error) {
+    console.log("Logo loading error details:", error);
     return "";
   }
 }
@@ -200,7 +218,12 @@ function collectionsForMonthKeyFromBookings(bookings: any[], monthKey: string): 
 
 function expenseTotalAndCategoriesForMonth(
   expenses: any[],
-  monthlyStaff: { amount: number; expense_type?: string; name?: string }[],
+  monthlyStaff: {
+    amount: number;
+    expense_type?: string;
+    name?: string;
+    startMonthKey?: string;
+  }[],
   monthKey: string,
   snapshotMonthKey: string
 ): { total: number; cats: { name: string; amount: number }[] } {
@@ -211,12 +234,15 @@ function expenseTotalAndCategoriesForMonth(
       const cat = e.category_name || "Other";
       sums[cat] = (sums[cat] || 0) + (Number(e.amount) || 0);
     });
-  if (monthKey === snapshotMonthKey) {
-    monthlyStaff.forEach((m) => {
-      const cat = (m.expense_type || m.name || "Monthly").replace(/_/g, " ");
-      sums[cat] = (sums[cat] || 0) + (Number(m.amount) || 0);
-    });
-  }
+  // Monthly Fixed Expenses tab entries are recurring templates.
+  // Show them for all months from their creation month onwards.
+  // (snapshotMonthKey is kept for backward-compatible signature.)
+  monthlyStaff.forEach((m) => {
+    const startKey = m.startMonthKey;
+    if (startKey && monthKey < startKey) return;
+    const cat = (m.expense_type || m.name || "Monthly").replace(/_/g, " ");
+    sums[cat] = (sums[cat] || 0) + (Number(m.amount) || 0);
+  });
   const total = Object.values(sums).reduce((a, b) => a + b, 0);
   const cats = Object.entries(sums).map(([name, amount]) => ({ name, amount }));
   return { total, cats };
@@ -292,7 +318,7 @@ type ExpenseSlicesState = {
 
 function buildExpenseSlices(
   expenses: any[],
-  monthly: { amount: number; expense_type?: string; name?: string }[],
+  monthly: { amount: number; expense_type?: string; name?: string; startMonthKey?: string }[],
   m0: string,
   m1: string,
   m2: string,
@@ -304,26 +330,38 @@ function buildExpenseSlices(
   const reportSlices: ExpenseSlicesState["report"] = {};
   const financialSlices: ExpenseSlicesState["financial"] = {};
 
-  const upToForView = (v: string) =>
-    v === "Combined" || v === currentMonthName ? m0 : v === prev1 ? m1 : v === prev2 ? m2 : m0;
-
   views.forEach((viewLabel) => {
-    const upToMonth = upToForView(viewLabel);
-    const isCurrentOrCombined = upToMonth === m0;
+    const viewMonths =
+      viewLabel === "Combined"
+        ? [m0, m1, m2]
+        : viewLabel === currentMonthName
+          ? [m0]
+          : viewLabel === prev1
+            ? [m1]
+            : [m2];
     const categorySums: Record<string, number> = {};
+    // Expenses tab entries are month-specific; include only those month keys.
     expenses
-      .filter((e: any) => (e.month_year || "") <= upToMonth)
+      .filter((e: any) => {
+        const mk = String(e.month_year || "");
+        return viewMonths.includes(mk);
+      })
       .forEach((e: any) => {
         const amt = Number(e.amount) || 0;
         const cat = e.category_name || "Other";
         categorySums[cat] = (categorySums[cat] || 0) + amt;
       });
-    if (isCurrentOrCombined) {
-      monthly.forEach((m) => {
-        const cat = (m.expense_type || m.name || "Monthly").replace(/_/g, " ");
+
+    // Monthly Fixed Expenses tab entries are recurring templates.
+    // Repeat the template amount per month within the selected slice (starting from creation month).
+    monthly.forEach((m) => {
+      const startKey = m.startMonthKey;
+      const cat = (m.expense_type || m.name || "Monthly").replace(/_/g, " ");
+      viewMonths.forEach((monthKey) => {
+        if (startKey && monthKey < startKey) return;
         categorySums[cat] = (categorySums[cat] || 0) + (Number(m.amount) || 0);
       });
-    }
+    });
     financialSlices[viewLabel] = Object.entries(categorySums).map(([category_name, amount]) => ({
       category_name,
       amount,
@@ -614,7 +652,7 @@ export default function ReportsHubScreen() {
   const [reportSource, setReportSource] = useState<{ bookings: any[]; moveOutList: any[] } | null>(null);
   const [reportsExpensesRaw, setReportsExpensesRaw] = useState<any[]>([]);
   const [reportsMonthlyStaff, setReportsMonthlyStaff] = useState<
-    { amount: number; expense_type?: string; name?: string }[]
+    { amount: number; expense_type?: string; name?: string; startMonthKey?: string }[]
   >([]);
   const [reportsSnapshotMonthKey, setReportsSnapshotMonthKey] = useState<string>("");
   const [myStayLogoDataUri, setMyStayLogoDataUri] = useState<string>("");
@@ -622,17 +660,35 @@ export default function ReportsHubScreen() {
   const [syncingTenantReports, setSyncingTenantReports] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
+  
+  // ========== END OF LOGO CHECK ==========
+
+
   useEffect(() => {
     let mounted = true;
     getMyStayLogoDataUri()
       .then((uri) => {
-        if (mounted) setMyStayLogoDataUri(uri);
+        if (mounted) {
+          setMyStayLogoDataUri(uri);
+          console.log("Logo state updated:", uri ? "Yes" : "No");
+        }
       })
-      .catch(() => {});
+      .catch((err) => console.log("Logo effect error:", err));
+  
     return () => {
       mounted = false;
     };
   }, []);
+
+  
+// Add this temporary test useEffect
+useEffect(() => {
+  const testLogo = async () => {
+    const uri = await getMyStayLogoDataUri();
+    console.log("Logo on mount:", uri ? "Loaded" : "Not loaded");
+  };
+  testLogo();
+}, []);
 
   const fetchReportsData = useCallback(async () => {
     if (!propertyId) {
@@ -684,11 +740,22 @@ export default function ReportsHubScreen() {
       const expenses = Array.isArray(expensesData) ? expensesData : [];
       const monthlyData = monthlyRes.data?.data ?? monthlyRes.data;
       const monthlyExpenses = Array.isArray(monthlyData) ? monthlyData : [];
-      const monthlyForSlices = monthlyExpenses.map((m: any) => ({
-        amount: Number(m.amount) || 0,
-        expense_type: m.expense_type,
-        name: m.name,
-      }));
+      const monthlyForSlices = monthlyExpenses.map((m: any) => {
+        const createdAt = m.created_at ?? m.createdAt ?? null;
+        let startMonthKey: string | undefined;
+        if (createdAt) {
+          const d = new Date(createdAt);
+          if (!Number.isNaN(d.getTime())) {
+            startMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          }
+        }
+        return {
+          amount: Number(m.amount) || 0,
+          expense_type: m.expense_type,
+          name: m.name,
+          startMonthKey,
+        };
+      });
 
       const toMonthKey = (d: any): string | null => {
         if (d == null) return null;
@@ -709,26 +776,113 @@ export default function ReportsHubScreen() {
         [m1]: { online: 0, cash: 0 },
         [m2]: { online: 0, cash: 0 },
       };
-      const dueItems: { amount: number }[] = [];
+      const pendingDuesByMonth: Record<string, number> = { [m0]: 0, [m1]: 0, [m2]: 0 };
       const transactionItems: { amount: number; type: string }[] = [];
+
+      const num = (v: any): number => {
+        const n = Number(v ?? 0);
+        return Number.isFinite(n) ? n : 0;
+      };
+
+      const rentStartYm = (booking: any): string | null => {
+        try {
+          const moveIn = booking?.moveInDate ? new Date(booking.moveInDate) : null;
+          if (!moveIn || Number.isNaN(moveIn.getTime())) return null;
+          const start =
+            moveIn.getDate() <= 10 ? moveIn : new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1);
+          return toMonthKeyFromDate(start);
+        } catch {
+          return null;
+        }
+      };
+
+      const adminMonthlyOnlineDueForMonthKey = (booking: any, monthKey: string): number => {
+        const rp = String(booking?.rentPeriod || "month").toLowerCase();
+        const legacyOn = num(booking?.onlinePaymentRecv);
+        const schedOn = num(booking?.scheduledOnlineRent);
+        const paidYm = String(booking?.rentOnlinePaidYearMonth ?? "").trim();
+        const startYm = rentStartYm(booking);
+        if (startYm && monthKey < startYm) return 0;
+
+        if (rp === "day") {
+          if (toBool(booking?.isRentOnlinePaid)) return 0;
+          const ra = num(booking?.rentAmount);
+          return ra > 0 ? ra : legacyOn;
+        }
+
+        if (schedOn > 0) {
+          if (paidYm && paidYm === monthKey) return 0;
+          return schedOn;
+        }
+        if (toBool(booking?.isRentOnlinePaid)) return 0;
+        return legacyOn > 0 ? legacyOn : 0;
+      };
+
+      const adminMonthlyCashDueForMonthKey = (booking: any, monthKey: string): number => {
+        const rp = String(booking?.rentPeriod || "month").toLowerCase();
+        const legacyCash = num(booking?.cashPaymentRecv);
+        const schedCash = num(booking?.scheduledCashRent);
+        const paidYm = String(booking?.rentCashPaidYearMonth ?? "").trim();
+        const startYm = rentStartYm(booking);
+        if (startYm && monthKey < startYm) return 0;
+
+        if (rp === "day") {
+          if (toBool(booking?.isRentCashPaid)) return 0;
+          return legacyCash;
+        }
+
+        if (schedCash > 0) {
+          if (paidYm && paidYm === monthKey) return 0;
+          return schedCash;
+        }
+        if (toBool(booking?.isRentCashPaid)) return 0;
+        return legacyCash > 0 ? legacyCash : 0;
+      };
+
       bookings.forEach((b: any) => {
         const monthKey = toMonthKey(b.moveInDate);
         const sec = Number(b.securityDeposit ?? 0);
         const online = Number(b.onlinePaymentRecv ?? 0);
         const cash = Number(b.cashPaymentRecv ?? 0);
-        if (!b.isSecurityPaid && sec > 0) dueItems.push({ amount: sec });
+
+        const moveInYm = monthKey || "";
+        const rentPeriod = String(b?.rentPeriod || "month").toLowerCase();
+
+        // Pending dues must be month-specific.
+        [m0, m1, m2].forEach((mk) => {
+          // Security deposit due shown in move-in month only.
+          if (mk === moveInYm && !toBool(b?.isSecurityPaid) && sec > 0) {
+            pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + sec;
+          }
+
+          // Rent due for that month (monthly scheduling uses paid year/month markers).
+          let onlineDue = 0;
+          let cashDue = 0;
+
+          if (rentPeriod === "day") {
+            // Day-based: show dues only in move-in month.
+            if (mk !== moveInYm) return;
+            onlineDue = adminMonthlyOnlineDueForMonthKey(b, mk);
+            cashDue = adminMonthlyCashDueForMonthKey(b, mk);
+          } else {
+            onlineDue = adminMonthlyOnlineDueForMonthKey(b, mk);
+            cashDue = adminMonthlyCashDueForMonthKey(b, mk);
+          }
+
+          if (onlineDue > 0) pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + onlineDue;
+          if (cashDue > 0) pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + cashDue;
+        });
+
         if (b.isSecurityPaid && sec > 0) {
           transactionItems.push({ amount: sec, type: "Security deposit (online)" });
           if (monthKey && collectionsByMonth[monthKey] !== undefined) collectionsByMonth[monthKey] += sec;
           if (monthKey && transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey].online += sec;
         }
-        if (online > 0 && !b.isRentOnlinePaid) dueItems.push({ amount: online });
         if (online > 0 && b.isRentOnlinePaid) {
           transactionItems.push({ amount: online, type: "Rent (online)" });
           if (monthKey && collectionsByMonth[monthKey] !== undefined) collectionsByMonth[monthKey] += online;
           if (monthKey && transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey].online += online;
         }
-        if (cash > 0 && !b.isRentCashPaid) dueItems.push({ amount: cash });
         if (cash > 0 && b.isRentCashPaid) {
           transactionItems.push({ amount: cash, type: "Rent (cash)" });
           if (monthKey && collectionsByMonth[monthKey] !== undefined) collectionsByMonth[monthKey] += cash;
@@ -741,7 +895,6 @@ export default function ReportsHubScreen() {
         txByMonth[mk] = { online: t.online, cash: t.cash, total: t.online + t.cash };
       });
 
-      const pendingDues = dueItems.reduce((s, d) => s + d.amount, 0);
       const totalCollections = transactionItems.reduce((s, t) => s + t.amount, 0);
       const onlineCollected = transactionItems
         .filter((t) => t.type === "Rent (online)" || t.type === "Security deposit (online)")
@@ -751,25 +904,49 @@ export default function ReportsHubScreen() {
         .reduce((s, t) => s + t.amount, 0);
       const moveOutPLVal = 0;
 
-      const monthlyTotal = monthlyExpenses.reduce((s: number, m: any) => s + (Number(m.amount) || 0), 0);
-      const exp0 =
-        expenses.filter((e: any) => (e.month_year || "") <= m0).reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0) +
-        monthlyTotal;
-      const exp1 = expenses
-        .filter((e: any) => (e.month_year || "") <= m1)
-        .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
-      const exp2 = expenses
-        .filter((e: any) => (e.month_year || "") <= m2)
-        .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+      // Expenses (fixed tab) are month-specific via expense_date -> month_year.
+      // Monthly expenses (monthly tab) are recurring templates; repeat them per month starting from creation month.
+      const monthlyRecurringTotalForMonth = (monthKey: string): number => {
+        return monthlyForSlices.reduce((sum: number, m: any) => {
+          const startKey = m.startMonthKey;
+          if (startKey && monthKey < startKey) return sum;
+          return sum + (Number(m.amount) || 0);
+        }, 0);
+      };
+
+      const fixedExpForMonth = (monthKey: string): number => {
+        return expenses
+          .filter((e: any) => (e.month_year || "") === monthKey)
+          .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+      };
+
+      const exp0 = fixedExpForMonth(m0) + monthlyRecurringTotalForMonth(m0);
+      const exp1 = fixedExpForMonth(m1) + monthlyRecurringTotalForMonth(m1);
+      const exp2 = fixedExpForMonth(m2) + monthlyRecurringTotalForMonth(m2);
 
       const coll0 = collectionsByMonth[m0] ?? 0;
       const coll1 = collectionsByMonth[m1] ?? 0;
       const coll2 = collectionsByMonth[m2] ?? 0;
 
       const financialDataNext = {
-        [currentMonthName]: { collections: coll0, expense: exp0, pendingDues, profitLoss: Math.round(coll0 - exp0) },
-        [prev1]: { collections: coll1, expense: exp1, pendingDues, profitLoss: Math.round(coll1 - exp1) },
-        [prev2]: { collections: coll2, expense: exp2, pendingDues, profitLoss: Math.round(coll2 - exp2) },
+        [currentMonthName]: {
+          collections: coll0,
+          expense: exp0,
+          pendingDues: pendingDuesByMonth[m0] ?? 0, // This should be month-specific
+          profitLoss: Math.round(coll0 - exp0),
+        },
+        [prev1]: {
+          collections: coll1,
+          expense: exp1,
+          pendingDues: pendingDuesByMonth[m1] ?? 0, // Month-specific
+          profitLoss: Math.round(coll1 - exp1),
+        },
+        [prev2]: {
+          collections: coll2,
+          expense: exp2,
+          pendingDues: pendingDuesByMonth[m2] ?? 0, // Month-specific
+          profitLoss: Math.round(coll2 - exp2),
+        },
       };
 
       const totalBeds = statsRes?.data?.success && typeof statsRes.data.totalBeds === "number" ? statsRes.data.totalBeds : 0;
@@ -1178,7 +1355,9 @@ export default function ReportsHubScreen() {
   const financialMonths = getFinancialMonths();
 
   // Combined pending dues (same as Due tab total on Payments page)
-  const combinedPendingDues = financialMonths[0]?.data?.pendingDues ?? 0;
+  const combinedPendingDues = (financialData[currentMonthName]?.pendingDues || 0) + 
+                           (financialData[MONTHS[(currentMonthIdx - 1 + 12) % 12]]?.pendingDues || 0) + 
+                           (financialData[MONTHS[(currentMonthIdx - 2 + 12) % 12]]?.pendingDues || 0);
 
   const expenseList =
     processedExpenseSlices.financial[financialView] ??
@@ -1685,19 +1864,26 @@ export default function ReportsHubScreen() {
     const periodLine = period ? `<p><strong>Period:</strong> ${period}</p>` : "";
     const logoUri = logoDataUriOverride || myStayLogoDataUri;
     const headerHtml = `
-      <div class="pdf-header">
-        <div class="brand">
-          ${logoUri ? `<img class="logo" src="${logoUri}" alt="MyStayInn" />` : ""}
-          <div class="brand-name">MyStayInn</div>
+  <div class="pdf-header">
+    <div class="brand">
+      ${logoUri ? 
+        `<div style="width:44px;height:44px;background-color:#1E33FF;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <img class="logo" src="${logoUri}" alt="MyStayInn" style="width:40px;height:40px;object-fit:contain;" />
+        </div>` : 
+        `<div style="width:44px;height:44px;background-color:#1E33FF;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:white;font-size:24px;font-weight:bold;">MS</span>
         </div>
-        <div class="meta">
-          <div class="report-name">${escapeHtml(reportName)}</div>
-          ${period ? `<div class="period">Period: ${escapeHtml(period)}</div>` : ""}
-          <div class="property">Property: ${escapeHtml(propertyName)}</div>
-          <div class="generated">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
-        </div>
-      </div>
-    `;
+      `}
+      <div class="brand-name">MyStayInn</div>
+    </div>
+    <div class="meta">
+      <div class="report-name">${escapeHtml(reportName)}</div>
+      ${period ? `<div class="period">Period: ${escapeHtml(period)}</div>` : ""}
+      <div class="property">Property: ${escapeHtml(propertyName)}</div>
+      <div class="generated">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+    </div>
+  </div>
+`;
     // Use table header/footer so it repeats on every printed page (Android/iOS friendly).
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${escapeHtml(
       reportName
@@ -2048,71 +2234,107 @@ export default function ReportsHubScreen() {
     [ensureDetailedReportsLoaded, getReportText]
   );
 
-  /* Generate PDF, save with proper filename, then offer share (Save to device / Files) */
-  const generateAndSharePdf = useCallback(async (reportName: string, period?: string, filterCtx?: { f1: string; f2: string }) => {
-    if (pdfGenerating) return;
-    setPdfGenerating(true);
-    try {
-      const details = await ensureDetailedReportsLoaded();
-      const logoUri = await getMyStayLogoDataUri();
-      if (logoUri && !myStayLogoDataUri) setMyStayLogoDataUri(logoUri);
-      if (typeof Print?.printToFileAsync !== "function") {
-        Alert.alert(
-          "PDF not available in this build",
-          "PDF export needs a fresh native build (e.g. run: npx expo run:android). Share the report as text instead?",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Share as text", onPress: () => { void offerShareAsTextFallback(reportName, period, filterCtx); } },
-          ]
-        );
-        return;
-      }
-      const html = await new Promise<string>((resolve) => {
-        InteractionManager.runAfterInteractions(() => {
-          resolve(buildReportHtml(reportName, period, details, filterCtx, logoUri || myStayLogoDataUri));
-        });
-      });
-      const { uri } = await Print.printToFileAsync({ html, base64: false });
-      const filename = getPdfFilename(reportName, period);
-      const sourceFile = new File(uri);
-      const destFile = new File(Paths.document, filename);
-      if (destFile.exists) destFile.delete();
-      sourceFile.copy(destFile);
-      try {
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) {
-          const dialogTitle = period ? `${reportName} (${period})` : reportName;
-          await Sharing.shareAsync(destFile.uri, { mimeType: "application/pdf", dialogTitle });
-        } else {
-          Alert.alert("Download complete", `PDF saved as ${filename}. Use "Save to Files" or "Save to Downloads" in the share menu to save it where you can find it.`);
-        }
-      } catch (_sharingError: any) {
-        Alert.alert("Download complete", `PDF saved as ${filename}. If the share menu did not open, update the app to save PDFs to your phone.`);
-      }
-    } catch (e: any) {
-      const msg = e?.message || String(e) || "";
-      const isNativeModuleMissing = /ExpoPrint|native module|cannot find/i.test(msg);
-      if (isNativeModuleMissing) {
-        Alert.alert(
-          "PDF not available in this build",
-          "PDF export needs a fresh native build (e.g. run: npx expo run:android). Share the report as text instead?",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Share as text", onPress: () => { void offerShareAsTextFallback(reportName, period, filterCtx); } },
-          ]
-        );
-      } else {
-        Alert.alert("Could not generate PDF", msg);
-      }
-    } finally {
-      setPdfGenerating(false);
+/* Generate PDF, save with proper filename, then offer share (Save to device / Files) */
+/* Generate PDF, save with proper filename, then offer share (Save to device / Files) */
+const generateAndSharePdf = useCallback(async (reportName: string, period?: string, filterCtx?: { f1: string; f2: string }) => {
+  if (pdfGenerating) return;
+  setPdfGenerating(true);
+  
+  try {
+    console.log(`Generating PDF for: ${reportName}`);
+    const details = await ensureDetailedReportsLoaded();
+    
+    // Load logo and log result
+    console.log("Loading logo for PDF...");
+    const logoUri = await getMyStayLogoDataUri();
+    console.log("Logo URI available:", !!logoUri);
+    if (logoUri) {
+      console.log("Logo URI length:", logoUri.length);
+      console.log("Logo URI starts with:", logoUri.substring(0, 50));
     }
-  }, [buildReportHtml, ensureDetailedReportsLoaded, getPdfFilename, offerShareAsTextFallback, pdfGenerating, myStayLogoDataUri]);
+    
+    // Update state
+    if (logoUri) {
+      setMyStayLogoDataUri(logoUri);
+    }
+    
+    // Check if print is available
+    if (typeof Print?.printToFileAsync !== "function") {
+      Alert.alert(
+        "PDF not available",
+        "PDF export is not available. Share as text instead?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Share as text", onPress: () => { void offerShareAsTextFallback(reportName, period, filterCtx); } },
+        ]
+      );
+      return;
+    }
+    
+    // Generate HTML
+    const html = buildReportHtml(reportName, period, details, filterCtx, logoUri);
+    console.log("HTML contains logo:", html.includes('data:image/png;base64') ? "Yes" : "No");
+    
+    // Verify HTML has content
+    if (!html || html.length < 100) {
+      throw new Error("Generated HTML is too short");
+    }
+    
+    console.log("HTML length:", html.length);
+    
+    // Create PDF
+    const { uri } = await Print.printToFileAsync({ 
+      html,
+      base64: false,
+    });
+    
+    console.log("PDF created at:", uri);
+    
+    const filename = getPdfFilename(reportName, period);
+    
+    // Move file
+    const sourceFile = new File(uri);
+    const destFile = new File(Paths.document, filename);
+    
+    if (destFile.exists) {
+      await destFile.delete();
+    }
+    
+    await sourceFile.copy(destFile);
+    console.log("File copied to:", destFile.uri);
+    
+    // Share
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      await Sharing.shareAsync(destFile.uri, { 
+        mimeType: "application/pdf",
+        dialogTitle: reportName,
+      });
+    } else {
+      Alert.alert("Success", `PDF saved as ${filename}`);
+    }
+    
+  } catch (error: any) {
+    console.error("PDF Error:", error);
+    Alert.alert(
+      "PDF Generation Failed",
+      error?.message || "Unknown error occurred",
+      [
+        { text: "OK" },
+        { text: "Share as Text", onPress: () => offerShareAsTextFallback(reportName, period, filterCtx) }
+      ]
+    );
+  } finally {
+    setPdfGenerating(false);
+  }
+}, [buildReportHtml, ensureDetailedReportsLoaded, getPdfFilename, offerShareAsTextFallback, pdfGenerating]);
+/* ===== ADD THIS MISSING FUNCTION ===== */
+/* Subscription Guard & Downloader */
+const handleDownload = (reportName: string) => {
+  generateAndSharePdf(reportName);
+};
+/* ===== END OF MISSING FUNCTION ===== */
 
-  /* Subscription Guard & Downloader */
-  const handleDownload = (reportName: string) => {
-    generateAndSharePdf(reportName);
-  };
 
   /* Filtered Reports Downloader */
   const handleFilteredDownload = (reportName: string) => {
@@ -2144,54 +2366,96 @@ export default function ReportsHubScreen() {
   );
 
   // Pie chart: uses row totals from `data` (not outer totalExpense) so slices always match and NaN is avoided
-  const SimplePieChart = ({ data, size = 180 }: { data: any[]; size?: number }) => {
-    const rows = (data || []).map((item, i) => ({
-      name: item.name ?? `Item ${i + 1}`,
-      amount: Math.max(0, Number(item.amount) || 0),
-      color: item.color || CHART_COLORS[i % CHART_COLORS.length],
-    }));
-    const chartTotal = rows.reduce((s, r) => s + r.amount, 0);
-    if (rows.length === 0 || chartTotal <= 0) {
-      return (
-        <View
-          className="items-center justify-center rounded-3xl bg-slate-50"
-          style={{ width: size, height: size }}
-        >
-          <Text className="text-slate-400 text-xs text-center px-6">
-            No expense data for this view. Add expenses or pick Combined / current month.
-          </Text>
-        </View>
-      );
-    }
-    const radius = size / 2;
-    const center = radius;
-    let cumulativeAngle = 0;
-    const segments = rows.map((item, index) => {
-      const angle = (item.amount / chartTotal) * 360;
-      const startAngle = cumulativeAngle;
-      cumulativeAngle += angle;
-      const startRad = (startAngle * Math.PI) / 180;
-      const endRad = (cumulativeAngle * Math.PI) / 180;
-      const x1 = center + radius * Math.cos(startRad);
-      const y1 = center + radius * Math.sin(startRad);
-      const x2 = center + radius * Math.cos(endRad);
-      const y2 = center + radius * Math.sin(endRad);
-      const largeArcFlag = angle > 180 ? 1 : 0;
-      const path = `M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
-      return (
-        <Path key={index} d={path} fill={item.color} stroke="#FFF" strokeWidth="2" />
-      );
-    });
+  // Pie chart with proper SVG rendering
+// Simple and reliable Pie Chart component
+// Alternative: Simple donut chart (more reliable)
+const SimpleDonutChart = ({ data, size = 200 }) => {
+  const chartData = (data || [])
+    .map((item, index) => ({
+      value: Number(item.amount) || 0,
+      color: item.color || CHART_COLORS[index % CHART_COLORS.length],
+      name: item.name
+    }))
+    .filter(item => item.value > 0);
 
+  const total = chartData.reduce((sum, item) => sum + item.value, 0);
+
+  if (!chartData.length || total === 0) {
     return (
-      <View className="items-center">
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          {segments}
-          <Circle cx={center} cy={center} r={radius * 0.32} fill="#FFFFFF" />
-        </Svg>
+      <View style={{ 
+        width: size, 
+        height: size, 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        backgroundColor: '#f1f5f9',
+        borderRadius: size / 2
+      }}>
+        <Text style={{ color: '#64748b' }}>No data</Text>
       </View>
     );
-  };
+  }
+
+  // Use circle segments instead of complex paths
+  const strokeWidth = 30;
+  const radius = (size - strokeWidth) / 2;
+  const center = size / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  let cumulativePercent = 0;
+  const segments = [];
+
+  chartData.forEach((item, index) => {
+    const percent = item.value / total;
+    const strokeDasharray = `${circumference * percent} ${circumference}`;
+    const rotation = cumulativePercent * 360;
+    
+    segments.push(
+      <Circle
+        key={index}
+        cx={center}
+        cy={center}
+        r={radius}
+        fill="none"
+        stroke={item.color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={strokeDasharray}
+        strokeDashoffset={0}
+        rotation={rotation}
+        origin={`${center}, ${center}`}
+      />
+    );
+    
+    cumulativePercent += percent;
+  });
+
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {/* Background circle */}
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth={strokeWidth}
+        />
+        {/* Data circles */}
+        {segments}
+      </Svg>
+      <View style={{ 
+        position: 'absolute', 
+        alignItems: 'center', 
+        justifyContent: 'center' 
+      }}>
+        <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#0f172a' }}>
+          ₹{total.toLocaleString()}
+        </Text>
+        <Text style={{ fontSize: 10, color: '#64748b' }}>Total</Text>
+      </View>
+    </View>
+  );
+};
 
   return (
     <SafeAreaView className="flex-1 bg-[#F6F8FF]">
@@ -2408,11 +2672,12 @@ export default function ReportsHubScreen() {
 
           {/* Pie Chart Section */}
           <View className="items-center mb-6">
-            <SimplePieChart data={expenseData} size={200} />
-            <Text className="text-slate-400 text-xs mt-2 uppercase tracking-widest">
-              {expenseReportView === "Combined" ? "Combined 3 Months" : expenseReportView} Breakdown
-            </Text>
-          </View>
+  <SimpleDonutChart data={expenseData} size={200} />
+  <Text className="text-slate-400 text-xs mt-2 uppercase tracking-widest">
+    {expenseReportView === "Combined" ? "Combined 3 Months" : expenseReportView} Breakdown
+  </Text>
+</View>
+
 
           {/* Enhanced Legend with Trends */}
           <View>
@@ -2425,23 +2690,16 @@ export default function ReportsHubScreen() {
                   <View key={index} className="bg-slate-50 rounded-xl p-3">
                     <View className="flex-row items-center justify-between mb-2">
                       <View className="flex-row items-center flex-1">
-                        <View 
-                          className="w-4 h-4 rounded-full mr-3"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        <View className="flex-1">
-                          <Text className="text-slate-900 font-bold text-sm" numberOfLines={1}>
-                            {item.name}
-                          </Text>
-                          {isHighest && (
-                            <Text className="text-red-600 text-xs font-bold">Highest Expense</Text>
-                          )}
-                        </View>
+                        <View className="w-4 h-4 rounded-full mr-3" style={{ backgroundColor: item.color }} />
+                        <Text className="text-slate-900 font-bold flex-1">{item.name}</Text>
+                        {isHighest && (
+                          <View className="bg-red-100 px-2 py-1 rounded-full mr-2">
+                            <Text className="text-red-600 text-xs font-bold">Highest</Text>
+                          </View>
+                        )}
                       </View>
                       <View className="items-end">
-                        <Text className="text-slate-900 font-black text-base">
-                          ₹{item.amount.toLocaleString()}
-                        </Text>
+                        <Text className="text-slate-900 font-black">₹{item.amount.toLocaleString()}</Text>
                         <Text className="text-slate-500 text-xs">{percentage}%</Text>
                       </View>
                     </View>

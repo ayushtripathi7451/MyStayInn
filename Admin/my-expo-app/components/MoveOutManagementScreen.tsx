@@ -24,7 +24,7 @@ export default function MoveOutManagementScreen({ navigation, route }: MoveOutMa
   const { currentProperty } = useProperty();
   const propertyId = currentProperty?.id;
   const openTabParam = route?.params?.openTab;
-  const [activeTab, setActiveTab] = useState<'requested' | 'accepted'>(openTabParam ?? 'requested');
+  const [activeTab, setActiveTab] = useState<'requested' | 'accepted'>(openTabParam ?? 'accepted');
   const [pendingRequests, setPendingRequests] = useState<MoveOutRequest[]>([]);
   const [scheduledMoveOuts, setScheduledMoveOuts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);

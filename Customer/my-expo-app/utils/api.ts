@@ -46,7 +46,7 @@ export const propertyApi = axios.create({
 
 // Booking service (port 3008) - enrollment requests, bookings
 export const bookingApi = axios.create({
-  baseURL: `http://${API_HOST}:3008`,
+  baseURL: `http://${API_HOST}:3012`,
   headers: {
     "Content-Type": "application/json",
   },

@@ -467,52 +467,7 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
 
             {/* Priority Selection */}
             <View>
-              <Text className="text-sm font-semibold text-slate-700 mb-2">Priority</Text>
-              <View className="flex-row gap-3">
-                <TouchableOpacity
-                  onPress={() => setPriority("normal")}
-                  className={`flex-1 p-3 rounded-xl border-2 ${
-                    priority === "normal" 
-                      ? "border-green-500 bg-green-50" 
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <View className="flex-row items-center justify-center">
-                    <Ionicons 
-                      name="information-circle" 
-                      size={18} 
-                      color={priority === "normal" ? "#10b981" : "#64748b"} 
-                    />
-                    <Text className={`ml-2 font-semibold ${
-                      priority === "normal" ? "text-green-600" : "text-slate-600"
-                    }`}>
-                      Normal
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => setPriority("high")}
-                  className={`flex-1 p-3 rounded-xl border-2 ${
-                    priority === "high" 
-                      ? "border-red-500 bg-red-50" 
-                      : "border-slate-200 bg-slate-50"
-                  }`}
-                >
-                  <View className="flex-row items-center justify-center">
-                    <Ionicons 
-                      name="warning" 
-                      size={18} 
-                      color={priority === "high" ? "#ef4444" : "#64748b"} 
-                    />
-                    <Text className={`ml-2 font-semibold ${
-                      priority === "high" ? "text-red-600" : "text-slate-600"
-                    }`}>
-                      High
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
+              
             </View>
           </View>
 

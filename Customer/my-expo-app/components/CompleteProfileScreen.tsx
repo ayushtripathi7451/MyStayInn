@@ -24,6 +24,7 @@ import * as WebBrowser from "expo-web-browser";
 import { api, userApi } from "../utils/api";
 import type { StructuredAddress } from "../utils/address";
 import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
+import ScrollableDatePicker from "./ScrollableDatePicker";
 
 const isAadhaarVerificationExpired = (expiresAt?: string | null) => {
   if (!expiresAt) return true;
@@ -191,7 +192,6 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
   const [cityModalVisible, setCityModalVisible] = useState(false);
   const [editingAddressKey, setEditingAddressKey] = useState<"aadhaar" | "current">("aadhaar");
 
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
 
   const [errors, setErrors] = useState<any>({});
@@ -272,7 +272,13 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           const response = await api.get("/api/kyc/digilocker/status");
           if (response.data.verified) {
             setAadhaarVerified(true);
-            setAadhaarDetails(response.data.aadhaarDetails || null);
+            // Merge top-level validUntil and verifiedAt into aadhaarDetails
+            const details = {
+              ...(response.data.aadhaarDetails || {}),
+              validUntil: response.data.validUntil || response.data.aadhaarDetails?.validUntil,
+              verifiedAt: response.data.verifiedAt || response.data.aadhaarDetails?.verifiedAt,
+            };
+            setAadhaarDetails(details);
             setFullKycResponse(response.data);
             Alert.alert("Success", "Aadhaar verified successfully via DigiLocker!");
           } else {
@@ -483,7 +489,13 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
       
       if (response.data.verified) {
         setAadhaarVerified(true);
-        setAadhaarDetails(response.data.aadhaarDetails || null);
+        // Merge top-level validUntil and verifiedAt into aadhaarDetails
+        const details = {
+          ...(response.data.aadhaarDetails || {}),
+          validUntil: response.data.validUntil || response.data.aadhaarDetails?.validUntil,
+          verifiedAt: response.data.verifiedAt || response.data.aadhaarDetails?.verifiedAt,
+        };
+        setAadhaarDetails(details);
         setFullKycResponse(response.data);
       }
     } catch (error) {
@@ -538,7 +550,13 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           const statusRes = await api.get("/api/kyc/digilocker/status").catch(() => null);
           if (statusRes?.data?.verified) {
             setAadhaarVerified(true);
-            setAadhaarDetails(statusRes.data.aadhaarDetails || null);
+            // Merge top-level validUntil and verifiedAt into aadhaarDetails
+            const details = {
+              ...(statusRes.data.aadhaarDetails || {}),
+              validUntil: statusRes.data.validUntil || statusRes.data.aadhaarDetails?.validUntil,
+              verifiedAt: statusRes.data.verifiedAt || statusRes.data.aadhaarDetails?.verifiedAt,
+            };
+            setAadhaarDetails(details);
             setFullKycResponse(statusRes.data);
           } else {
             setAadhaarVerified(true);
@@ -580,7 +598,13 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
         const statusRes = await api.get("/api/kyc/digilocker/status").catch(() => null);
         if (statusRes?.data?.verified) {
           setAadhaarVerified(true);
-          setAadhaarDetails(statusRes.data.aadhaarDetails || null);
+          // Merge top-level validUntil and verifiedAt into aadhaarDetails
+          const details = {
+            ...(statusRes.data.aadhaarDetails || {}),
+            validUntil: statusRes.data.validUntil || statusRes.data.aadhaarDetails?.validUntil,
+            verifiedAt: statusRes.data.verifiedAt || statusRes.data.aadhaarDetails?.verifiedAt,
+          };
+          setAadhaarDetails(details);
           setFullKycResponse(statusRes.data);
         } else {
           setAadhaarVerified(true);
@@ -615,7 +639,13 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
         
         if (response.data.verified) {
           setAadhaarVerified(true);
-          setAadhaarDetails(response.data.aadhaarDetails || null);
+          // Merge top-level validUntil and verifiedAt into aadhaarDetails
+          const details = {
+            ...(response.data.aadhaarDetails || {}),
+            validUntil: response.data.validUntil || response.data.aadhaarDetails?.validUntil,
+            verifiedAt: response.data.verifiedAt || response.data.aadhaarDetails?.verifiedAt,
+          };
+          setAadhaarDetails(details);
           setFullKycResponse(response.data);
           Alert.alert("Success", "Aadhaar verified successfully! Check the response below and compare with your entered details.");
           return true;
@@ -663,8 +693,11 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
   const aadhaarGender = aadhaarDetails?.gender === "M" ? "Male" : aadhaarDetails?.gender === "F" ? "Female" : "";
   const aadhaarAddress = (aadhaarDetails?.address || "").trim();
   const aadhaarExpiry =
+    fullKycResponse?.validUntil ||
     fullKycResponse?.aadhaarExpiresAt ||
+    fullKycResponse?.aadhaarDetails?.validUntil ||
     fullKycResponse?.aadhaarDetails?.aadhaarExpiresAt ||
+    aadhaarDetails?.validUntil ||
     aadhaarDetails?.aadhaarExpiresAt ||
     null;
   const aadhaarValidityMessage = aadhaarDetails
@@ -817,15 +850,6 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
     addressAsPerAadhaar.city &&
     addressAsPerAadhaar.pincode?.trim().length === 6 &&
     (sameAsAadhar || (currentAddress.line1?.trim() && currentAddress.state && currentAddress.city && currentAddress.pincode?.trim().length === 6));
-
-  /* ---------------- DATE PICKER ---------------- */
-  const onChangeDate = (_event: any, selected?: Date) => {
-    setShowDatePicker(false);
-    if (selected) {
-      setSelectedDate(selected);
-      setDob(selected.toISOString().split("T")[0]);
-    }
-  };
 
   /* ---------------- IMAGE PICKER WITH CROPPER ---------------- */
   const pickImage = async () => {
@@ -1016,15 +1040,16 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                   <Text className="text-gray-700 font-semibold">Date of Birth</Text>
                   <MatchTick show={matchDob} />
                 </View>
-                <TouchableOpacity
-                  onPress={() => setShowDatePicker(true)}
-                  className="border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-gray-50"
-                >
-                  <Text className={dob ? "text-black" : "text-gray-400"}>
-                    {dob || "Select date"}
-                  </Text>
-                  <Ionicons name="calendar" size={18} color="gray" />
-                </TouchableOpacity>
+                <ScrollableDatePicker
+                  selectedDate={selectedDate || null}
+                  onDateChange={(date) => {
+                    setSelectedDate(date || undefined);
+                    if (date) {
+                      setDob(date.toISOString().split("T")[0]);
+                    }
+                  }}
+                  maximumDate={new Date()}
+                />
               </View>
 
               <View style={{ width: "48%" }}>
@@ -1383,15 +1408,6 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
             </TouchableOpacity>
           </View>
           </ScrollView>
-        )}
-
-        {showDatePicker && (
-          <DateTimePicker
-            value={selectedDate || new Date()}
-            mode="date"
-            maximumDate={new Date()}
-            onChange={onChangeDate}
-          />
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>

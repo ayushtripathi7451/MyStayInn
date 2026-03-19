@@ -8,12 +8,11 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { moveOutApi } from "../utils/api";
+import ScrollableDatePicker from "./ScrollableDatePicker";
 
 interface AdminInitiateMoveOutScreenProps {
   navigation: any;
@@ -36,15 +35,9 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
     const d = params.moveOutDate ? new Date(params.moveOutDate) : new Date();
     return d;
   });
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [adminComments, setAdminComments] = useState("");
   const [securityDepositReturned, setSecurityDepositReturned] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const onDateChange = (_: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === "ios");
-    if (selectedDate) setMoveOutDate(selectedDate);
-  };
 
   const submit = async () => {
     if (!customerId || !bookingId || !roomId) {
@@ -68,6 +61,7 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
         roomNumber: roomNumber || undefined,
         moveOutDate: moveOutDate.toISOString().split("T")[0],
         adminComments: adminComments.trim(),
+        securityDepositAmount: securityDeposit, // Send the original security deposit amount
         securityDepositReturned:
           securityDepositReturned.trim() !== "" ? parseFloat(securityDepositReturned) : undefined,
       });
@@ -115,24 +109,11 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
 
         <View className="bg-white rounded-[24px] p-6 mt-4 shadow-sm border border-white">
           <Text className="text-slate-700 font-bold mb-2">Move-out date</Text>
-          <TouchableOpacity
-            onPress={() => setShowDatePicker(true)}
-            className="border border-slate-200 rounded-xl px-4 py-3 flex-row items-center justify-between"
-          >
-            <Text className="text-slate-900 font-medium">
-              {moveOutDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-            </Text>
-            <Ionicons name="calendar-outline" size={22} color="#64748B" />
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={moveOutDate}
-              mode="date"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={onDateChange}
-              minimumDate={new Date()}
-            />
-          )}
+          <ScrollableDatePicker
+            selectedDate={moveOutDate}
+            onDateChange={(date) => setMoveOutDate(date)}
+            minimumDate={new Date()}
+          />
         </View>
 
         <View className="bg-white rounded-[24px] p-6 mt-4 shadow-sm border border-white">

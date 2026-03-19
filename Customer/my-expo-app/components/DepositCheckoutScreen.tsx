@@ -173,7 +173,7 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
       setSubmitting(false);
 
       if (opened) {
-        dispatch(refreshCurrentStay(true));
+        dispatch(refreshCurrentStay({ force: true }));
         Alert.alert(
           "Payment Submitted",
           "If completed, it will reflect shortly.",

@@ -98,7 +98,8 @@ export default function SearchAdminScreen({ navigation }: any) {
 
   const isValidPhone = (text: string) => /^\d{10}$/.test(normalizePhone(text));
   const isValidAdminId = (text: string) =>
-    text.length >= 10 && text.toUpperCase().startsWith("MYS");
+    text.length >= 10 &&
+    (text.toUpperCase().startsWith("MYS") || text.toUpperCase().startsWith("MYO"));
 
   const searchOwnersByQuery = useCallback(async (searchQuery: string) => {
     const q = searchQuery.trim();
@@ -201,7 +202,7 @@ export default function SearchAdminScreen({ navigation }: any) {
     if (!isValidPhone(trimmed) && !isValidAdminId(trimmed)) {
       setResults([]);
       setSearchError(
-        "Enter a valid 10-digit phone number or Owner ID (e.g. MYS25A000001)"
+        "Enter a valid 10-digit phone number or Owner ID (e.g. MYS25A000001 / MYO25A000001)"
       );
       return;
     }
@@ -491,7 +492,7 @@ export default function SearchAdminScreen({ navigation }: any) {
             <TextInput
               placeholder={
                 tab === "id"
-                  ? "Admin's phone number or Unique ID (e.g. MYS25A000001)"
+                  ? "Admin's phone number or Unique ID (e.g. MYS25A000001 / MYO25A000001)"
                   : "Search by area, sector, city"
               }
               value={query}

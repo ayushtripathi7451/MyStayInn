@@ -12,8 +12,10 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ticketApi } from "../utils/api";
 
+const STATUS_OPTIONS = ["open", "in_progress", "closed"] as const;
 const STATUS_LABEL: Record<string, string> = {
   open: "Open",
   in_progress: "In Progress",
@@ -39,18 +41,27 @@ function formatDate(s: string) {
   }
 }
 
-export default function TicketChat({ navigation, route }: any) {
+export default function AdminTicketChat({ navigation, route }: any) {
   const ticketId = route?.params?.ticketId;
   const [ticket, setTicket] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const fetchTicket = useCallback(async () => {
     if (!ticketId) return;
     try {
-      const res = await ticketApi.get<{ success: boolean; ticket?: any; comments?: any[] }>(`/api/tickets/${ticketId}`);
+      const res = await ticketApi.get<{ 
+        success: boolean; 
+        ticket?: any; 
+        comments?: any[]; 
+        currentUserUniqueId?: string;
+        currentUserRole?: string;
+      }>(`/api/tickets/${ticketId}`);
       if (res.data.success) {
         setTicket(res.data.ticket);
         setComments(res.data.comments || []);
@@ -65,7 +76,57 @@ export default function TicketChat({ navigation, route }: any) {
 
   useEffect(() => {
     fetchTicket();
+    
+    // Get current user ID from AsyncStorage
+    const getCurrentUserId = async () => {
+      try {
+        const userData = await AsyncStorage.getItem("userData");
+        if (userData) {
+          const user = JSON.parse(userData);
+          // Use uniqueId as that's what's stored in authorId in the backend
+          const userId = user.uniqueId || user.id;
+          console.log("Current User ID:", userId);
+          setCurrentUserId(userId);
+        }
+      } catch (error) {
+        console.error("Error fetching user ID:", error);
+      }
+    };
+    getCurrentUserId();
   }, [fetchTicket]);
+
+  const handleStatusChange = async (newStatus: string) => {
+    if (!ticket || ticket.status === newStatus) {
+      setOpenDropdown(false);
+      return;
+    }
+    if (newStatus === "closed") {
+      Alert.alert(
+        "Close Ticket?",
+        "You won't be able to add new comments after closing.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => setOpenDropdown(false) },
+          { text: "Yes, Close", onPress: () => doUpdateStatus("closed") },
+        ]
+      );
+    } else {
+      doUpdateStatus(newStatus);
+    }
+  };
+
+  const doUpdateStatus = async (status: string) => {
+    setOpenDropdown(false);
+    if (!ticketId) return;
+    setUpdatingStatus(true);
+    try {
+      const res = await ticketApi.patch(`/api/tickets/${ticketId}`, { status });
+      if (res.data.success && res.data.ticket) setTicket(res.data.ticket);
+    } catch (e: any) {
+      Alert.alert("Error", e?.response?.data?.message || "Failed to update status");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
 
   const handleAddComment = async () => {
     const body = commentText.trim();
@@ -87,7 +148,7 @@ export default function TicketChat({ navigation, route }: any) {
   if (loading || !ticket) {
     return (
       <SafeAreaView className="flex-1 bg-white justify-center items-center">
-        {loading ? <ActivityIndicator size="large" color="#3B4BFF" /> : <Text className="text-gray-500">Ticket not found</Text>}
+        {loading ? <ActivityIndicator size="large" color="#1E33FF" /> : <Text className="text-slate-500">Ticket not found</Text>}
       </SafeAreaView>
     );
   }
@@ -97,66 +158,185 @@ export default function TicketChat({ navigation, route }: any) {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <View className="flex-row items-center justify-between px-5 py-4 bg-white border-b border-gray-100">
+      {/* Header with back button and status */}
+      <View className="flex-row items-center justify-between px-5 py-4 bg-white border-b border-slate-200 shadow-sm">
         <View className="flex-row items-center">
-          <TouchableOpacity onPress={() => navigation.goBack()} className="w-10 h-10 bg-white rounded-full border border-gray-300 justify-center items-center">
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()} 
+            className="w-10 h-10 bg-white rounded-full border border-slate-300 justify-center items-center active:bg-slate-100"
+          >
             <Ionicons name="chevron-back" size={22} color="#000" />
           </TouchableOpacity>
-          <Text className="ml-3 text-2xl font-semibold">{ticket.displayId}</Text>
+          <Text className="ml-3 text-2xl font-semibold text-slate-900">{ticket.displayId}</Text>
         </View>
         <View className="relative">
-          <View
-            className="flex-row items-center justify-center px-4 py-1 rounded-full"
+          <TouchableOpacity
+            onPress={() => !isClosed && setOpenDropdown((p) => !p)}
+            className="flex-row items-center justify-center px-4 py-2 rounded-full shadow-sm"
             style={{ backgroundColor: statusColor[status]?.bg || statusColor.open.bg, minWidth: 130 }}
           >
             <Text className="font-semibold text-[16px]" style={{ color: statusColor[status]?.text || statusColor.open.text }}>
               {STATUS_LABEL[status] || status}
             </Text>
-          </View>
+            {!isClosed && (
+              <Ionicons 
+                name={openDropdown ? "chevron-up" : "chevron-down"} 
+                size={16} 
+                color={statusColor[status]?.text} 
+                style={{ marginLeft: 6 }} 
+              />
+            )}
+          </TouchableOpacity>
+          
+          {openDropdown && (
+            <View className="absolute right-0 mt-2 bg-white rounded-xl border border-slate-200 shadow-lg z-50">
+              {STATUS_OPTIONS.map((s) => (
+                <TouchableOpacity 
+                  key={s} 
+                  onPress={() => handleStatusChange(s)} 
+                  className="px-4 py-3 active:bg-slate-50"
+                  disabled={updatingStatus}
+                >
+                  <Text className="font-medium" style={{ color: statusColor[s]?.text }}>
+                    {STATUS_LABEL[s]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
-        <ScrollView showsVerticalScrollIndicator={false} className="px-4 flex-1" keyboardDismissMode="on-drag">
-          <View className="bg-slate-50 rounded-2xl p-5 my-4">
-            <Text className="text-[17px] font-semibold text-[#1A1A1A]">{ticket.title}</Text>
-            <Text className="text-gray-600 mt-2">{ticket.description || ""}</Text>
-            <Text className="text-gray-500 text-sm mt-3">{ticket.category} {ticket.propertyRef ? ` · ${ticket.propertyRef}` : ""}</Text>
-            <Text className="text-gray-400 text-xs mt-1">{formatDate(ticket.createdAt)}</Text>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : undefined} 
+        className="flex-1"
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      >
+        <ScrollView 
+          showsVerticalScrollIndicator={false} 
+          className="px-4 flex-1" 
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={{ paddingBottom: 20 }}
+        >
+          {/* Ticket Details Card */}
+          <View className="bg-slate-50 rounded-2xl p-5 my-4 border border-slate-100">
+            <Text className="text-[18px] font-semibold text-slate-900">{ticket.title}</Text>
+            <Text className="text-slate-600 mt-2 leading-5">{ticket.description || "No description provided"}</Text>
+            <View className="flex-row mt-3">
+              <View className="bg-slate-200 rounded-full px-3 py-1 mr-2">
+                <Text className="text-slate-700 text-xs font-medium">{ticket.category}</Text>
+              </View>
+              {ticket.propertyRef && (
+                <View className="bg-slate-200 rounded-full px-3 py-1">
+                  <Text className="text-slate-700 text-xs font-medium">{ticket.propertyRef}</Text>
+                </View>
+              )}
+            </View>
+            <Text className="text-slate-400 text-xs mt-3">{formatDate(ticket.createdAt)}</Text>
           </View>
 
-          <Text className="mt-4 mb-3 text-[18px] font-semibold">Comments</Text>
+          {/* Comments Section */}
+          <Text className="mt-4 mb-3 text-[18px] font-semibold text-slate-900">Comments</Text>
+          
           {comments.length === 0 ? (
-            <Text className="text-gray-500 py-4">No comments yet.</Text>
+            <View className="items-center justify-center py-8">
+              <Ionicons name="chatbubble-outline" size={40} color="#CBD5E1" />
+              <Text className="text-slate-400 mt-2">No comments yet</Text>
+            </View>
           ) : (
-            comments.map((c) => (
-              <View key={c.id} className="mb-3">
-                <View className="bg-gray-100 rounded-xl py-3 px-4 max-w-[85%]">
-                  <Text className="text-gray-700">{c.body}</Text>
-                  <Text className="text-gray-500 text-[10px] mt-1">{c.authorUniqueId || "User"} · {formatDate(c.createdAt)}</Text>
+            comments.map((c) => {
+              // Messages from current user appear on right, others on left
+              const isMyMessage = currentUserId && c.authorId === currentUserId;
+              console.log("Comment:", { authorId: c.authorId, currentUserId, isMyMessage });
+              
+              return (
+                <View key={c.id} className={`mb-4 ${isMyMessage ? "items-end" : "items-start"}`}>
+                  <View className="flex-row items-end max-w-[85%]">
+                    {!isMyMessage && (
+                      <View className="w-8 h-8 rounded-full bg-[#1E33FF] items-center justify-center mr-2">
+                        <Text className="text-white font-medium text-xs">AD</Text>
+                      </View>
+                    )}
+                    
+                    <View 
+                      className={`rounded-2xl py-3 px-4 ${
+                        isMyMessage 
+                          ? "bg-[#1E33FF] rounded-tr-sm" 
+                          : "bg-slate-100 rounded-tl-sm"
+                      }`}
+                      style={{
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.05,
+                        shadowRadius: 2,
+                        elevation: 2,
+                      }}
+                    >
+                      <Text className={isMyMessage ? "text-white text-[15px]" : "text-slate-800 text-[15px]"}>
+                        {c.body}
+                      </Text>
+                      <View className={`flex-row items-center mt-1 ${isMyMessage ? "justify-end" : "justify-start"}`}>
+                        <Text className={`text-[10px] ${isMyMessage ? "text-blue-200" : "text-slate-400"}`}>
+                          {isMyMessage ? "You" : "Support"} · {formatDate(c.createdAt)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {isMyMessage && (
+                      <View className="w-8 h-8 rounded-full bg-slate-300 items-center justify-center ml-2">
+                        <Text className="text-slate-700 font-medium text-xs">
+                          {c.authorUniqueId?.substring(0, 2).toUpperCase() || "U"}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
 
-          <View className="mt-5 mb-6 bg-white rounded-xl p-3 shadow shadow-black/5">
+          {/* Comment Input Area - Increased height */}
+          <View className="mt-5 mb-6 bg-white rounded-xl border border-slate-200 shadow-sm">
             <TextInput
-              placeholder={isClosed ? "Ticket is closed" : "Write a comment..."}
-              placeholderTextColor="#9CA3AF"
+              placeholder={isClosed ? "This ticket is closed" : "Write your reply..."}
+              placeholderTextColor="#94A3B8"
               editable={!isClosed}
-              className="border border-gray-300 rounded-xl px-3 py-2 mb-3"
-              style={{ color: "#111827" }}
+              className="px-4 pt-4 pb-2 text-slate-900"
+              style={{ 
+                minHeight: 120, 
+                maxHeight: 200,
+                textAlignVertical: "top",
+                fontSize: 16,
+              }}
               multiline
+              numberOfLines={5}
               value={commentText}
               onChangeText={setCommentText}
             />
-            <TouchableOpacity
-              disabled={isClosed || sendingComment || !commentText.trim()}
-              onPress={handleAddComment}
-              className={`rounded-full py-3 items-center ${isClosed || sendingComment ? "bg-gray-300" : "bg-[#4361FF]"}`}
-            >
-              <Text className="text-white font-semibold">{sendingComment ? "Sending..." : "Add comment"}</Text>
-            </TouchableOpacity>
+            
+            <View className="flex-row items-center justify-between px-3 py-2 border-t border-slate-100">
+              <Text className="text-xs text-slate-400">
+                {commentText.length}/500
+              </Text>
+              <TouchableOpacity
+                disabled={isClosed || sendingComment || !commentText.trim()}
+                onPress={handleAddComment}
+                className={`px-6 py-2 rounded-full flex-row items-center ${
+                  isClosed || sendingComment || !commentText.trim() 
+                    ? "bg-slate-300" 
+                    : "bg-[#1E33FF] active:bg-[#1526CC]"
+                }`}
+              >
+                <Text className="text-white font-semibold mr-1">
+                  {sendingComment ? "Sending" : "Send"}
+                </Text>
+                {sendingComment ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="send" size={16} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

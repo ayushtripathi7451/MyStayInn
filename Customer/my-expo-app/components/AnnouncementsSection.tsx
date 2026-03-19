@@ -10,6 +10,7 @@ import AnnouncementCard, { type AnnouncementItem } from "./AnnouncementCard";
  * Rendered at the bottom of the Home screen in a horizontal scroll strip.
  */
 export default function AnnouncementsSection() {
+  const navigation = useNavigation<any>();
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

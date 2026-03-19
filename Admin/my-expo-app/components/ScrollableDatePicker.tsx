@@ -39,7 +39,12 @@ export default function ScrollableDatePicker({
 
   // Generate arrays for scrollable pickers
   const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
+  // Dynamic year range: 1930 to (current year + 10)
+  // This ensures the range extends as years progress
+  const startYear = 1930;
+  const endYear = Math.max(2030, currentYear + 10);
+  const years = Array.from({ length: endYear - startYear + 1 }, (_, i) => startYear + i);
+  
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'

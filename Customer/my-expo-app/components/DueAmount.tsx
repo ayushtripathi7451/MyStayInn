@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -21,24 +21,111 @@ export type DueItem = {
   ownerId?: string;
 };
 
-/** Derives all unpaid dues: security deposit, rent (online), rent (cash). Any payment left to be completed is a due; when paid it is removed from this list and from current due. */
+// Helper function for year-month formatting
+function yearMonth(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Derives all unpaid dues: security deposit, rent (online), rent (cash). 
+ * Shows each unpaid month as a separate line item */
 function deriveDueItemsFromRaw(raw: any): DueItem[] {
+  console.log('[deriveDueItemsFromRaw] Input raw:', raw);
+  
   const items: DueItem[] = [];
-  if (!raw?.booking || !raw?.property) return items;
+  if (!raw?.booking || !raw?.property) {
+    console.log('[deriveDueItemsFromRaw] Missing booking or property data');
+    return items;
+  }
 
   const moveInDate = raw.booking.moveInDate;
-  const monthLabel =
-    moveInDate ?
-      new Date(moveInDate).toLocaleDateString("en-GB", { month: "short", year: "numeric" })
-    : "Due";
+  const monthlyRent = Number(raw.booking.scheduledOnlineRent) || Number(raw.booking.rentAmount) || 0;
+  const lastPaidYm = raw.booking.rentOnlinePaidYearMonth;
+  
+  // Calculate first due month based on move-in date
+  const moveIn = moveInDate ? new Date(moveInDate) : null;
+  let firstDueYm = null;
+  if (moveIn) {
+    const moveInDay = moveIn.getDate();
+    const moveInYm = yearMonth(moveIn);
+    const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
+    firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
+    console.log('[deriveDueItemsFromRaw] First due month:', firstDueYm);
+  }
 
+  // Generate items for each unpaid month
+  if (firstDueYm && monthlyRent > 0) {
+    const current = new Date();
+    const currentYm = yearMonth(current);
+    
+    // Parse dates for comparison
+    const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
+    const [lastPaidYear, lastPaidMonth] = lastPaidYm ? lastPaidYm.split('-').map(Number) : [firstYear, firstMonth - 1];
+    const [currentYear, currentMonth] = currentYm.split('-').map(Number);
+    
+    console.log('[deriveDueItemsFromRaw] Date ranges:', {
+      firstDue: `${firstYear}-${firstMonth}`,
+      lastPaid: lastPaidYm || 'none',
+      current: `${currentYear}-${currentMonth}`
+    });
+    
+    // Start from the month after last paid, or first due if nothing paid
+    let year = firstYear;
+    let month = firstMonth;
+    
+    // If we have a last paid month, start from the next month
+    if (lastPaidYm) {
+      if (year < lastPaidYear || (year === lastPaidYear && month <= lastPaidMonth)) {
+        year = lastPaidYear;
+        month = lastPaidMonth + 1;
+        if (month > 12) {
+          month = 1;
+          year++;
+        }
+      }
+    }
+    
+    // Generate months until current month
+    while (year < currentYear || (year === currentYear && month <= currentMonth)) {
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
+        month: "short", 
+        year: "numeric" 
+      });
+      
+      console.log(`[deriveDueItemsFromRaw] Adding unpaid month: ${year}-${month}`);
+      
+      items.push({
+        id: `rent_online_${year}-${month}`,
+        label: "Rent (online)",
+        monthLabel,
+        amount: monthlyRent,
+        paid: false,
+        type: "rent_online",
+        propertyId: raw.property.id,
+        ownerId: raw.property.ownerId ?? undefined,
+      });
+      
+      // Move to next month
+      month++;
+      if (month > 12) {
+        month = 1;
+        year++;
+      }
+    }
+  }
+
+  // Add security deposit if not paid (only once)
   const securityAmount = Number(raw.booking.securityDeposit) || 0;
   const isSecurityPaid = Boolean(raw.booking.isSecurityPaid);
+  console.log('[deriveDueItemsFromRaw] security:', { securityAmount, isSecurityPaid });
+  
   if (securityAmount > 0 && !isSecurityPaid) {
     items.push({
       id: "security_deposit",
       label: "Security deposit",
-      monthLabel,
+      monthLabel: new Date(raw.booking.moveInDate).toLocaleDateString("en-GB", { 
+        month: "short", 
+        year: "numeric" 
+      }),
       amount: securityAmount,
       paid: false,
       type: "security_deposit",
@@ -47,28 +134,16 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
     });
   }
 
-  const onlineRecv = Number(raw.booking.onlinePaymentRecv) || 0;
-  const isRentOnlinePaid = Boolean(raw.booking.isRentOnlinePaid);
-  if (onlineRecv > 0 && !isRentOnlinePaid) {
-    items.push({
-      id: "rent_online",
-      label: "Rent (online)",
-      monthLabel,
-      amount: onlineRecv,
-      paid: false,
-      type: "rent_online",
-      propertyId: raw.property.id,
-      ownerId: raw.property.ownerId ?? undefined,
-    });
-  }
-
+  // Add cash rent if configured (simplified - assumes single amount)
   const cashRecv = Number(raw.booking.cashPaymentRecv) || 0;
   const isRentCashPaid = Boolean(raw.booking.isRentCashPaid);
+  console.log('[deriveDueItemsFromRaw] cash rent:', { cashRecv, isRentCashPaid });
+  
   if (cashRecv > 0 && !isRentCashPaid) {
     items.push({
       id: "rent_cash",
       label: "Rent (cash)",
-      monthLabel,
+      monthLabel: new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
       amount: cashRecv,
       paid: false,
       type: "rent_cash",
@@ -77,6 +152,7 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
     });
   }
 
+  console.log('[deriveDueItemsFromRaw] Final items:', items);
   return items;
 }
 
@@ -84,29 +160,68 @@ export default function DueAmount() {
   const { theme } = useTheme();
   const navigation = useNavigation<any>();
   const { raw, loading, refresh } = useCurrentStay();
-  const [payingId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
+  
+  // Add useEffect to log raw data whenever it changes
+  useEffect(() => {
+    console.log('========== DUE AMOUNT DEBUG ==========');
+    console.log('1. Raw data from useCurrentStay:', raw);
+    console.log('2. Booking object:', raw?.booking);
+    console.log('3. onlinePaymentRecv:', raw?.booking?.onlinePaymentRecv);
+    console.log('4. isRentOnlinePaid:', raw?.booking?.isRentOnlinePaid);
+    console.log('5. rentPeriod:', raw?.booking?.rentPeriod);
+    console.log('6. moveInDate:', raw?.booking?.moveInDate);
+    console.log('7. scheduledOnlineRent:', raw?.booking?.scheduledOnlineRent);
+    console.log('8. rentOnlinePaidYearMonth:', raw?.booking?.rentOnlinePaidYearMonth);
+    console.log('9. rentInfoMessage:', raw?.booking?.rentInfoMessage);
+    console.log('======================================');
+  }, [raw]);
+  
   const dueItems = useMemo(() => deriveDueItemsFromRaw(raw), [raw]);
   const totalDue = useMemo(() => dueItems.reduce((sum, i) => sum + (Number(i.amount) || 0), 0), [dueItems]);
 
   const isFemale = theme === "female";
   const gradientColors = isFemale ? ["#FF5CA8", "#FF1E7A"] : ["#646DFF", "#0815FF"];
 
-  const handlePayNow = (item: DueItem) => {
+  const handlePayNow = async (item: DueItem) => {
     if (item.paid || !item.propertyId) return;
     if (item.type === "rent_cash") return;
-    navigation.navigate("DepositCheckoutScreen", {
-      type: item.type,
-      amount: item.amount,
-    });
+    
+    setPayingId(item.id);
+    try {
+      navigation.navigate("DepositCheckoutScreen", {
+        type: item.type,
+        amount: item.amount,
+        propertyId: item.propertyId,
+        // For rent payments, include which month is being paid
+        ...(item.type === "rent_online" && { 
+          monthLabel: item.monthLabel,
+          returnTo: "Home"
+        }),
+      });
+    } finally {
+      setPayingId(null);
+    }
   };
 
   const formatAmount = (n: number | undefined) =>
     (n != null && !Number.isNaN(n) ? n : 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
+  // Force refresh function
+  const handleForceRefresh = () => {
+    console.log('[DueAmount] Force refresh triggered');
+    refresh({ force: true });
+  };
+
   return (
     <View className="px-4 mt-6">
       <View className="flex-row justify-between items-end mb-4">
         <Text className="text-xl font-bold text-slate-800">Due Amount</Text>
+        {dueItems.length > 0 && (
+          <Text className="text-sm text-slate-600">
+            Total: ₹{formatAmount(totalDue)}
+          </Text>
+        )}
       </View>
 
       <View className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20">
@@ -132,6 +247,7 @@ export default function DueAmount() {
                 </Text>
               )}
 
+              {/* Regular Refresh Button */}
               <TouchableOpacity
                 onPress={refresh}
                 className="mt-6 px-6 py-2 bg-white/10 rounded-full border border-white/20"
@@ -140,9 +256,12 @@ export default function DueAmount() {
                   Refresh Status
                 </Text>
               </TouchableOpacity>
+
+             
             </View>
           ) : (
             <>
+              {/* Table Header */}
               <View className="flex-row items-center bg-white/10 rounded-full py-3 mb-4 mx-2">
                 <Text className="flex-[1.2] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
                   Month
@@ -158,6 +277,7 @@ export default function DueAmount() {
                 </Text>
               </View>
 
+              {/* Due Items */}
               {dueItems.map((item, index) => (
                 <View
                   key={`due-${index}-${item.id}`}
@@ -184,7 +304,7 @@ export default function DueAmount() {
                       </View>
                     ) : item.type === "rent_cash" ? (
                       <Text className="text-white/90 text-[11px] font-medium text-center">
-                        Pay ₹{formatAmount(item.amount)} via cash
+                        Pay via cash
                       </Text>
                     ) : payingId === item.id ? (
                       <ActivityIndicator size="small" color="#fff" />
@@ -205,7 +325,9 @@ export default function DueAmount() {
                   </View>
                 </View>
               ))}
-              {dueItems.length > 0 ? (
+              
+              {/* Total Row */}
+              {dueItems.length > 0 && (
                 <View className="flex-row items-center py-4 px-2 mt-2 border-t-2 border-white/20">
                   <Text className="flex-[1.2] text-left pl-4 text-white font-bold text-[16px]">
                     Total due
@@ -216,7 +338,10 @@ export default function DueAmount() {
                   <Text className="flex-[1] text-center text-white/70" />
                   <View className="flex-[1.5]" />
                 </View>
-              ) : null}
+              )}
+
+              {/* Force Refresh Button - Always show when there are dues */}
+              
             </>
           )}
         </LinearGradient>

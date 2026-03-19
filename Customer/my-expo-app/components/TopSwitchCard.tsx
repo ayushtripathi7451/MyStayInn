@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { useTheme } from "../context/ThemeContext";
 
-export default function TopSwitchCard({ mode, setMode, navigation }: any) {
+export default function TopSwitchCard({ mode, setMode, navigation, firstName = "User" }: any) {
   const { theme } = useTheme(); // ✅ GLOBAL THEME
 
   // ✅ THEME-BASED ACTIVE BUTTON COLOR
@@ -74,7 +74,7 @@ export default function TopSwitchCard({ mode, setMode, navigation }: any) {
         </Text>
 
         <Text className="text-gray-500 text-right mt-2 text-[13px]">
-          Not Ayush?{" "}
+          Not {firstName}?{" "}
           <Text
             className={`font-semibold ${linkColor}`}
             onPress={() => navigation.navigate("Welcome")}

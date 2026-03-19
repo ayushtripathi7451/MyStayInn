@@ -168,12 +168,12 @@ export default function CreateRequestScreen({ navigation }: any) {
           </Text>
         </View>
 
-        <Text className="mt-1 text-gray-400">
+        {/* <Text className="mt-1 text-gray-400">
           Attachments Maximum 5
-        </Text>
+        </Text> */}
 
         {/* ADD BUTTONS */}
-        <View className="flex-row justify-around mt-5">
+        {/* <View className="flex-row justify-around mt-5">
           <TouchableOpacity
             onPress={pickDocument}
             className="flex-row px-4 py-2 rounded-xl"
@@ -191,7 +191,7 @@ export default function CreateRequestScreen({ navigation }: any) {
             <Ionicons name="image-outline" size={20} color="#fff" />
             <Text className="ml-2 text-white">Add photo</Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
 
         {/* FORM */}
         <View

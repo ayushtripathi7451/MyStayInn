@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { 
@@ -12,6 +12,7 @@ import {
   ScrollView,
   Dimensions
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import TopSwitchCard from "./TopSwitchCard";
 import PinLoginCard from "./PinLoginCard";
 import BiometricsCard from "./BiometricsCard";
@@ -21,9 +22,28 @@ const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 export default function LoginPinScreen({ navigation }: any) {
   const [globalPinFocus, setGlobalPinFocus] = useState(false);
   const [mode, setMode] = useState<"pin" | "biometric">("pin");
+  const [firstName, setFirstName] = useState("User");
   
 
-  const gradientColors =
+  useEffect(() => {
+    // Fetch user's first name from AsyncStorage
+    const getUserName = async () => {
+      try {
+        const userData = await AsyncStorage.getItem("userData");
+        if (userData) {
+          const user = JSON.parse(userData);
+          const fullName = `${user.firstName ?? ''} ${(user.lastName ?? '').trim()}`.trim() || 'User';
+          setFirstName(fullName);
+        }
+      } catch (error) {
+        console.error("Error fetching user name:", error);
+      }
+    };
+
+    getUserName();
+  }, []);
+
+  const gradientColors: [string, string] =
      ["#6D7BFF", "#0040FF"];
 
   return (
@@ -34,7 +54,7 @@ export default function LoginPinScreen({ navigation }: any) {
       end={{ x: 1, y: 1 }}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : ""}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
       >
         <ScrollView 
@@ -55,7 +75,7 @@ export default function LoginPinScreen({ navigation }: any) {
                 {/* WELCOME TEXT */}
                 <View className="px-6">
                   <Text className="text-white text-3xl font-semibold">
-                    Welcome, Ayush 👋
+                    Welcome, {firstName} 👋
                   </Text>
                 </View>
 
@@ -64,6 +84,7 @@ export default function LoginPinScreen({ navigation }: any) {
                   mode={mode}
                   setMode={setMode}
                   navigation={navigation}
+                  firstName={firstName}
                 />
 
                 {/* LOGIN FORM & BACKGROUND CONTAINER */}

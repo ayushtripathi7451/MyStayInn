@@ -201,22 +201,7 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
         </TouchableOpacity>
       </View>
 
-      {/* Forgot MPIN – navigate directly to Reactivate (change MPIN) flow */}
-      <View className="mt-4 items-end">
-        <TouchableOpacity
-          disabled={loading}
-          onPress={() => {
-            setPin('');
-            Keyboard.dismiss();
-            setGlobalPinFocus(false);
-            navigation.navigate('Reactivate');
-          }}
-        >
-          <Text className="text-[14px] font-semibold text-white/90">
-            Forgot MPIN?
-          </Text>
-        </TouchableOpacity>
-      </View>
+    
     </View>
   );
 }

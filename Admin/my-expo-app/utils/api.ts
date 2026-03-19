@@ -5,7 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const AUTH_SERVICE_URL = "http://192.168.1.7:3001";
 const PROPERTY_SERVICE_URL = "http://192.168.1.7:3004";
 export const USER_SERVICE_URL = "http://192.168.1.7:3002";
-const BOOKING_SERVICE_URL = "http://192.168.1.7:3008";
+const BOOKING_SERVICE_URL = "http://192.168.1.7:3012";
 const NOTIFICATION_SERVICE_URL = "http://192.168.1.7:3005";
 const TICKET_SERVICE_URL = "http://192.168.1.7:3007";
 const MOVE_OUT_SERVICE_URL = "http://192.168.1.7:3010";

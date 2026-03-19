@@ -196,7 +196,7 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
           </View>
 
           {/* Map: centered on property location with pin */}
-          <View className="mt-4 rounded-2xl overflow-hidden border border-gray-200" style={styles.mapContainer}>
+          {/* <View className="mt-4 rounded-2xl overflow-hidden border border-gray-200" style={styles.mapContainer}>
             <MapFallback
               latitude={hasLocation ? Number(lat) : undefined}
               longitude={hasLocation ? Number(lng) : undefined}
@@ -238,7 +238,7 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
                 <Text className="ml-2 text-gray-600 text-sm">Property location not set</Text>
               </View>
             )}
-          </View>
+          </View> */}
 
           <View className="h-[1px] bg-gray-200 my-5" />
 

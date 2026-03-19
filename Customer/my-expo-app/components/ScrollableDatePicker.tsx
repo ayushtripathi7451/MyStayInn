@@ -34,20 +34,13 @@ export default function ScrollableDatePicker({
   const [isVisible, setIsVisible] = useState(false);
 
   const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
+  const startYear = 1930;
+  const endYear = Math.max(2030, currentYear + 10);
+  const years = Array.from({ length: endYear - startYear + 1 }, (_, i) => startYear + i);
+  
   const months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
   ];
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
 
@@ -88,13 +81,24 @@ export default function ScrollableDatePicker({
   };
 
   const scrollToIndex = (scrollRef: React.RefObject<ScrollView>, index: number, itemHeight = 50) => {
-    scrollRef.current?.scrollTo({ y: index * itemHeight, animated: true });
+    if (scrollRef.current && index >= 0) {
+      // Calculate position to center the item
+      const scrollViewHeight = 160; // Height of the ScrollView container (h-40 = 160px)
+      const centerOffset = (scrollViewHeight - itemHeight) / 2;
+      const yOffset = index * itemHeight - centerOffset;
+      
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: Math.max(0, yOffset), animated: true });
+      }, 100);
+    }
   };
 
   const openPicker = () => {
     if (disabled) return;
     setIsVisible(true);
-    setTimeout(() => {
+    
+    // Use requestAnimationFrame to ensure layout is complete
+    requestAnimationFrame(() => {
       if (mode !== "time") {
         scrollToIndex(yearScrollRef, years.indexOf(selectedYear));
         scrollToIndex(monthScrollRef, selectedMonth);
@@ -104,7 +108,7 @@ export default function ScrollableDatePicker({
         scrollToIndex(hourScrollRef, selectedHour);
         scrollToIndex(minuteScrollRef, selectedMinute);
       }
-    }, 100);
+    });
   };
 
   const handleConfirm = () => {
@@ -149,7 +153,7 @@ export default function ScrollableDatePicker({
           showsVerticalScrollIndicator={false}
           snapToInterval={50}
           decelerationRate="fast"
-          contentContainerStyle={{ paddingVertical: 95 }}
+          contentContainerStyle={{ paddingVertical: 55 }} // Adjusted to help with centering
         >
           {data.map((item, index) => {
             const selectedKey = typeof item === "string" && label === "Month" ? index : item;
@@ -161,9 +165,13 @@ export default function ScrollableDatePicker({
                   onSelect(typeof item === "string" ? (label === "Month" ? index : parseInt(item, 10)) : item);
                   scrollToIndex(scrollRef, index);
                 }}
-                className={`h-12 justify-center items-center ${isSelected ? "bg-blue-100 border border-blue-300 rounded-lg mx-2" : ""}`}
+                className={`h-12 justify-center items-center ${
+                  isSelected ? "bg-blue-100 border border-blue-300 rounded-lg mx-2" : ""
+                }`}
               >
-                <Text className={`text-base ${isSelected ? "text-blue-600 font-bold" : "text-gray-700"}`}>{item}</Text>
+                <Text className={`text-base ${isSelected ? "text-blue-600 font-bold" : "text-gray-700"}`}>
+                  {item}
+                </Text>
               </TouchableOpacity>
             );
           })}
@@ -178,6 +186,26 @@ export default function ScrollableDatePicker({
   useEffect(() => {
     if (selectedDay > daysInSelectedMonth) setSelectedDay(daysInSelectedMonth);
   }, [selectedYear, selectedMonth, selectedDay, daysInSelectedMonth]);
+
+  // Scroll to selected values when modal becomes visible
+  useEffect(() => {
+    if (isVisible) {
+      // Small delay to ensure modal is fully rendered
+      const timer = setTimeout(() => {
+        if (mode !== "time") {
+          scrollToIndex(yearScrollRef, years.indexOf(selectedYear));
+          scrollToIndex(monthScrollRef, selectedMonth);
+          scrollToIndex(dayScrollRef, selectedDay - 1);
+        }
+        if (mode !== "date") {
+          scrollToIndex(hourScrollRef, selectedHour);
+          scrollToIndex(minuteScrollRef, selectedMinute);
+        }
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isVisible]);
 
   return (
     <>

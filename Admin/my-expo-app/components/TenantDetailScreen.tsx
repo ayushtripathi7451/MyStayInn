@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { userApi, bookingApi, propertyApi } from "../utils/api";
 import { formatAddress } from "../utils/address";
 import { resolveFinalKycVerified } from "../utils/kyc";
@@ -174,11 +175,13 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
     } finally {
       setLoading(false);
     }
-  }, [tenantId, uniqueId, passedCustomer, passedBooking, isInactiveRoute]);
+  }, [tenantId, uniqueId, isInactiveRoute]);
 
-  useEffect(() => {
-    fetchDetails();
-  }, [fetchDetails]);
+  useFocusEffect(
+    useCallback(() => {
+      fetchDetails();
+    }, [fetchDetails])
+  );
 
   const formatDate = (dateString: string) => {
     if (!dateString) return "—";
@@ -279,40 +282,56 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
       ) : null}
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
-        <View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
-          <View className="flex-row items-center justify-between mb-4">
-            <View className="flex-row items-center">
-              <View className="w-16 h-16 bg-blue-100 rounded-xl items-center justify-center">
-                <Text className="text-blue-600 font-bold text-2xl">{displayName.charAt(0)}</Text>
-              </View>
-              <View className="ml-4">
-                <Text className="text-xl font-black text-slate-900">{displayName}</Text>
-                <Text className="text-slate-500">
-                  {booking?.roomNumber ? `Room ${booking.roomNumber}` : "—"} • {profile?.uniqueId || tenantId || "—"}
-                </Text>
-                <Text className={`mt-1 text-xs font-bold uppercase ${isKycVerified ? "text-green-600" : "text-amber-600"}`}>
-                  KYC {kycStatusLabel}
-                </Text>
-              </View>
-            </View>
-            <View className={`px-3 py-1 rounded-full ${isInactiveTenant ? "bg-slate-100" : "bg-green-50"}`}>
-              <Text className={`font-bold text-xs uppercase ${isInactiveTenant ? "text-slate-600" : "text-green-600"}`}>
-                {isInactiveTenant ? "Inactive" : "Active"}
-              </Text>
-            </View>
-          </View>
+        // In TenantDetailScreen.tsx, update the profile header section:
 
-          <View className="flex-row gap-2 mt-2">
-            <TouchableOpacity className="flex-1 bg-green-500 py-3 rounded-xl" onPress={() => handleAction("call")}>
-              <Text className="text-center font-bold text-white text-sm">Call</Text>
-            </TouchableOpacity>
-            {!isInactiveTenant && (
-              <TouchableOpacity className="flex-1 bg-orange-500 py-3 rounded-xl" onPress={() => handleAction("moveout")}>
-                <Text className="text-center font-bold text-white text-sm">Move Out</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
+<View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
+  <View className="flex-row items-center justify-between mb-4">
+    <View className="flex-row items-center">
+      {/* Profile Image with proper access and fallback */}
+      <View className="w-16 h-16 bg-blue-100 rounded-xl items-center justify-center overflow-hidden">
+        {profileExtras?.profileImage ? (
+          <Image 
+            source={{ uri: profileExtras.profileImage }} 
+            className="w-full h-full"
+            resizeMode="cover"
+            onError={(e) => {
+              console.log('Profile image failed to load:', profileExtras.profileImage);
+            }}
+          />
+        ) : (
+          <Text className="text-blue-600 font-bold text-2xl">
+            {displayName.charAt(0).toUpperCase()}
+          </Text>
+        )}
+      </View>
+      <View className="ml-4">
+        <Text className="text-xl font-black text-slate-900">{displayName}</Text>
+        <Text className="text-slate-500">
+          {booking?.roomNumber ? `Room ${booking.roomNumber}` : "—"} • {profile?.uniqueId || tenantId || "—"}
+        </Text>
+        <Text className={`mt-1 text-xs font-bold uppercase ${isKycVerified ? "text-green-600" : "text-amber-600"}`}>
+          KYC {kycStatusLabel}
+        </Text>
+      </View>
+    </View>
+    <View className={`px-3 py-1 rounded-full ${isInactiveTenant ? "bg-slate-100" : "bg-green-50"}`}>
+      <Text className={`font-bold text-xs uppercase ${isInactiveTenant ? "text-slate-600" : "text-green-600"}`}>
+        {isInactiveTenant ? "Inactive" : "Active"}
+      </Text>
+    </View>
+  </View>
+
+  <View className="flex-row gap-2 mt-2">
+    <TouchableOpacity className="flex-1 bg-green-500 py-3 rounded-xl" onPress={() => handleAction("call")}>
+      <Text className="text-center font-bold text-white text-sm">Call</Text>
+    </TouchableOpacity>
+    {!isInactiveTenant && (
+      <TouchableOpacity className="flex-1 bg-orange-500 py-3 rounded-xl" onPress={() => handleAction("moveout")}>
+        <Text className="text-center font-bold text-white text-sm">Move Out</Text>
+      </TouchableOpacity>
+    )}
+  </View>
+</View>
 
         {tabs.length > 0 && (
           <View className="flex-row bg-white rounded-[24px] p-2 mt-4 shadow-sm border border-white">

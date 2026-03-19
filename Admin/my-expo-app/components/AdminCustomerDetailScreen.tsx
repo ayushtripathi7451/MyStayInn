@@ -112,7 +112,7 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
   void activeStay;
 
   // Get customer from route params (customer.id is often uniqueId from list)
-  const customer = route?.params?.customer;
+  const customer = route?.params?.customer || route?.params?.customerData;
 
   const profileLookupId = customer?.uniqueId || customer?.id || customer?.mystayId;
 
@@ -451,32 +451,44 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
           </View>
         </Section>
 
-        {/* DOCUMENTS */}
-        <Section title="Customer Documents">
-          <View className="flex-row flex-wrap justify-between">
-            <Doc label="Aadhaar Front" uri={CUSTOMER.documents.aadharFront} half onPreview={setPreviewImage} />
-            <Doc label="Aadhaar Back" uri={CUSTOMER.documents.aadharBack} half onPreview={setPreviewImage} />
-            <Doc label="ID Front" uri={CUSTOMER.documents.idFront} half onPreview={setPreviewImage} />
-            <Doc label="ID Back" uri={CUSTOMER.documents.idBack} half onPreview={setPreviewImage} />
-          </View>
-        </Section>
-
-        {/* KYC VERIFICATION DETAILS */}
+         {/* KYC VERIFICATION DETAILS */}
         <Section title="KYC Verification">
           {/* Overall KYC status badge */}
-          <View className={`flex-row items-center px-4 py-3 rounded-2xl mb-5 ${isKycVerified ? "bg-emerald-50 border border-emerald-200" : "bg-orange-50 border border-orange-200"}`}>
-            <Ionicons
-              name={isKycVerified ? "shield-checkmark" : "shield-outline"}
-              size={22}
-              color={isKycVerified ? "#059669" : "#EA580C"}
-            />
-            <Text className={`ml-3 font-black text-base ${isKycVerified ? "text-emerald-700" : "text-orange-600"}`}>
-              KYC {kycStatus}
-            </Text>
-            {kycMatches.hasAadhaarData && (
-              <Text className="ml-auto text-[11px] font-semibold text-slate-400">Aadhaar matched</Text>
-            )}
-          </View>
+          {!kycMatches.hasAadhaarData ? (
+            // No Aadhaar data - KYC not initiated
+            <View className="flex-row items-center px-4 py-3 rounded-2xl mb-5 bg-red-50 border border-red-200">
+              <Ionicons name="alert-circle" size={22} color="#DC2626" />
+              <Text className="ml-3 font-black text-base text-red-600">
+                KYC Pending
+              </Text>
+            </View>
+          ) : isKycVerified ? (
+            // Aadhaar verified
+            <View className="flex-row items-center px-4 py-3 rounded-2xl mb-5 bg-emerald-50 border border-emerald-200">
+              <Ionicons name="shield-checkmark" size={22} color="#059669" />
+              <View className="ml-3 flex-1">
+                <Text className="font-black text-base text-emerald-700">
+                  KYC Completed
+                </Text>
+                <Text className="text-xs font-semibold text-emerald-600 mt-0.5">
+                  Aadhaar authenticated
+                </Text>
+              </View>
+            </View>
+          ) : (
+            // Aadhaar unverified
+            <View className="flex-row items-center px-4 py-3 rounded-2xl mb-5 bg-orange-50 border border-orange-200">
+              <Ionicons name="shield-outline" size={22} color="#EA580C" />
+              <View className="ml-3 flex-1">
+                <Text className="font-black text-base text-orange-600">
+                  KYC Completed
+                </Text>
+                <Text className="text-xs font-semibold text-orange-500 mt-0.5">
+                  Aadhaar authentication failed
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Field-by-field comparison */}
           {kycMatches.hasAadhaarData ? (
@@ -514,6 +526,18 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
             </View>
           )}
         </Section>
+
+        {/* DOCUMENTS */}
+        <Section title="Customer Documents">
+          <View className="flex-row flex-wrap justify-between">
+            <Doc label="Aadhaar Front" uri={CUSTOMER.documents.aadharFront} half onPreview={setPreviewImage} />
+            <Doc label="Aadhaar Back" uri={CUSTOMER.documents.aadharBack} half onPreview={setPreviewImage} />
+            <Doc label="ID Front" uri={CUSTOMER.documents.idFront} half onPreview={setPreviewImage} />
+            <Doc label="ID Back" uri={CUSTOMER.documents.idBack} half onPreview={setPreviewImage} />
+          </View>
+        </Section>
+
+       
 
         {/* VERIFICATION */}
         <TouchableOpacity

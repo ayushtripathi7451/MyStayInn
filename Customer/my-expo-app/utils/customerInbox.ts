@@ -53,11 +53,21 @@ export async function fetchAnnouncementRows(): Promise<InboxRow[]> {
       const id = String(a.id ?? "").trim() || `a-${out.length}`;
       if (seen.has(id)) continue;
       seen.add(id);
+      
+      const title = (a.title || "").trim();
+      const body = String(a.body ?? "").trim();
+      
+      // Skip announcements with empty title AND empty body
+      if (!title && !body) {
+        console.warn('[fetchAnnouncementRows] Skipping announcement with empty title and body:', id);
+        continue;
+      }
+      
       out.push({
         kind: "announcement",
         id: `ann-${id}`,
-        title: (a.title || "Announcement").trim(),
-        body: String(a.body ?? ""),
+        title: title || "Announcement",
+        body: body,
         sentAt: a.sentAt || new Date().toISOString(),
       });
     }
@@ -99,12 +109,22 @@ export async function getCustomerPushRows(): Promise<InboxRow[]> {
     const p = JSON.parse(raw);
     if (!Array.isArray(p)) return [];
     return p
-      .filter((x: any) => x?.id && x?.sentAt)
+      .filter((x: any) => {
+        if (!x?.id || !x?.sentAt) return false;
+        // Filter out notifications with empty title AND empty body
+        const title = String(x.title ?? "").trim();
+        const body = String(x.body ?? "").trim();
+        if (!title && !body) {
+          console.warn('[getCustomerPushRows] Skipping push notification with empty title and body:', x.id);
+          return false;
+        }
+        return true;
+      })
       .map((x: any) => ({
         kind: "push" as const,
         id: String(x.id),
-        title: String(x.title ?? "Notification"),
-        body: String(x.body ?? ""),
+        title: String(x.title ?? "Notification").trim() || "Notification",
+        body: String(x.body ?? "").trim(),
         sentAt: String(x.sentAt),
       }));
   } catch {

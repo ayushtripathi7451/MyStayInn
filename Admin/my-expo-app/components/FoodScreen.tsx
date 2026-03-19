@@ -253,7 +253,7 @@ export default function FoodScreen({ navigation, route }: any) {
                         className="border border-gray-200 bg-white rounded-2xl px-4 py-3 text-gray-800"
                       />
                     </View>
-                    <View className="flex-row items-center justify-between">
+                    {/* <View className="flex-row items-center justify-between">
                       <Text className="text-gray-600 text-sm">Notify tenants at start time (food ready)</Text>
                       <Switch
                         value={s.notifyAtStart}
@@ -261,7 +261,7 @@ export default function FoodScreen({ navigation, route }: any) {
                         trackColor={{ false: "#D1D5DB", true: "#A5B4FC" }}
                         thumbColor={s.notifyAtStart ? ACTIVE_COLOR : "#F3F4F6"}
                       />
-                    </View>
+                    </View> */}
                   </>
                 )}
               </View>

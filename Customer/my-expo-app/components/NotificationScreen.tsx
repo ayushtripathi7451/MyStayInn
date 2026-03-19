@@ -28,7 +28,19 @@ export default function NotificationScreen() {
       setLoading(true);
       const [ann, push] = await Promise.all([fetchAnnouncementRows(), getCustomerPushRows()]);
       const merged = mergeInboxRows(ann, push);
-      const mapped: ListItem[] = merged.map((r) => {
+      
+      // Filter out notifications with empty or whitespace-only title AND body
+      const filtered = merged.filter((r) => {
+        const hasTitle = r.title && r.title.trim().length > 0;
+        const hasBody = r.body && r.body.trim().length > 0;
+        if (!hasTitle && !hasBody) {
+          console.warn('[NotificationScreen] Filtering out notification with no content:', r.id);
+          return false;
+        }
+        return true;
+      });
+      
+      const mapped: ListItem[] = filtered.map((r) => {
         const date = new Date(r.sentAt);
         const timeLabel = Number.isNaN(date.getTime())
           ? "—"
@@ -61,7 +73,12 @@ export default function NotificationScreen() {
     () =>
       items.filter((n) => {
         const t = new Date(n.sentAt).getTime();
-        return !Number.isNaN(t) && t >= sevenDaysAgo;
+        // For push notifications, show in Recent if within 7 days
+        if (n.kind === "push") {
+          return !Number.isNaN(t) && t >= sevenDaysAgo;
+        }
+        // For announcements, always show in Recent (they're already customer-specific from backend)
+        return true;
       }),
     [items, sevenDaysAgo]
   );
@@ -69,7 +86,12 @@ export default function NotificationScreen() {
     () =>
       items.filter((n) => {
         const t = new Date(n.sentAt).getTime();
-        return Number.isNaN(t) || t < sevenDaysAgo;
+        // Only push notifications go to Past History (after 7 days)
+        if (n.kind === "push") {
+          return Number.isNaN(t) || t < sevenDaysAgo;
+        }
+        // Announcements never go to Past History
+        return false;
       }),
     [items, sevenDaysAgo]
   );
