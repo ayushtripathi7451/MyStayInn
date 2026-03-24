@@ -37,13 +37,6 @@ export default function PropertyDropdown({ navigation }: PropertyDropdownProps) 
         name: prop.name,
         address: `${prop.city || ''}, ${prop.state || ''}`,
         totalRooms: prop.totalRooms ?? 0,
-        occupiedRooms: currentProperty.occupiedRooms,
-        monthlyRevenue: currentProperty.monthlyRevenue,
-        monthlyExpenses: currentProperty.monthlyExpenses,
-        pendingDues: currentProperty.pendingDues,
-        bookingRequests: currentProperty.bookingRequests,
-        moveOutRequests: currentProperty.moveOutRequests,
-        openTickets: currentProperty.openTickets,
       }))
     : [];
   const displayProperties = transformedFromRedux.length > 0 ? transformedFromRedux : properties;
@@ -69,10 +62,10 @@ export default function PropertyDropdown({ navigation }: PropertyDropdownProps) 
       >
         <View className="flex-col">
           <Text className="text-[18px] font-semibold text-black">
-            {currentProperty.name}
+            {currentProperty?.name ?? 'Select Property'}
           </Text>
           <Text className="text-[14px] font-medium text-gray-400">
-            ID: {currentProperty.id}
+            ID: {currentProperty?.id ?? '—'}
           </Text>
         </View>
         <Ionicons
@@ -115,7 +108,7 @@ export default function PropertyDropdown({ navigation }: PropertyDropdownProps) 
                       key={property.id}
                       onPress={() => handlePropertySelect(property)}
                       className={`p-4 border-b border-gray-50 ${
-                        currentProperty.id === property.id ? 'bg-blue-50' : ''
+                        currentProperty?.id === property.id ? 'bg-blue-50' : ''
                       }`}
                     >
                       <View className="flex-row items-center justify-between">
@@ -130,7 +123,7 @@ export default function PropertyDropdown({ navigation }: PropertyDropdownProps) 
                             {property.totalRooms} rooms
                           </Text>
                         </View>
-                        {currentProperty.id === property.id && (
+                        {currentProperty?.id === property.id && (
                           <Ionicons name="checkmark-circle" size={20} color="#2563EB" />
                         )}
                       </View>

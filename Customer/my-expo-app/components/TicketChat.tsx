@@ -15,7 +15,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ticketApi } from "../utils/api";
 
-const STATUS_OPTIONS = ["open", "in_progress", "closed"] as const;
 const STATUS_LABEL: Record<string, string> = {
   open: "Open",
   in_progress: "In Progress",
@@ -48,8 +47,6 @@ export default function AdminTicketChat({ navigation, route }: any) {
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [openDropdown, setOpenDropdown] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const fetchTicket = useCallback(async () => {
@@ -95,39 +92,6 @@ export default function AdminTicketChat({ navigation, route }: any) {
     getCurrentUserId();
   }, [fetchTicket]);
 
-  const handleStatusChange = async (newStatus: string) => {
-    if (!ticket || ticket.status === newStatus) {
-      setOpenDropdown(false);
-      return;
-    }
-    if (newStatus === "closed") {
-      Alert.alert(
-        "Close Ticket?",
-        "You won't be able to add new comments after closing.",
-        [
-          { text: "Cancel", style: "cancel", onPress: () => setOpenDropdown(false) },
-          { text: "Yes, Close", onPress: () => doUpdateStatus("closed") },
-        ]
-      );
-    } else {
-      doUpdateStatus(newStatus);
-    }
-  };
-
-  const doUpdateStatus = async (status: string) => {
-    setOpenDropdown(false);
-    if (!ticketId) return;
-    setUpdatingStatus(true);
-    try {
-      const res = await ticketApi.patch(`/api/tickets/${ticketId}`, { status });
-      if (res.data.success && res.data.ticket) setTicket(res.data.ticket);
-    } catch (e: any) {
-      Alert.alert("Error", e?.response?.data?.message || "Failed to update status");
-    } finally {
-      setUpdatingStatus(false);
-    }
-  };
-
   const handleAddComment = async () => {
     const body = commentText.trim();
     if (!body || !ticketId || ticket?.status === "closed") return;
@@ -169,48 +133,23 @@ export default function AdminTicketChat({ navigation, route }: any) {
           </TouchableOpacity>
           <Text className="ml-3 text-2xl font-semibold text-slate-900">{ticket.displayId}</Text>
         </View>
+        {/* Status badge - read-only for customers */}
         <View className="relative">
-          <TouchableOpacity
-            onPress={() => !isClosed && setOpenDropdown((p) => !p)}
+          <View
             className="flex-row items-center justify-center px-4 py-2 rounded-full shadow-sm"
             style={{ backgroundColor: statusColor[status]?.bg || statusColor.open.bg, minWidth: 130 }}
           >
             <Text className="font-semibold text-[16px]" style={{ color: statusColor[status]?.text || statusColor.open.text }}>
               {STATUS_LABEL[status] || status}
             </Text>
-            {!isClosed && (
-              <Ionicons 
-                name={openDropdown ? "chevron-up" : "chevron-down"} 
-                size={16} 
-                color={statusColor[status]?.text} 
-                style={{ marginLeft: 6 }} 
-              />
-            )}
-          </TouchableOpacity>
-          
-          {openDropdown && (
-            <View className="absolute right-0 mt-2 bg-white rounded-xl border border-slate-200 shadow-lg z-50">
-              {STATUS_OPTIONS.map((s) => (
-                <TouchableOpacity 
-                  key={s} 
-                  onPress={() => handleStatusChange(s)} 
-                  className="px-4 py-3 active:bg-slate-50"
-                  disabled={updatingStatus}
-                >
-                  <Text className="font-medium" style={{ color: statusColor[s]?.text }}>
-                    {STATUS_LABEL[s]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          </View>
         </View>
       </View>
 
       <KeyboardAvoidingView 
-        behavior={Platform.OS === "ios" ? "padding" : undefined} 
+        behavior={Platform.OS === "ios" ? "padding" : "padding"} 
         className="flex-1"
-        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
         <ScrollView 
           showsVerticalScrollIndicator={false} 
@@ -245,9 +184,28 @@ export default function AdminTicketChat({ navigation, route }: any) {
             </View>
           ) : (
             comments.map((c) => {
-              // Messages from current user appear on right, others on left
-              const isMyMessage = currentUserId && c.authorId === currentUserId;
-              console.log("Comment:", { authorId: c.authorId, currentUserId, isMyMessage });
+              // For customer app: customer messages go right, admin messages go left
+              // Use authorRole as the primary indicator
+              const isMyMessage = c.authorRole === "customer";
+              
+              // Debug logging
+              console.log("Customer TicketChat - Comment:", {
+                commentId: c.id,
+                authorId: c.authorId,
+                authorUniqueId: c.authorUniqueId,
+                authorRole: c.authorRole,
+                currentUserId,
+                isMyMessage
+              });
+              
+              // Determine label based on role
+              const authorLabel = isMyMessage 
+                ? "You" 
+                : c.authorRole === "admin" 
+                  ? "Admin" 
+                  : c.authorRole === "support"
+                    ? "Support"
+                    : "User";
               
               return (
                 <View key={c.id} className={`mb-4 ${isMyMessage ? "items-end" : "items-start"}`}>
@@ -277,7 +235,7 @@ export default function AdminTicketChat({ navigation, route }: any) {
                       </Text>
                       <View className={`flex-row items-center mt-1 ${isMyMessage ? "justify-end" : "justify-start"}`}>
                         <Text className={`text-[10px] ${isMyMessage ? "text-blue-200" : "text-slate-400"}`}>
-                          {isMyMessage ? "You" : "Support"} · {formatDate(c.createdAt)}
+                          {authorLabel} · {formatDate(c.createdAt)}
                         </Text>
                       </View>
                     </View>
@@ -294,22 +252,24 @@ export default function AdminTicketChat({ navigation, route }: any) {
               );
             })
           )}
+        </ScrollView>
 
-          {/* Comment Input Area - Increased height */}
-          <View className="mt-5 mb-6 bg-white rounded-xl border border-slate-200 shadow-sm">
+        {/* Comment Input Area - Fixed at bottom */}
+        <View className="bg-white border-t border-slate-200 px-4 pb-2 pt-2">
+          <View className="bg-white rounded-xl border border-slate-200 shadow-sm">
             <TextInput
               placeholder={isClosed ? "This ticket is closed" : "Write your reply..."}
               placeholderTextColor="#94A3B8"
               editable={!isClosed}
               className="px-4 pt-4 pb-2 text-slate-900"
               style={{ 
-                minHeight: 120, 
-                maxHeight: 200,
+                minHeight: 100, 
+                maxHeight: 150,
                 textAlignVertical: "top",
                 fontSize: 16,
               }}
               multiline
-              numberOfLines={5}
+              numberOfLines={4}
               value={commentText}
               onChangeText={setCommentText}
             />
@@ -338,7 +298,7 @@ export default function AdminTicketChat({ navigation, route }: any) {
               </TouchableOpacity>
             </View>
           </View>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

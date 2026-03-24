@@ -159,17 +159,20 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       }
 
       const rawProfileImage = (profileData?.profileImage as string | null) || null;
-      const profileImageUrl = await uploadImageIfLocal(rawProfileImage, "profileImage");
+      // Profile image is already base64 from CompleteProfileScreen, no need to upload
+      const profileImageBase64 = rawProfileImage;
+      
+      console.log('[CompleteProfileDocsScreen] profileImage present:', !!profileImageBase64);
+      if (profileImageBase64) {
+        console.log('[CompleteProfileDocsScreen] profileImage type:', typeof profileImageBase64);
+        console.log('[CompleteProfileDocsScreen] profileImage length:', profileImageBase64.length);
+        console.log('[CompleteProfileDocsScreen] profileImage preview:', profileImageBase64.substring(0, 50));
+      }
+      
       const aadharFrontUrl = await uploadImageIfLocal(aadharFront, "aadharFront");
       const aadharBackUrl = await uploadImageIfLocal(aadharBack, "aadharBack");
       const idFrontUrl = requiresExtraId ? await uploadImageIfLocal(idFront, "idFront") : null;
       const idBackUrl = requiresExtraId ? await uploadImageIfLocal(idBack, "idBack") : null;
-
-      // If user selected a profile image, ensure we successfully uploaded it (don't silently drop it).
-      if (rawProfileImage && rawProfileImage.startsWith("file://") && !profileImageUrl) {
-        Alert.alert("Error", "Could not upload profile photo. Please try again.");
-        return;
-      }
 
       if (!aadharFrontUrl || !aadharBackUrl) {
         Alert.alert("Error", "Could not upload Aadhaar images. Please try again.");
@@ -185,7 +188,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
         emergencyContactName: contactName,
         emergencyContactPhone: `${countryCode}${contactNumber}`,
         profession,
-        ...(profileImageUrl ? { profileImage: profileImageUrl } : {}),
+        ...(profileImageBase64 ? { profileImage: profileImageBase64 } : {}),
         documents: {
           aadharFront: aadharFrontUrl,
           aadharBack: aadharBackUrl,
@@ -193,7 +196,11 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
         },
       };
 
+      console.log('[CompleteProfileDocsScreen] Submitting payload with profileImage:', !!payload.profileImage);
+
       const response = await userApi.post("/api/users/complete-profile", payload);
+
+      console.log('[CompleteProfileDocsScreen] Response:', response.data);
 
       if (response.data.success) {
         Alert.alert(

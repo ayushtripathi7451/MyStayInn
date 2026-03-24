@@ -215,9 +215,14 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
 
       <KeyboardAvoidingView 
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        className="flex-1"
+        style={{ flex: 1 }}
       >
-        <ScrollView showsVerticalScrollIndicator={false} className="flex-1 px-5">
+        <ScrollView 
+          showsVerticalScrollIndicator={false} 
+          className="flex-1 px-5"
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 40 }}
+        >
           
           {/* Recipient Selection */}
           <View className="bg-white rounded-2xl p-5 mt-5 shadow-sm border border-slate-100">

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import auth from "@react-native-firebase/auth";
-import { setConfirmation } from "../utils/firebaseConfirmation";
+import { setConfirmation, clearConfirmation } from "../utils/firebaseConfirmation";
 
 export default function BasicInfoScreen({ navigation }: any) {
   const [first, setFirst] = useState("");
@@ -25,6 +25,43 @@ export default function BasicInfoScreen({ navigation }: any) {
   const [email, setEmail] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
+
+  // Clear any stale confirmation when component mounts
+  useEffect(() => {
+    clearConfirmation();
+    
+    // Sign out any existing user silently (without triggering errors)
+    const signOutSilently = async () => {
+      try {
+        const currentUser = auth().currentUser;
+        if (currentUser) {
+          await auth().signOut();
+        }
+      } catch (error) {
+        // Silently ignore sign-out errors on mount
+        console.log("Silent sign-out on mount:", error);
+      }
+    };
+    
+    signOutSilently();
+  }, []);
+
+  // Clear confirmation when screen is focused (but don't sign out aggressively)
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      clearConfirmation();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  // Handle back button press - go to Signup without trying to sign out
+  const handleBackPress = () => {
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Signup" }],
+    });
+  };
 
   const validate = () => {
     if (!first.trim()) return Alert.alert("Error", "First name is required");
@@ -51,18 +88,29 @@ export default function BasicInfoScreen({ navigation }: any) {
       setLoading(true);
       const fullPhoneNumber = `${countryCode}${mobile}`;
 
-      /**
-       * Calling auth().signInWithPhoneNumber ensures the native module is used.
-       * In a Dev Build, this triggers Play Integrity or reCAPTCHA automatically.
-       */
-      const confirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
+      // Clear any existing confirmation first
+      clearConfirmation();
 
-      // Store confirmation in helper (avoid passing non-serializable object)
+      // Check if user already exists in Firebase (optional)
+      try {
+        const currentUser = auth().currentUser;
+        if (currentUser) {
+          // If there's a user already signed in, sign them out silently
+          await auth().signOut();
+        }
+      } catch (signOutError) {
+        // Ignore sign-out errors
+        console.log("Sign-out before OTP:", signOutError);
+      }
+
+      // Wait a moment for Firebase to settle
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const confirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
       setConfirmation(confirmation);
 
       Alert.alert("OTP Sent!", `OTP sent to ${fullPhoneNumber}`);
 
-      // Navigate to VerifyEmail without passing confirmation
       navigation.navigate("VerifyEmail", {
         mobile: fullPhoneNumber,
         first,
@@ -84,6 +132,8 @@ export default function BasicInfoScreen({ navigation }: any) {
         friendlyMessage = "Too many attempts. Please try again later.";
       } else if (error.code === 'auth/missing-client-identifier') {
         friendlyMessage = "Configuration error: Ensure SHA-1 is added to Firebase.";
+      } else if (error.code === 'auth/user-disabled') {
+        friendlyMessage = "This phone number has been disabled.";
       }
 
       Alert.alert("Error", friendlyMessage);
@@ -109,136 +159,136 @@ export default function BasicInfoScreen({ navigation }: any) {
             }}
           >
             <Pressable onPress={() => setShowDropdown(false)}>
-            {/* HEADER */}
-            <View className="flex-row items-center mt-4">
-              <TouchableOpacity onPress={() => navigation.goBack()}>
-                <Ionicons name="chevron-back" size={26} color="black" />
-              </TouchableOpacity>
+              {/* HEADER */}
+              <View className="flex-row items-center mt-4">
+                <TouchableOpacity onPress={handleBackPress}>
+                  <Ionicons name="chevron-back" size={26} color="black" />
+                </TouchableOpacity>
 
-              <View className="flex-1 items-center -ml-6">
-                <Text className="text-xl font-semibold">
-                  Add your Basic Info 1 / 3
-                </Text>
-              </View>
-              <View style={{ width: 26 }} />
-            </View>
-
-            {/* PROGRESS BAR */}
-            <View className="flex-row justify-center mt-3 mb-8">
-              <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
-              <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
-            </View>
-
-            {/* First Name */}
-            <Text className="text-gray-700 mb-1">First Name</Text>
-            <TextInput
-              placeholder="Enter your first name"
-              placeholderTextColor="#9CA3AF"
-              value={first}
-              onChangeText={setFirst}
-              className="border border-gray-300 rounded-lg px-4 py-3"
-              style={{ color: '#000000' }}
-            />
-
-            {/* Last Name */}
-            <Text className="text-gray-700 mb-1 mt-3">Last Name</Text>
-            <TextInput
-              placeholder="Enter your last name"
-              placeholderTextColor="#9CA3AF"
-              value={last}
-              onChangeText={setLast}
-              className="border border-gray-300 rounded-lg px-4 py-3"
-              style={{ color: '#000000' }}
-            />
-
-            {/* Gender */}
-            <Text className="text-gray-700 mb-1 mt-3">Gender</Text>
-            <View className="relative">
-              <Pressable
-                onPress={() => setShowDropdown(!showDropdown)}
-                className="border border-gray-300 rounded-lg px-4 py-3 flex-row justify-between bg-white"
-              >
-                <Text className={gender ? "text-black" : "text-gray-400"}>
-                  {gender || "Select your gender"}
-                </Text>
-                <Ionicons
-                  name={showDropdown ? "chevron-up" : "chevron-down"}
-                  size={20}
-                  color="gray"
-                />
-              </Pressable>
-
-              {showDropdown && (
-                <View className="absolute w-full bg-white rounded-lg shadow-xl border border-gray-200 mt-12 z-20">
-                  {["Male", "Female"].map((item) => (
-                    <TouchableOpacity
-                      key={item}
-                      onPress={() => {
-                        setGender(item);
-                        setShowDropdown(false);
-                      }}
-                      className="px-4 py-3 border-b border-gray-100"
-                    >
-                      <Text>{item}</Text>
-                    </TouchableOpacity>
-                  ))}
+                <View className="flex-1 items-center -ml-6">
+                  <Text className="text-xl font-semibold">
+                    Add your Basic Info 1 / 3
+                  </Text>
                 </View>
-              )}
-            </View>
+                <View style={{ width: 26 }} />
+              </View>
 
-            {/* Mobile */}
-            <Text className="text-gray-700 mb-1 mt-3">Mobile Number</Text>
-            <View className="flex-row border border-gray-300 rounded-lg overflow-hidden">
+              {/* PROGRESS BAR */}
+              <View className="flex-row justify-center mt-3 mb-8">
+                <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+                <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
+                <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
+              </View>
+
+              {/* First Name */}
+              <Text className="text-gray-700 mb-1">First Name</Text>
               <TextInput
-                value={countryCode}
-                onChangeText={(t) =>
-                  setCountryCode(t.replace(/[^+0-9]/g, "").slice(0, 4))
-                }
-                keyboardType="phone-pad"
-                className="px-4 py-3 border-r border-gray-300 text-center"
-                style={{ minWidth: 70, color: '#000000' }}
-              />
-              <TextInput
-                placeholder="Enter mobile number"
+                placeholder="Enter your first name"
                 placeholderTextColor="#9CA3AF"
-                value={mobile}
-                onChangeText={(t) =>
-                  setMobile(t.replace(/[^0-9]/g, "").slice(0, 10))
-                }
-                keyboardType="numeric"
-                maxLength={10}
-                className="flex-1 px-4 py-3"
+                value={first}
+                onChangeText={setFirst}
+                className="border border-gray-300 rounded-lg px-4 py-3"
                 style={{ color: '#000000' }}
               />
-            </View>
 
-            {/* Email */}
-            <Text className="text-gray-700 mb-1 mt-3">Email</Text>
-            <TextInput
-              placeholder="example@example.com"
-              placeholderTextColor="#9CA3AF"
-              value={email}
-              onChangeText={setEmail}
-              className="border border-gray-300 rounded-lg px-4 py-3"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              style={{ color: '#000000' }}
-            />
+              {/* Last Name */}
+              <Text className="text-gray-700 mb-1 mt-3">Last Name</Text>
+              <TextInput
+                placeholder="Enter your last name"
+                placeholderTextColor="#9CA3AF"
+                value={last}
+                onChangeText={setLast}
+                className="border border-gray-300 rounded-lg px-4 py-3"
+                style={{ color: '#000000' }}
+              />
 
-            {/* BUTTON */}
-            <TouchableOpacity
-              onPress={sendOTP}
-              disabled={!isValid || loading}
-              className={`w-full py-4 rounded-xl mt-8 flex-row justify-center items-center ${
-                isValid && !loading ? "bg-purple-500" : "bg-purple-300"
-              }`}
-            >
-              {loading && <ActivityIndicator color="white" className="mr-2" />}
-              <Text className="text-center text-white font-semibold text-lg">
-                {loading ? "Sending OTP..." : "Send OTP"}
-              </Text>
-            </TouchableOpacity>
+              {/* Gender */}
+              <Text className="text-gray-700 mb-1 mt-3">Gender</Text>
+              <View className="relative">
+                <Pressable
+                  onPress={() => setShowDropdown(!showDropdown)}
+                  className="border border-gray-300 rounded-lg px-4 py-3 flex-row justify-between bg-white"
+                >
+                  <Text className={gender ? "text-black" : "text-gray-400"}>
+                    {gender || "Select your gender"}
+                  </Text>
+                  <Ionicons
+                    name={showDropdown ? "chevron-up" : "chevron-down"}
+                    size={20}
+                    color="gray"
+                  />
+                </Pressable>
+
+                {showDropdown && (
+                  <View className="absolute w-full bg-white rounded-lg shadow-xl border border-gray-200 mt-12 z-20">
+                    {["Male", "Female"].map((item) => (
+                      <TouchableOpacity
+                        key={item}
+                        onPress={() => {
+                          setGender(item);
+                          setShowDropdown(false);
+                        }}
+                        className="px-4 py-3 border-b border-gray-100"
+                      >
+                        <Text>{item}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {/* Mobile */}
+              <Text className="text-gray-700 mb-1 mt-3">Mobile Number</Text>
+              <View className="flex-row border border-gray-300 rounded-lg overflow-hidden">
+                <TextInput
+                  value={countryCode}
+                  onChangeText={(t) =>
+                    setCountryCode(t.replace(/[^+0-9]/g, "").slice(0, 4))
+                  }
+                  keyboardType="phone-pad"
+                  className="px-4 py-3 border-r border-gray-300 text-center"
+                  style={{ minWidth: 70, color: '#000000' }}
+                />
+                <TextInput
+                  placeholder="Enter mobile number"
+                  placeholderTextColor="#9CA3AF"
+                  value={mobile}
+                  onChangeText={(t) =>
+                    setMobile(t.replace(/[^0-9]/g, "").slice(0, 10))
+                  }
+                  keyboardType="numeric"
+                  maxLength={10}
+                  className="flex-1 px-4 py-3"
+                  style={{ color: '#000000' }}
+                />
+              </View>
+
+              {/* Email */}
+              <Text className="text-gray-700 mb-1 mt-3">Email</Text>
+              <TextInput
+                placeholder="example@example.com"
+                placeholderTextColor="#9CA3AF"
+                value={email}
+                onChangeText={setEmail}
+                className="border border-gray-300 rounded-lg px-4 py-3"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                style={{ color: '#000000' }}
+              />
+
+              {/* BUTTON */}
+              <TouchableOpacity
+                onPress={sendOTP}
+                disabled={!isValid || loading}
+                className={`w-full py-4 rounded-xl mt-8 flex-row justify-center items-center ${
+                  isValid && !loading ? "bg-purple-500" : "bg-purple-300"
+                }`}
+              >
+                {loading && <ActivityIndicator color="white" className="mr-2" />}
+                <Text className="text-center text-white font-semibold text-lg">
+                  {loading ? "Sending OTP..." : "Send OTP"}
+                </Text>
+              </TouchableOpacity>
             </Pressable>
           </ScrollView>
         </KeyboardAvoidingView>

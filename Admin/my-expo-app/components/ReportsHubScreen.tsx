@@ -24,6 +24,7 @@ import { useProperty } from "../contexts/PropertyContext";
 import { useProperties } from "../src/hooks";
 import { analyticsApi, bookingApi, expenseApi, moveOutApi, propertyApi, userApi } from "../utils/api";
 import { resolveFinalKycVerified } from "../utils/kyc";
+import { aggregateMoveOutPL, isBookingMovedOut } from "../utils/financialCalculations";
 
 /* -------------------- CONSTANTS -------------------- */
 // const { EncodingType } = FileSystem;
@@ -92,37 +93,43 @@ const escapeHtml = (value: any) =>
 
 async function getMyStayLogoDataUri(): Promise<string> {
   if (myStayLogoDataUriCache) {
-    console.log("Returning cached logo");
     return myStayLogoDataUriCache;
   }
 
   try {
-    console.log("Loading logo from assets...");
+    console.log("[Logo] Attempting to load logo...");
     const asset = Asset.fromModule(require("../assets/my-stay-logo.png"));
     await asset.downloadAsync();
 
     const uri = asset.localUri || asset.uri;
-    console.log("Asset URI:", uri);
-
     if (!uri) {
-      console.log("No URI available");
+      console.log("[Logo] No URI found for asset");
       return "";
     }
 
-    // Use the legacy API with explicit import
-    const base64 = await FileSystemLegacy.readAsStringAsync(uri, {
+    // Try to read file with timeout
+    const readPromise = FileSystemLegacy.readAsStringAsync(uri, {
       encoding: FileSystemLegacy.EncodingType.Base64,
     });
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Logo read timeout')), 5000)
+    );
+    
+    const base64 = await Promise.race([readPromise, timeoutPromise]);
 
-    console.log("Base64 length:", base64.length);
+    if (!base64 || base64.length === 0) {
+      console.log("[Logo] Empty base64 data");
+      return "";
+    }
 
     const dataUri = `data:image/png;base64,${base64}`;
     myStayLogoDataUriCache = dataUri;
-    console.log("Logo cached successfully");
+    console.log("[Logo] Successfully loaded, length:", dataUri.length);
     return dataUri;
   } catch (error) {
-    console.log("Logo loading error details:", error);
-    return "";
+    console.error("[Logo] Error loading logo:", error);
+    return ""; // Return empty string to continue without logo
   }
 }
 
@@ -203,16 +210,86 @@ function monthKeyToShortLabel(key: string): string {
 
 function collectionsForMonthKeyFromBookings(bookings: any[], monthKey: string): number {
   let total = 0;
+  let securityTotal = 0;
+  let onlineTotal = 0;
+  let cashTotal = 0;
+  
   bookings.forEach((b: any) => {
-    const mk = toMonthKeyFromDate(b.moveInDate);
-    if (mk !== monthKey) return;
-    const sec = Number(b.securityDeposit) || 0;
-    const online = Number(b.onlinePaymentRecv) || 0;
-    const cash = Number(b.cashPaymentRecv) || 0;
-    if (toBool(b.isSecurityPaid) && sec > 0) total += sec;
-    if (online > 0 && toBool(b.isRentOnlinePaid)) total += online;
-    if (cash > 0 && toBool(b.isRentCashPaid)) total += cash;
+    const rp = String(b.rentPeriod || 'month').toLowerCase();
+    
+    // Security deposit - counted in move-in month
+    const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
+    if (moveInMonthKey === monthKey) {
+      const sec = Number(b.securityDeposit) || 0;
+      if (toBool(b.isSecurityPaid) && sec > 0) {
+        total += sec;
+        securityTotal += sec;
+      }
+    }
+    
+    // Daily rent - iterate through dailyPayments array for paid amounts
+    if (rp === 'day') {
+      const dailyPayments = Array.isArray(b.dailyPayments) ? b.dailyPayments : [];
+      
+      dailyPayments.forEach((dp: any) => {
+        const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
+        if (dpMonthKey === monthKey) {
+          const onlineAmount = Number(dp.onlineAmount ?? 0);
+          const cashAmount = Number(dp.cashAmount ?? 0);
+          const paidOnline = toBool(dp.paidOnline);
+          const paidCash = toBool(dp.paidCash);
+          
+          // Add paid online amount
+          if (paidOnline && onlineAmount > 0) {
+            total += onlineAmount;
+            onlineTotal += onlineAmount;
+          }
+          
+          // Add paid cash amount
+          if (paidCash && cashAmount > 0) {
+            total += cashAmount;
+            cashTotal += cashAmount;
+          }
+        }
+      });
+      
+      return; // Skip monthly logic for day-based bookings
+    }
+    
+    // Monthly rent - check if this month is in the paid months list
+    const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
+    const onlinePaidMonths = onlinePaidYm ? onlinePaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
+    const schedOnline = Number(b.scheduledOnlineRent ?? 0);
+    const legacyOnline = Number(b.onlinePaymentRecv) || 0;
+    
+    if (schedOnline > 0 && onlinePaidMonths.includes(monthKey)) {
+      // New multi-month tracking
+      total += schedOnline;
+      onlineTotal += schedOnline;
+    } else if (legacyOnline > 0 && toBool(b.isRentOnlinePaid) && moveInMonthKey === monthKey) {
+      // Legacy single-month tracking (fallback)
+      total += legacyOnline;
+      onlineTotal += legacyOnline;
+    }
+    
+    // Cash rent - check if this month is in the paid months list
+    const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
+    const cashPaidMonths = cashPaidYm ? cashPaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
+    const schedCash = Number(b.scheduledCashRent ?? 0);
+    const legacyCash = Number(b.cashPaymentRecv) || 0;
+    
+    if (schedCash > 0 && cashPaidMonths.includes(monthKey)) {
+      // New multi-month tracking
+      total += schedCash;
+      cashTotal += schedCash;
+    } else if (legacyCash > 0 && toBool(b.isRentCashPaid) && moveInMonthKey === monthKey) {
+      // Legacy single-month tracking (fallback)
+      total += legacyCash;
+      cashTotal += legacyCash;
+    }
   });
+  
+  console.log(`[Collections] Month ${monthKey}: Security=₹${securityTotal}, Online=₹${onlineTotal}, Cash=₹${cashTotal}, Total=₹${total}`);
   return total;
 }
 
@@ -396,17 +473,142 @@ const EMPTY_REPORT_META: ReportMetaState = {
 
 const EMPTY_EXPENSE_SLICES: ExpenseSlicesState = { report: {}, financial: {} };
 
+const isMovedOutBooking = (b: any): boolean => {
+  const status = String(b?.status || "").toLowerCase();
+  return status === "completed" || status === "moved_out";
+};
+
 const getTotalDueFromBooking = (b: any): number => {
   const security = Number(b.securityDeposit) || 0;
   const isSecurityPaid = toBool(b.isSecurityPaid);
-  const onlineRecv = Number(b.onlinePaymentRecv) || 0;
-  const cashRecv = Number(b.cashPaymentRecv) || 0;
-  const isRentOnlinePaid = toBool(b.isRentOnlinePaid);
-  const isRentCashPaid = toBool(b.isRentCashPaid);
+  
+  // Helper to get year-month string
+  const yearMonth = (d: Date): string => {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  
+  // Helper to parse move-in date
+  const parseMoveInDate = (moveInDate: any): Date | null => {
+    if (!moveInDate) return null;
+    if (moveInDate instanceof Date) {
+      return isNaN(moveInDate.getTime()) ? null : moveInDate;
+    }
+    try {
+      const date = new Date(moveInDate);
+      return isNaN(date.getTime()) ? null : date;
+    } catch {
+      return null;
+    }
+  };
+  
+  const num = (v: any): number => {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
+  
   let due = 0;
-  if (security > 0 && !isSecurityPaid) due += security;
-  if (onlineRecv > 0 && !isRentOnlinePaid) due += onlineRecv;
-  if (cashRecv > 0 && !isRentCashPaid) due += cashRecv;
+  
+  // Security deposit: do not count moved-out/completed tenants in dues
+  if (security > 0 && !isSecurityPaid && !isMovedOutBooking(b)) {
+    due += security;
+  }
+  
+  const rp = String(b.rentPeriod || 'month').toLowerCase();
+  const now = new Date();
+  const currentYm = yearMonth(now);
+  
+  // Day-based rent - inspect dailyPayments array for actual unpaid status
+  if (rp === 'day') {
+    // Check dailyPayments array for unpaid amounts
+    const dailyPayments = Array.isArray(b.dailyPayments) ? b.dailyPayments : [];
+    
+    // Sum up all unpaid daily amounts
+    dailyPayments.forEach((dp: any) => {
+      const onlineAmount = num(dp.onlineAmount);
+      const cashAmount = num(dp.cashAmount);
+      const paidOnline = toBool(dp.paidOnline);
+      const paidCash = toBool(dp.paidCash);
+      
+      // Add unpaid online amount
+      if (!paidOnline && onlineAmount > 0) {
+        due += onlineAmount;
+      }
+      
+      // Add unpaid cash amount
+      if (!paidCash && cashAmount > 0) {
+        due += cashAmount;
+      }
+    });
+    
+    return due;
+  }
+  
+  // Monthly rent - calculate all unpaid months
+  const moveIn = parseMoveInDate(b.moveInDate);
+  if (!moveIn) {
+    // Fallback to legacy logic if no move-in date
+    const onlineRecv = num(b.onlinePaymentRecv);
+    const cashRecv = num(b.cashPaymentRecv);
+    const isRentOnlinePaid = toBool(b.isRentOnlinePaid);
+    const isRentCashPaid = toBool(b.isRentCashPaid);
+    
+    if (onlineRecv > 0 && !isRentOnlinePaid) due += onlineRecv;
+    if (cashRecv > 0 && !isRentCashPaid) due += cashRecv;
+    
+    return due;
+  }
+  
+  // Calculate first due month based on move-in day
+  const moveInDay = moveIn.getDate();
+  const moveInYm = yearMonth(moveIn);
+  const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
+  const firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
+  
+  // If current month is before first due month, no rent due
+  if (currentYm < firstDueYm) {
+    return due;
+  }
+  
+  // Generate all months from first due to current
+  const monthsToPay: string[] = [];
+  let current = firstDueYm;
+  while (current <= currentYm) {
+    monthsToPay.push(current);
+    const [year, month] = current.split('-').map(Number);
+    const nextDate = new Date(year, month, 1);
+    current = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+  }
+  
+  // Online rent
+  const schedOnline = num(b.scheduledOnlineRent);
+  const legacyOnline = num(b.onlinePaymentRecv);
+  const onlineRent = schedOnline > 0 ? schedOnline : legacyOnline;
+  
+  if (onlineRent > 0) {
+    const paidMonthsStr = String(b.rentOnlinePaidYearMonth || '').trim();
+    const paidMonths = paidMonthsStr 
+      ? paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean)
+      : [];
+    
+    const unpaidMonths = monthsToPay.filter(month => !paidMonths.includes(month));
+    due += onlineRent * unpaidMonths.length;
+  }
+  
+  // Cash rent
+  const schedCash = num(b.scheduledCashRent);
+  const legacyCash = num(b.cashPaymentRecv);
+  const cashRent = schedCash > 0 ? schedCash : legacyCash;
+  
+  if (cashRent > 0) {
+    const paidMonthsStr = String(b.rentCashPaidYearMonth || '').trim();
+    const paidMonths = paidMonthsStr 
+      ? paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean)
+      : [];
+    
+    const unpaidMonths = monthsToPay.filter(month => !paidMonths.includes(month));
+    due += cashRent * unpaidMonths.length;
+  }
+  
   return due;
 };
 
@@ -415,17 +617,41 @@ function getMonthsFromCurrentThroughApril(): { monthKey: string; label: string }
   const out: { monthKey: string; label: string }[] = [];
   let y = new Date().getFullYear();
   let m = new Date().getMonth();
-  for (;;) {
+  let count = 0;
+  const maxMonths = 12; // Prevent infinite loop
+  
+  // Calculate target month: We want to go until April
+  // Determine which April to stop at
+  let targetYear = y;
+  let targetMonth = 3; // April is month index 3
+  
+  // If current month is before April (Jan, Feb, Mar), we need to go to previous year's April
+  if (m < 3) { // Current month is Jan (0), Feb (1), or Mar (2)
+    targetYear = y - 1;
+  }
+  
+  while (count < maxMonths) {
     const monthKey = `${y}-${String(m + 1).padStart(2, "0")}`;
     out.push({ monthKey, label: `${MONTHS[m]} ${y}` });
-    if (m === 3) break;
+    
+    // Check if we've reached our target (April of the target year)
+    if (y === targetYear && m === targetMonth) {
+      break;
+    }
+    
+    // Move to previous month
     if (m === 0) {
       m = 11;
       y -= 1;
-    } else m -= 1;
+    } else {
+      m -= 1;
+    }
+    count++;
   }
+  
   return out;
 }
+
 
 function roomTypeLabel(room: any): string {
   const cap = Number(room?.capacity);
@@ -566,7 +792,7 @@ export type DetailedActiveRow = {
   securityDeposit: number;
   due: number;
   /** For Transaction Report */
-  payments?: { amount: number; date: string; type: "Online" | "Cash"; label: string }[];
+  payments?: { amount: number; date: string; type: "Online" | "Cash"; label: string; monthKey?: string }[];
   /** YYYY-MM from move-in; used to scope filtered reports */
   moveInMonthKey?: string;
   kycStatus: string;
@@ -595,6 +821,7 @@ type ReportDetailsState = {
   detailedOldRows: DetailedOldRow[];
   roomsOccupancyBlocks: RoomOccupancyBlock[];
   monthwiseMoveOutBlocks: MonthwiseMoveOutBlock[];
+  allTransactionRows?: DetailedActiveRow[]; // For Transaction Report - includes completed bookings
 };
 
 const EMPTY_REPORT_DETAILS: ReportDetailsState = {
@@ -630,8 +857,8 @@ export default function ReportsHubScreen() {
   const [expenseReportView, setExpenseReportView] = useState<string>(currentMonthName);
   // Occupancy Data State
   const [occupancyView, setOccupancyView] = useState<string>(currentMonthName);
-  // Transaction Report State (default "Combined" = all-time, matches Payments > Transactions tab)
-  const [transactionView, setTransactionView] = useState<string>("Combined");
+  // Transaction Report State (default = current month)
+  const [transactionView, setTransactionView] = useState<string>(currentMonthName);
   // Filtered Reports State
   const [reportFilter1, setReportFilter1] = useState<string>("Monthly");
   const [reportFilter2, setReportFilter2] = useState<string>(currentMonthName);
@@ -732,6 +959,18 @@ useEffect(() => {
         cashPaymentRecv: b.cashPaymentRecv != null ? Number(b.cashPaymentRecv) : 0,
         isRentOnlinePaid: toBool(b.isRentOnlinePaid),
         isRentCashPaid: toBool(b.isRentCashPaid),
+        // ✅ CRITICAL: Map and normalize dailyPayments array with proper type conversions
+        dailyPayments: Array.isArray(b.dailyPayments) 
+          ? b.dailyPayments.map((dp: any) => ({
+              id: dp.id?.toString?.() ?? String(dp.id || ''),
+              paymentDate: dp.paymentDate,
+              amount: Number(dp.amount ?? 0),
+              paidOnline: toBool(dp.paidOnline),
+              paidCash: toBool(dp.paidCash),
+              onlineAmount: Number(dp.onlineAmount ?? 0),
+              cashAmount: Number(dp.cashAmount ?? 0),
+            }))
+          : [],
         moveInDate: b.moveInDate != null ? (typeof b.moveInDate === "string" ? b.moveInDate : new Date(b.moveInDate).toISOString?.() ?? String(b.moveInDate)) : "",
       }));
 
@@ -771,6 +1010,7 @@ useEffect(() => {
       const m2 = monthYear(2);
 
       const collectionsByMonth: Record<string, number> = { [m0]: 0, [m1]: 0, [m2]: 0 };
+      const securityDepositsByMonth: Record<string, number> = { [m0]: 0, [m1]: 0, [m2]: 0 };
       const transactionsByMonthMap: Record<string, { online: number; cash: number }> = {
         [m0]: { online: 0, cash: 0 },
         [m1]: { online: 0, cash: 0 },
@@ -805,13 +1045,27 @@ useEffect(() => {
         if (startYm && monthKey < startYm) return 0;
 
         if (rp === "day") {
+          // ✅ For day rentals, sum unpaid online amounts from dailyPayments array
+          if (Array.isArray(booking?.dailyPayments) && booking.dailyPayments.length > 0) {
+            const dailyOnlineDue = booking.dailyPayments
+              .filter((dp: any) => {
+                const dpDate = new Date(dp.paymentDate);
+                const dpMonthKey = toMonthKeyFromDate(dpDate);
+                return dpMonthKey === monthKey && !toBool(dp.paidOnline) && Number(dp.onlineAmount ?? 0) > 0;
+              })
+              .reduce((sum: number, dp: any) => sum + Number(dp.onlineAmount ?? 0), 0);
+            return dailyOnlineDue;
+          }
+          // Fallback to legacy flag if no dailyPayments
           if (toBool(booking?.isRentOnlinePaid)) return 0;
           const ra = num(booking?.rentAmount);
           return ra > 0 ? ra : legacyOn;
         }
 
         if (schedOn > 0) {
-          if (paidYm && paidYm === monthKey) return 0;
+          // ✅ Check if monthKey is in the comma-separated list of paid months
+          const paidMonths = paidYm ? paidYm.split(',').map((m: string) => m.trim()) : [];
+          if (paidMonths.includes(monthKey)) return 0;
           return schedOn;
         }
         if (toBool(booking?.isRentOnlinePaid)) return 0;
@@ -827,12 +1081,26 @@ useEffect(() => {
         if (startYm && monthKey < startYm) return 0;
 
         if (rp === "day") {
+          // ✅ For day rentals, sum unpaid cash amounts from dailyPayments array
+          if (Array.isArray(booking?.dailyPayments) && booking.dailyPayments.length > 0) {
+            const dailyCashDue = booking.dailyPayments
+              .filter((dp: any) => {
+                const dpDate = new Date(dp.paymentDate);
+                const dpMonthKey = toMonthKeyFromDate(dpDate);
+                return dpMonthKey === monthKey && !toBool(dp.paidCash) && Number(dp.cashAmount ?? 0) > 0;
+              })
+              .reduce((sum: number, dp: any) => sum + Number(dp.cashAmount ?? 0), 0);
+            return dailyCashDue;
+          }
+          // Fallback to legacy flag if no dailyPayments
           if (toBool(booking?.isRentCashPaid)) return 0;
           return legacyCash;
         }
 
         if (schedCash > 0) {
-          if (paidYm && paidYm === monthKey) return 0;
+          // ✅ Check if monthKey is in the comma-separated list of paid months
+          const paidMonths = paidYm ? paidYm.split(',').map((m: string) => m.trim()) : [];
+          if (paidMonths.includes(monthKey)) return 0;
           return schedCash;
         }
         if (toBool(booking?.isRentCashPaid)) return 0;
@@ -851,7 +1119,8 @@ useEffect(() => {
         // Pending dues must be month-specific.
         [m0, m1, m2].forEach((mk) => {
           // Security deposit due shown in move-in month only.
-          if (mk === moveInYm && !toBool(b?.isSecurityPaid) && sec > 0) {
+          // Exclude moved-out/completed bookings from due totals.
+          if (mk === moveInYm && !toBool(b?.isSecurityPaid) && sec > 0 && !isMovedOutBooking(b)) {
             pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + sec;
           }
 
@@ -860,10 +1129,15 @@ useEffect(() => {
           let cashDue = 0;
 
           if (rentPeriod === "day") {
-            // Day-based: show dues only in move-in month.
-            if (mk !== moveInYm) return;
-            onlineDue = adminMonthlyOnlineDueForMonthKey(b, mk);
-            cashDue = adminMonthlyCashDueForMonthKey(b, mk);
+            // Day-based rents are handled in dailyPayments below, to avoid duplicate due calculations.
+            // Fallback to legacy behavior only when dailyPayments is empty.
+            if (Array.isArray(b.dailyPayments) && b.dailyPayments.length > 0) {
+              onlineDue = 0;
+              cashDue = 0;
+            } else {
+              onlineDue = adminMonthlyOnlineDueForMonthKey(b, mk);
+              cashDue = adminMonthlyCashDueForMonthKey(b, mk);
+            }
           } else {
             onlineDue = adminMonthlyOnlineDueForMonthKey(b, mk);
             cashDue = adminMonthlyCashDueForMonthKey(b, mk);
@@ -875,18 +1149,118 @@ useEffect(() => {
 
         if (b.isSecurityPaid && sec > 0) {
           transactionItems.push({ amount: sec, type: "Security deposit (online)" });
-          if (monthKey && collectionsByMonth[monthKey] !== undefined) collectionsByMonth[monthKey] += sec;
-          if (monthKey && transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey].online += sec;
+          if (monthKey) {
+            if (securityDepositsByMonth[monthKey] === undefined) securityDepositsByMonth[monthKey] = 0;
+            securityDepositsByMonth[monthKey] += sec;
+          }
+          // note: do not add security to collections (revenue) to avoid profit inflation
         }
-        if (online > 0 && b.isRentOnlinePaid) {
-          transactionItems.push({ amount: online, type: "Rent (online)" });
-          if (monthKey && collectionsByMonth[monthKey] !== undefined) collectionsByMonth[monthKey] += online;
-          if (monthKey && transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey].online += online;
+        
+        if (rentPeriod !== "day") {
+          // Online rent: check if paid for each month
+          const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
+          const onlinePaidMonths = onlinePaidYm ? onlinePaidYm.split(',').map((s: string) => s.trim()) : [];
+          const schedOnline = Number(b.scheduledOnlineRent ?? 0);
+          
+          if (schedOnline > 0 && onlinePaidMonths.length > 0) {
+            // Multi-month tracking: add each paid month separately
+            onlinePaidMonths.forEach((paidYm: string) => {
+              transactionItems.push({ amount: schedOnline, type: "Rent (online)" });
+              // Initialize month if not exists, then add
+              if (collectionsByMonth[paidYm] === undefined) collectionsByMonth[paidYm] = 0;
+              collectionsByMonth[paidYm] += schedOnline;
+              if (!transactionsByMonthMap[paidYm]) transactionsByMonthMap[paidYm] = { online: 0, cash: 0 };
+              transactionsByMonthMap[paidYm].online += schedOnline;
+            });
+          } else if (online > 0 && b.isRentOnlinePaid) {
+            // Legacy: single payment
+            transactionItems.push({ amount: online, type: "Rent (online)" });
+            if (monthKey) {
+              if (collectionsByMonth[monthKey] === undefined) collectionsByMonth[monthKey] = 0;
+              collectionsByMonth[monthKey] += online;
+              if (!transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey] = { online: 0, cash: 0 };
+              transactionsByMonthMap[monthKey].online += online;
+            }
+          }
+          
+          // Cash rent: check if paid for each month (same logic as online)
+          const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
+          const cashPaidMonths = cashPaidYm ? cashPaidYm.split(',').map((s: string) => s.trim()) : [];
+          const schedCash = Number(b.scheduledCashRent ?? 0);
+          
+          if (schedCash > 0 && cashPaidMonths.length > 0) {
+            // Multi-month tracking: add each paid month separately
+            console.log(`[ReportsHub] Processing cash payments for booking ${b.id}: schedCash=${schedCash}, paidMonths=${cashPaidMonths.join(',')}`);
+            cashPaidMonths.forEach((paidYm: string) => {
+              transactionItems.push({ amount: schedCash, type: "Rent (cash)" });
+              // Initialize month if not exists, then add
+              if (collectionsByMonth[paidYm] === undefined) collectionsByMonth[paidYm] = 0;
+              collectionsByMonth[paidYm] += schedCash;
+              if (!transactionsByMonthMap[paidYm]) transactionsByMonthMap[paidYm] = { online: 0, cash: 0 };
+              transactionsByMonthMap[paidYm].cash += schedCash;
+              console.log(`[ReportsHub] Added cash payment: month=${paidYm}, amount=${schedCash}, newTotal=${collectionsByMonth[paidYm]}`);
+            });
+          } else if (cash > 0 && b.isRentCashPaid) {
+            // Legacy: single payment
+            console.log(`[ReportsHub] Processing legacy cash payment for booking ${b.id}: cash=${cash}, monthKey=${monthKey}`);
+            transactionItems.push({ amount: cash, type: "Rent (cash)" });
+            if (monthKey) {
+              if (collectionsByMonth[monthKey] === undefined) collectionsByMonth[monthKey] = 0;
+              collectionsByMonth[monthKey] += cash;
+              if (!transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey] = { online: 0, cash: 0 };
+              transactionsByMonthMap[monthKey].cash += cash;
+              console.log(`[ReportsHub] Added legacy cash payment: month=${monthKey}, amount=${cash}, newTotal=${collectionsByMonth[monthKey]}`);
+            }
+          }
         }
-        if (cash > 0 && b.isRentCashPaid) {
-          transactionItems.push({ amount: cash, type: "Rent (cash)" });
-          if (monthKey && collectionsByMonth[monthKey] !== undefined) collectionsByMonth[monthKey] += cash;
-          if (monthKey && transactionsByMonthMap[monthKey]) transactionsByMonthMap[monthKey].cash += cash;
+        
+        // ✅ Daily Rent: Process individual daily payments if present
+        if (Array.isArray(b.dailyPayments) && b.dailyPayments.length > 0) {
+          console.log(`[ReportsHub] Processing ${b.dailyPayments.length} daily payments for booking ${b.id}`);
+          
+          b.dailyPayments.forEach((dp: any) => {
+            const dpDate = new Date(dp.paymentDate);
+            const dpMonthKey = toMonthKeyFromDate(dpDate);
+            if (!dpMonthKey) return;
+            
+            const dpAmount = Number(dp.amount ?? 0);
+            const dpOnlineAmount = Number(dp.onlineAmount ?? 0);
+            const dpCashAmount = Number(dp.cashAmount ?? 0);
+            const isPaidOnline = toBool(dp.paidOnline);
+            const isPaidCash = toBool(dp.paidCash);
+            
+            console.log(`[ReportsHub] Daily payment: date=${dp.paymentDate}, monthKey=${dpMonthKey}, online=${dpOnlineAmount}, cash=${dpCashAmount}, paidOnline=${isPaidOnline}, paidCash=${isPaidCash}`);
+            
+            // Add paid online amounts to collections
+            if (isPaidOnline && dpOnlineAmount > 0) {
+              transactionItems.push({ amount: dpOnlineAmount, type: "Rent (online)" });
+              if (collectionsByMonth[dpMonthKey] === undefined) collectionsByMonth[dpMonthKey] = 0;
+              collectionsByMonth[dpMonthKey] += dpOnlineAmount;
+              if (!transactionsByMonthMap[dpMonthKey]) transactionsByMonthMap[dpMonthKey] = { online: 0, cash: 0 };
+              transactionsByMonthMap[dpMonthKey].online += dpOnlineAmount;
+              console.log(`[ReportsHub] Added daily online payment: month=${dpMonthKey}, amount=${dpOnlineAmount}`);
+            }
+            
+            // Add paid cash amounts to collections
+            if (isPaidCash && dpCashAmount > 0) {
+              transactionItems.push({ amount: dpCashAmount, type: "Rent (cash)" });
+              if (collectionsByMonth[dpMonthKey] === undefined) collectionsByMonth[dpMonthKey] = 0;
+              collectionsByMonth[dpMonthKey] += dpCashAmount;
+              if (!transactionsByMonthMap[dpMonthKey]) transactionsByMonthMap[dpMonthKey] = { online: 0, cash: 0 };
+              transactionsByMonthMap[dpMonthKey].cash += dpCashAmount;
+              console.log(`[ReportsHub] Added daily cash payment: month=${dpMonthKey}, amount=${dpCashAmount}`);
+            }
+            
+            // Add unpaid amounts to pending dues
+            if (!isPaidOnline && dpOnlineAmount > 0) {
+              pendingDuesByMonth[dpMonthKey] = (pendingDuesByMonth[dpMonthKey] ?? 0) + dpOnlineAmount;
+              console.log(`[ReportsHub] Added daily online due: month=${dpMonthKey}, amount=${dpOnlineAmount}, total=${pendingDuesByMonth[dpMonthKey]}`);
+            }
+            if (!isPaidCash && dpCashAmount > 0) {
+              pendingDuesByMonth[dpMonthKey] = (pendingDuesByMonth[dpMonthKey] ?? 0) + dpCashAmount;
+              console.log(`[ReportsHub] Added daily cash due: month=${dpMonthKey}, amount=${dpCashAmount}, total=${pendingDuesByMonth[dpMonthKey]}`);
+            }
+          });
         }
       });
       const txByMonth: Record<string, { online: number; cash: number; total: number }> = {};
@@ -902,7 +1276,24 @@ useEffect(() => {
       const cashCollected = transactionItems
         .filter((t) => t.type === "Rent (cash)")
         .reduce((s, t) => s + t.amount, 0);
-      const moveOutPLVal = 0;
+      
+      // Calculate MoveOut P/L from completed bookings
+      const moveOutAggregation = aggregateMoveOutPL(bookings.filter(b => isMovedOutBooking(b)));
+      const moveOutPLVal = moveOutAggregation.totalMoveOutPL;
+
+      // 🐛 Debug summary to validate daily rent aggregation and avoid duplicates
+      console.log("[ReportsHub] FINANCIAL SUMMARY:", {
+        m0,
+        m1,
+        m2,
+        collectionsByMonth,
+        pendingDuesByMonth,
+        transactionsByMonthMap,
+        totalCollections,
+        onlineCollected,
+        cashCollected,
+        totalTransactions: transactionItems.length,
+      });
 
       // Expenses (fixed tab) are month-specific via expense_date -> month_year.
       // Monthly expenses (monthly tab) are recurring templates; repeat them per month starting from creation month.
@@ -927,25 +1318,80 @@ useEffect(() => {
       const coll0 = collectionsByMonth[m0] ?? 0;
       const coll1 = collectionsByMonth[m1] ?? 0;
       const coll2 = collectionsByMonth[m2] ?? 0;
+      const sec0 = securityDepositsByMonth[m0] ?? 0;
+      const sec1 = securityDepositsByMonth[m1] ?? 0;
+      const sec2 = securityDepositsByMonth[m2] ?? 0;
+
+      // Calculate MoveOut P/L per month
+      const calculateMoveOutPLByMonth = (monthKey: string): number => {
+        let totalPL = 0;
+        bookings.forEach((b: any) => {
+          if (isMovedOutBooking(b)) {
+            const moveOutData = b.moveOutRequest;
+            if (moveOutData) {
+              // Check if this booking moved out in the specified month
+              const movedOutAt = moveOutData.movedOutAt || moveOutData.completedAt;
+              if (movedOutAt) {
+                const movedOutDate = new Date(movedOutAt);
+                const movedOutMonthKey = `${movedOutDate.getFullYear()}-${String(movedOutDate.getMonth() + 1).padStart(2, "0")}`;
+                if (movedOutMonthKey === monthKey) {
+                  // Calculate MoveOut P/L for this booking
+                  const currentDue = moveOutData.currentDue || 0;
+                  const collected = moveOutData.securityDepositAmount || 0;
+                  const returned = moveOutData.securityDepositReturned || 0;
+                  
+                  // Apply MoveOut P/L calculation logic
+                  if (currentDue === 0) {
+                    if (returned === collected) {
+                      totalPL += 0;
+                    } else if (returned < collected) {
+                      totalPL += (collected - returned);
+                    }
+                  } else if (currentDue > 0) {
+                    if (currentDue > collected) {
+                      totalPL += 0;
+                    } else {
+                      if (returned < (collected + currentDue)) {
+                        totalPL += (collected - (returned + currentDue));
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        });
+        return Math.round(totalPL);
+      };
+
+      const moveOutPL0 = calculateMoveOutPLByMonth(m0);
+      const moveOutPL1 = calculateMoveOutPLByMonth(m1);
+      const moveOutPL2 = calculateMoveOutPLByMonth(m2);
 
       const financialDataNext = {
         [currentMonthName]: {
           collections: coll0,
+          securityDeposits: sec0,
           expense: exp0,
           pendingDues: pendingDuesByMonth[m0] ?? 0, // This should be month-specific
           profitLoss: Math.round(coll0 - exp0),
+          moveOutPL: moveOutPL0,
         },
         [prev1]: {
           collections: coll1,
+          securityDeposits: sec1,
           expense: exp1,
           pendingDues: pendingDuesByMonth[m1] ?? 0, // Month-specific
           profitLoss: Math.round(coll1 - exp1),
+          moveOutPL: moveOutPL1,
         },
         [prev2]: {
           collections: coll2,
+          securityDeposits: sec2,
           expense: exp2,
           pendingDues: pendingDuesByMonth[m2] ?? 0, // Month-specific
           profitLoss: Math.round(coll2 - exp2),
+          moveOutPL: moveOutPL2,
         },
       };
 
@@ -1138,6 +1584,9 @@ useEffect(() => {
           ? inactiveTenantsRes.data.tenants
           : [];
       const activeBk = bookings.filter((b: any) => String(b.status || "").toLowerCase() === "active");
+      
+      // For transaction report, we need ALL bookings (active + completed)
+      const allBkForTransactions = bookings; // Include completed bookings for transaction history
 
       const uidSet = new Set<string>();
       tenantRows.forEach((t) => {
@@ -1184,19 +1633,113 @@ useEffect(() => {
         const fn = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
         const due = getTotalDueFromBooking(b);
         const payDate = formatDateLabel(b.moveInDate);
+        const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
         const payments: DetailedActiveRow["payments"] = [];
+        
+        // Security deposit (single payment)
         const sec = Number(b.securityDeposit) || 0;
-        const online = Number(b.onlinePaymentRecv) || 0;
-        const cash = Number(b.cashPaymentRecv) || 0;
         if (sec > 0 && toBool(b.isSecurityPaid)) {
-          payments.push({ amount: sec, date: payDate, type: "Online", label: "Security deposit" });
+          payments.push({ 
+            amount: sec, 
+            date: payDate, 
+            type: "Online", 
+            label: "Security deposit",
+            monthKey: moveInMonthKey || undefined
+          });
         }
-        if (online > 0 && toBool(b.isRentOnlinePaid)) {
-          payments.push({ amount: online, date: payDate, type: "Online", label: "Rent" });
+        
+        // Online rent - multi-month tracking
+        const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
+        const onlinePaidMonths = onlinePaidYm ? onlinePaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
+        const schedOnline = Number(b.scheduledOnlineRent ?? 0);
+        
+        if (schedOnline > 0 && onlinePaidMonths.length > 0) {
+          // Add each paid month separately
+          onlinePaidMonths.forEach((monthKey: string) => {
+            const monthLabel = monthKeyToShortLabel(monthKey);
+            payments.push({ 
+              amount: schedOnline, 
+              date: monthLabel, 
+              type: "Online", 
+              label: `Rent - ${monthLabel}`,
+              monthKey: monthKey
+            });
+          });
+        } else {
+          // Legacy: single payment
+          const online = Number(b.onlinePaymentRecv) || 0;
+          if (online > 0 && toBool(b.isRentOnlinePaid)) {
+            payments.push({ 
+              amount: online, 
+              date: payDate, 
+              type: "Online", 
+              label: "Rent",
+              monthKey: moveInMonthKey || undefined
+            });
+          }
         }
-        if (cash > 0 && toBool(b.isRentCashPaid)) {
-          payments.push({ amount: cash, date: payDate, type: "Cash", label: "Rent" });
+        
+        // Cash rent - multi-month tracking
+        const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
+        const cashPaidMonths = cashPaidYm ? cashPaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
+        const schedCash = Number(b.scheduledCashRent ?? 0);
+        
+        if (schedCash > 0 && cashPaidMonths.length > 0) {
+          // Add each paid month separately
+          cashPaidMonths.forEach((monthKey: string) => {
+            const monthLabel = monthKeyToShortLabel(monthKey);
+            payments.push({ 
+              amount: schedCash, 
+              date: monthLabel, 
+              type: "Cash", 
+              label: `Rent - ${monthLabel}`,
+              monthKey: monthKey
+            });
+          });
+        } else {
+          // Legacy: single payment
+          const cash = Number(b.cashPaymentRecv) || 0;
+          if (cash > 0 && toBool(b.isRentCashPaid)) {
+            payments.push({ 
+              amount: cash, 
+              date: payDate, 
+              type: "Cash", 
+              label: "Rent",
+              monthKey: moveInMonthKey || undefined
+            });
+          }
         }
+
+        // ✅ Daily rent payments (online and cash)
+        if (Array.isArray(b.dailyPayments) && b.dailyPayments.length > 0) {
+          b.dailyPayments.forEach((dp: any) => {
+            const dayLabel = formatDateLabel(dp.paymentDate);
+            const dayMonthKey = toMonthKeyFromDate(dp.paymentDate);
+            
+            // Daily rent online
+            if (toBool(dp.paidOnline) && Number(dp.onlineAmount ?? 0) > 0) {
+              payments.push({
+                amount: Number(dp.onlineAmount),
+                date: dayLabel,
+                type: "Online",
+                label: `Daily Rent - ${dayLabel}`,
+                monthKey: dayMonthKey || undefined
+              });
+            }
+            
+            // Daily rent cash
+            if (toBool(dp.paidCash) && Number(dp.cashAmount ?? 0) > 0) {
+              payments.push({
+                amount: Number(dp.cashAmount),
+                date: dayLabel,
+                type: "Cash",
+                label: `Daily Rent - ${dayLabel}`,
+                monthKey: dayMonthKey || undefined
+              });
+            }
+          });
+        }
+        
         return {
           num: idx + 1,
           fullName: fn || det.fullName,
@@ -1219,6 +1762,115 @@ useEffect(() => {
           uniqueId: uid,
         };
       });
+      
+      // Create transaction rows from ALL bookings (including completed) for Transaction Report
+      console.log('[ReportsHub] Creating allTransactionRows from', allBkForTransactions.length, 'bookings');
+      const allTransactionRows: DetailedActiveRow[] = allBkForTransactions.map((b: any, idx: number) => {
+        const c = b.customer || {};
+        const uid = String(c.uniqueId || "");
+        const prof = profileMap[uid];
+        const det = extractProfileDetails(prof, c);
+        const fn = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
+        const payDate = formatDateLabel(b.moveInDate);
+        const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
+        const payments: DetailedActiveRow["payments"] = [];
+        
+        // Security deposit (single payment)
+        const sec = Number(b.securityDeposit) || 0;
+        if (sec > 0 && toBool(b.isSecurityPaid)) {
+          payments.push({ 
+            amount: sec, 
+            date: payDate, 
+            type: "Online", 
+            label: "Security deposit",
+            monthKey: moveInMonthKey || undefined
+          });
+        }
+        
+        // Online rent - multi-month tracking
+        const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
+        const onlinePaidMonths = onlinePaidYm ? onlinePaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
+        const schedOnline = Number(b.scheduledOnlineRent ?? 0);
+        
+        if (schedOnline > 0 && onlinePaidMonths.length > 0) {
+          onlinePaidMonths.forEach((monthKey: string) => {
+            const monthLabel = monthKeyToShortLabel(monthKey);
+            payments.push({ 
+              amount: schedOnline, 
+              date: monthLabel, 
+              type: "Online", 
+              label: `Rent - ${monthLabel}`,
+              monthKey: monthKey
+            });
+          });
+        } else {
+          const online = Number(b.onlinePaymentRecv) || 0;
+          if (online > 0 && toBool(b.isRentOnlinePaid)) {
+            payments.push({ 
+              amount: online, 
+              date: payDate, 
+              type: "Online", 
+              label: "Rent",
+              monthKey: moveInMonthKey || undefined
+            });
+          }
+        }
+        
+        // Cash rent - multi-month tracking
+        const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
+        const cashPaidMonths = cashPaidYm ? cashPaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
+        const schedCash = Number(b.scheduledCashRent ?? 0);
+        
+        if (schedCash > 0 && cashPaidMonths.length > 0) {
+          cashPaidMonths.forEach((monthKey: string) => {
+            const monthLabel = monthKeyToShortLabel(monthKey);
+            payments.push({ 
+              amount: schedCash, 
+              date: monthLabel, 
+              type: "Cash", 
+              label: `Rent - ${monthLabel}`,
+              monthKey: monthKey
+            });
+          });
+        } else {
+          const cash = Number(b.cashPaymentRecv) || 0;
+          if (cash > 0 && toBool(b.isRentCashPaid)) {
+            payments.push({ 
+              amount: cash, 
+              date: payDate, 
+              type: "Cash", 
+              label: "Rent",
+              monthKey: moveInMonthKey || undefined
+            });
+          }
+        }
+        
+        return {
+          num: idx + 1,
+          fullName: fn || det.fullName,
+          phone: det.phone,
+          email: det.email,
+          dob: det.dob,
+          aadhaar: det.aadhaarDisplay,
+          aadhaarLast4: getAadhaarLast4Digits(prof, c),
+          address: det.address,
+          emergencyName: det.emergencyName,
+          emergencyPhone: det.emergencyPhone,
+          room: b.room?.roomNumber != null ? String(b.room.roomNumber) : "—",
+          moveIn: formatDateLabel(b.moveInDate),
+          moveOut: b.moveOutDate ? formatDateLabel(b.moveOutDate) : "—",
+          securityDeposit: Number(b.securityDeposit) || 0,
+          due: 0, // Completed bookings have no dues
+          payments,
+          moveInMonthKey: toMonthKeyFromDate(b.moveInDate),
+          kycStatus: prof ? kycLabelFromUser(prof) : kycByUniqueId.get(uid) || "Unverified",
+          uniqueId: uid,
+        };
+      });
+      
+      console.log('[ReportsHub] Created allTransactionRows:', allTransactionRows.length, 'rows');
+      console.log('[ReportsHub] Sample transaction row:', allTransactionRows[0]);
+      console.log('[ReportsHub] Total payments across all rows:', allTransactionRows.reduce((sum, r) => sum + (r.payments?.length || 0), 0));
 
       const detailedOldRows: DetailedOldRow[] = inactiveList.map((t: any, idx: number) => {
         const uid = String(t.uniqueId || "");
@@ -1323,6 +1975,7 @@ useEffect(() => {
         detailedOldRows,
         roomsOccupancyBlocks,
         monthwiseMoveOutBlocks,
+        allTransactionRows, // Include all transactions for Transaction Report
       };
       setReportDetails(nextDetails);
       setReportDetailsPropertyId(propertyId);
@@ -1411,16 +2064,19 @@ useEffect(() => {
     logoDataUriOverride?: string
   ): string => {
     const propertyName = currentProperty?.name || currentProperty?.id || "Property";
+    const propertyId = currentProperty?.id || "";
+    const propertyDisplay = propertyId ? `${propertyName} (ID: ${propertyId})` : propertyName;
     const fd = financialData[currentMonthName] ?? financialData[MONTHS[(currentMonthIdx - 1 + 12) % 12]];
     const pending = fd?.pendingDues ?? combinedPendingDues;
     const collections = fd?.collections ?? 0;
     const expense = fd?.expense ?? 0;
-    const profit = fd?.profitLoss ?? 0;
+    const profit = Math.round((fd?.collections ?? 0) - (fd?.expense ?? 0));
     const {
       detailedActiveRows,
       detailedOldRows,
       roomsOccupancyBlocks,
       monthwiseMoveOutBlocks,
+      allTransactionRows = detailedActiveRows, // Fallback to active rows if not provided
     } = details;
     const rows = (label: string, value: string | number) => `<tr><td style="padding:8px;border:1px solid #ddd">${label}</td><td style="padding:8px;border:1px solid #ddd">${value}</td></tr>`;
     let body = "";
@@ -1515,15 +2171,40 @@ useEffect(() => {
               </tr>`
             )
             .join("");
+          
           body = `<h3>Tenant Details</h3>
-          <p><strong>Total:</strong> ${detailedActiveRows.length}</p>
+          <p><strong>Total:</strong> ${detailedActiveRows.length} tenants</p>
           ${
             detailedActiveRows.length
-              ? `<table><thead><tr><th>#</th><th>Full Name</th><th>Phone</th><th>DOB</th><th>Email</th><th>Aadhaar (last 4)</th><th>Address</th><th>Emergency Name / Contact</th><th>Room</th><th>Move In</th><th>Move Out</th></tr></thead><tbody>${tenantRowsHtml}</tbody></table>`
+              ? `<table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Full Name</th>
+                    <th>Phone</th>
+                    <th>DOB</th>
+                    <th>Email</th>
+                    <th>Aadhaar (last 4)</th>
+                    <th>Address</th>
+                    <th>Emergency Name / Contact</th>
+                    <th>Room</th>
+                    <th>Move In</th>
+                    <th>Move Out</th>
+                  </tr>
+                </thead>
+                <tbody>${tenantRowsHtml}</tbody>
+              </table>`
               : `<p>No active tenants for this property.</p>`
           }
-          <h3>Financial Summary (${currentMonthName})</h3>
-          <table style="border-collapse:collapse"><tbody>${rows("Collections", "₹" + (collections ?? 0).toLocaleString())}${rows("Expense", "₹" + (expense ?? 0).toLocaleString())}${rows("Pending Dues", "₹" + (pending ?? 0).toLocaleString())}${rows("Profit/Loss", "₹" + (profit ?? 0).toLocaleString())}</tbody></table>`;
+          <h3 style="margin-top:24px">Financial Summary (${currentMonthName})</h3>
+          <table style="width:auto;max-width:400px">
+            <tbody>
+              ${rows("Collections", "₹" + (collections ?? 0).toLocaleString())}
+              ${rows("Expense", "₹" + (expense ?? 0).toLocaleString())}
+              ${rows("Pending Dues", "₹" + (pending ?? 0).toLocaleString())}
+              ${rows("Profit/Loss", "₹" + (profit ?? 0).toLocaleString())}
+            </tbody>
+          </table>`;
         }
         break;
       case "Tenant KYC Details":
@@ -1563,19 +2244,31 @@ useEffect(() => {
                   ? blk.tenants
                       .map(
                         (t) => `<tr>
-                    <td>${t.num}</td>
-                    <td>${escapeHtml(t.name)}</td>
-                    <td>${escapeHtml(t.phone)}</td>
-                    <td>${escapeHtml(t.moveIn)}</td>
-                    <td>${escapeHtml(t.moveOut)}</td>
-                    <td style="text-align:right;color:#b91c1c">₹${t.due.toLocaleString()}</td>
+                    <td style="padding:8px;border:1px solid #ddd">${t.num}</td>
+                    <td style="padding:8px;border:1px solid #ddd">${escapeHtml(t.name)}</td>
+                    <td style="padding:8px;border:1px solid #ddd">${escapeHtml(t.phone)}</td>
+                    <td style="padding:8px;border:1px solid #ddd">${escapeHtml(t.moveIn)}</td>
+                    <td style="padding:8px;border:1px solid #ddd">${escapeHtml(t.moveOut)}</td>
+                    <td style="padding:8px;border:1px solid #ddd;text-align:right;color:#b91c1c">₹${t.due.toLocaleString()}</td>
                   </tr>`
                       )
                       .join("")
-                  : `<tr><td colspan="6" style="font-style:italic;color:#64748b">Vacant / No active tenant</td></tr>`;
+                  : `<tr><td colspan="6" style="padding:8px;border:1px solid #ddd;font-style:italic;color:#64748b">Vacant / No active tenant</td></tr>`;
               return `<div style="margin-bottom:24px;page-break-inside:avoid">
                 <h4 style="margin-bottom:8px">Room ${escapeHtml(blk.roomNumber)} — ${escapeHtml(blk.roomType)}</h4>
-                <table><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Move In</th><th>Move Out</th><th>Due</th></tr></thead><tbody>${tenantLines}</tbody></table>
+                <table style="border-collapse:collapse;width:100%">
+                  <thead>
+                    <tr style="background:#f8fafc">
+                      <th style="padding:8px;border:1px solid #ddd">#</th>
+                      <th style="padding:8px;border:1px solid #ddd">Name</th>
+                      <th style="padding:8px;border:1px solid #ddd">Phone</th>
+                      <th style="padding:8px;border:1px solid #ddd">Move In</th>
+                      <th style="padding:8px;border:1px solid #ddd">Move Out</th>
+                      <th style="padding:8px;border:1px solid #ddd">Due</th>
+                    </tr>
+                  </thead>
+                  <tbody>${tenantLines}</tbody>
+                </table>
               </div>`;
             })
             .join("");
@@ -1605,14 +2298,37 @@ useEffect(() => {
                   </tr>`
                       )
                       .join("")
-                  : `<tr><td colspan="7" style="color:#94a3b8">No move-outs</td></tr>`;
-              return `<h4 style="margin-top:20px">${escapeHtml(block.label)}</h4>
-              <table><thead><tr><th>#</th><th>Full Name</th><th>Phone</th><th>Room</th><th>Move In</th><th>Move Out</th><th>Dues</th></tr></thead><tbody>${inner}</tbody></table>`;
+                  : `<tr><td colspan="7" style="color:#94a3b8;text-align:center">No move-outs in this month</td></tr>`;
+              
+              return `
+          <div class="month-section">
+            <div class="month-title">${escapeHtml(block.label)}</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Full Name</th>
+                  <th>Phone</th>
+                  <th>Room</th>
+                  <th>Move In</th>
+                  <th>Move Out</th>
+                  <th>Dues</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${inner}
+              </tbody>
+            </table>
+          </div>
+        `;
             })
             .join("");
-          body = `<h3>Month-wise Move Out</h3>
-          <p>From current month back through April (calendar).</p>
-          ${sections || "<p>No move-out records.</p>"}`;
+          
+          body = `
+      <h3>Month-wise Move Out Report</h3>
+      <p style="color:#64748b">From current month back through April (calendar).</p>
+      ${sections || "<p>No move-out records found.</p>"}
+    `;
         }
         break;
       case "Old Tenant Report":
@@ -1652,24 +2368,42 @@ useEffect(() => {
         const ref = new Date();
         const scopedKeys = filterCtx ? getReportFilterMonthKeys(filterCtx.f1, filterCtx.f2, ref) : [];
         const keySet = filterCtx && scopedKeys.length ? new Set(scopedKeys) : null;
-        const rowSource = keySet
-          ? detailedActiveRows.filter((r) => r.moveInMonthKey && keySet.has(r.moveInMonthKey))
-          : detailedActiveRows;
-        const items = rowSource
-          .flatMap((r) =>
-            (r.payments || []).map((p) => ({
-              tenant: r.fullName,
-              phone: r.phone,
-              room: r.room,
-              amount: p.amount,
-              date: p.date,
-              type: p.type,
-            }))
-          )
-          .filter((x) => (Number(x.amount) || 0) > 0);
+        
+        // Debug logging
+        console.log('[TransactionReport] allTransactionRows count:', allTransactionRows.length);
+        console.log('[TransactionReport] Filter context:', filterCtx);
+        console.log('[TransactionReport] Scoped keys:', scopedKeys);
+        
+        // Extract all payment items from ALL tenants (including completed bookings)
+        const allPayments = allTransactionRows.flatMap((r) =>
+          (r.payments || []).map((p) => ({
+            tenant: r.fullName,
+            phone: r.phone,
+            room: r.room,
+            amount: p.amount,
+            date: p.date,
+            type: p.type,
+            label: p.label,
+            monthKey: (p as any).monthKey || null, // Use the monthKey stored in the payment object
+          }))
+        );
+        
+        console.log('[TransactionReport] All payments count:', allPayments.length);
+        console.log('[TransactionReport] Sample payments:', allPayments.slice(0, 3));
+        
+        // Filter by payment month if a specific period is selected
+        const items = keySet
+          ? allPayments.filter((p) => p.monthKey && keySet.has(p.monthKey))
+          : allPayments;
+        
+        console.log('[TransactionReport] Filtered items count:', items.length);
+        console.log('[TransactionReport] Sample filtered items:', items.slice(0, 3));
+        
+        const filteredItems = items.filter((x) => (Number(x.amount) || 0) > 0);
+        
         const rowsHtml =
-          items.length > 0
-            ? items
+          filteredItems.length > 0
+            ? filteredItems
                 .map(
                   (t, i) => `<tr>
                     <td>${i + 1}</td>
@@ -1684,13 +2418,13 @@ useEffect(() => {
                 .join("")
             : "";
         const scopeNote = keySet
-          ? `<p style="font-size:11px;color:#64748b">Rows are limited to tenants with move-in in the selected period (same basis as hub collections).</p>`
+          ? `<p style="font-size:11px;color:#64748b">Rows are limited to payments made in the selected period.</p>`
           : "";
         body = `<h3>Transaction Report</h3>
           <p>Details of payment received (Cashfree online + cash).</p>
           ${scopeNote}
           ${
-            items.length
+            filteredItems.length
               ? `<table><thead><tr><th>#</th><th>Tenant Name</th><th>Phone</th><th>Room</th><th>Amount</th><th>Date</th><th>Type</th></tr></thead><tbody>${rowsHtml}</tbody></table>`
               : `<p>No transactions in the selected period.</p>`
           }`;
@@ -1814,6 +2548,10 @@ useEffect(() => {
         const bk = reportSource?.bookings ?? [];
         const snap = reportsSnapshotMonthKey;
         let rowsList: string[];
+        let totalColl = 0;
+        let totalExp = 0;
+        let totalPL = 0;
+        
         if (filterCtx && getReportFilterMonthKeys(filterCtx.f1, filterCtx.f2, ref).length) {
           const mks = getReportFilterMonthKeys(filterCtx.f1, filterCtx.f2, ref);
           rowsList = mks.map((k, i) => {
@@ -1825,13 +2563,17 @@ useEffect(() => {
               snap
             );
             const pl = Math.round(coll - exp);
+            totalColl += coll;
+            totalExp += exp;
+            totalPL += pl;
             const label = monthKeyToShortLabel(k);
+            const plColor = pl >= 0 ? '#16a34a' : '#dc2626';
             return `<tr>
               <td>${i + 1}</td>
               <td>${escapeHtml(label)}</td>
               <td style="text-align:right">₹${Number(coll).toLocaleString()}</td>
               <td style="text-align:right">₹${Number(exp).toLocaleString()}</td>
-              <td style="text-align:right">${pl >= 0 ? "₹" : "-₹"}${Math.abs(pl).toLocaleString()}</td>
+              <td style="text-align:right;color:${plColor};font-weight:600">${pl >= 0 ? "₹" : "-₹"}${Math.abs(pl).toLocaleString()}</td>
             </tr>`;
           });
         } else {
@@ -1840,22 +2582,35 @@ useEffect(() => {
           const m2 = MONTHS[(currentMonthIdx - 2 + 12) % 12];
           rowsList = [m0, m1, m2].map((m, i) => {
             const d = financialData[m] || { collections: 0, expense: 0, profitLoss: 0 };
+            const coll = Number(d.collections || 0);
+            const exp = Number(d.expense || 0);
+            const pl = Math.round(Number(d.collections || 0) - Number(d.expense || 0));
+            totalColl += coll;
+            totalExp += exp;
+            totalPL += pl;
+            const plColor = pl >= 0 ? '#16a34a' : '#dc2626';
             return `<tr>
               <td>${i + 1}</td>
               <td>${escapeHtml(m)}</td>
-              <td style="text-align:right">₹${Number(d.collections || 0).toLocaleString()}</td>
-              <td style="text-align:right">₹${Number(d.expense || 0).toLocaleString()}</td>
-              <td style="text-align:right">${Number(d.profitLoss || 0) >= 0 ? "₹" : "-₹"}${Math.abs(
-              Number(d.profitLoss || 0)
-            ).toLocaleString()}</td>
+              <td style="text-align:right">₹${coll.toLocaleString()}</td>
+              <td style="text-align:right">₹${exp.toLocaleString()}</td>
+              <td style="text-align:right;color:${plColor};font-weight:600">${pl >= 0 ? "₹" : "-₹"}${Math.abs(pl).toLocaleString()}</td>
             </tr>`;
           });
         }
+        
+        const totalPLColor = totalPL >= 0 ? '#16a34a' : '#dc2626';
+        const totalRow = `<tr style="background:#f8fafc;font-weight:700;border-top:2px solid #1E33FF">
+          <td colspan="2" style="text-align:right">Total</td>
+          <td style="text-align:right">₹${totalColl.toLocaleString()}</td>
+          <td style="text-align:right">₹${totalExp.toLocaleString()}</td>
+          <td style="text-align:right;color:${totalPLColor}">${totalPL >= 0 ? "₹" : "-₹"}${Math.abs(totalPL).toLocaleString()}</td>
+        </tr>`;
+        
         body = `<h3>Monthwise Financial Report</h3>
           <p>Compare month on month: collected, expenses, profit/loss.</p>
-          <table><thead><tr><th>#</th><th>Month</th><th>Collected</th><th>Expense</th><th>Profit/Loss</th></tr></thead><tbody>${rowsList.join(
-            ""
-          )}</tbody></table>`;
+          <table><thead><tr><th>#</th><th>Month</th><th>Collected</th><th>Expense</th><th>Profit/Loss</th></tr></thead><tbody>${rowsList.join("")}${totalRow}</tbody></table>
+          <p style="margin-top:12px;font-size:11px;color:#64748b">Note: Profit/Loss = Collected - Expense. Green indicates profit, red indicates loss.</p>`;
       }
         break;
       default:
@@ -1864,54 +2619,56 @@ useEffect(() => {
     const periodLine = period ? `<p><strong>Period:</strong> ${period}</p>` : "";
     const logoUri = logoDataUriOverride || myStayLogoDataUri;
     const headerHtml = `
-  <div class="pdf-header">
+  <div class="header-row">
     <div class="brand">
       ${logoUri ? 
-        `<div style="width:44px;height:44px;background-color:#1E33FF;border-radius:8px;display:flex;align-items:center;justify-content:center;">
-          <img class="logo" src="${logoUri}" alt="MyStayInn" style="width:40px;height:40px;object-fit:contain;" />
-        </div>` : 
-        `<div style="width:44px;height:44px;background-color:#1E33FF;border-radius:8px;display:flex;align-items:center;justify-content:center;">
-          <span style="color:white;font-size:24px;font-weight:bold;">MS</span>
-        </div>
+        `<img class="logo" src="${logoUri}" alt="MyStayInn" />` : 
+        `<div style="width:40px;height:40px;background-color:#1E33FF;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:bold;">MS</div>
       `}
       <div class="brand-name">MyStayInn</div>
     </div>
     <div class="meta">
       <div class="report-name">${escapeHtml(reportName)}</div>
-      ${period ? `<div class="period">Period: ${escapeHtml(period)}</div>` : ""}
-      <div class="property">Property: ${escapeHtml(propertyName)}</div>
-      <div class="generated">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
+      ${period ? `<div class="meta-line">Period: ${escapeHtml(period)}</div>` : ""}
+      <div class="meta-line">${escapeHtml(propertyDisplay)}</div>
+      <div class="meta-line">Generated: ${escapeHtml(new Date().toLocaleString())}</div>
     </div>
   </div>
 `;
-    // Use table header/footer so it repeats on every printed page (Android/iOS friendly).
+    // Clean HTML structure for automatic pagination
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${escapeHtml(
       reportName
     )}</title><style>
-      @page{margin:18px 20px 22px 20px;}
-      body{font-family:system-ui,sans-serif;color:#333}
-      .page{width:100%;border-collapse:collapse}
-      .page thead{display:table-header-group}
-      .page tfoot{display:table-footer-group}
-      .page td{padding:0;border:none}
-      .pdf-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid #e2e8f0;padding-bottom:10px;margin-bottom:12px}
-      .brand{display:flex;align-items:center;gap:10px;min-width:160px}
-      .logo{width:44px;height:44px;object-fit:contain}
-      .brand-name{font-size:18px;font-weight:800;letter-spacing:0.2px}
-      .meta{flex:1;text-align:right}
-      .report-name{font-size:14px;font-weight:800}
-      .meta .period,.meta .property,.meta .generated{font-size:11px;color:#475569;margin-top:2px}
-      .pdf-footer{border-top:1px solid #e2e8f0;margin-top:12px;padding-top:8px;text-align:center;font-size:10px;color:#64748b}
-      h1,h2,h3,h4{margin-top:16px}
-      table{margin:12px 0;border-collapse:collapse;width:100%;font-size:11px}
-      th,td{border:1px solid #ddd;padding:6px;text-align:left;vertical-align:top}
-      th{background:#f8fafc;font-weight:700}
+      @page{margin:16px;size:A4;}
+      body{font-family:Arial,sans-serif;color:#333;line-height:1.4;margin:0;padding:0}
+      .pdf-header{border-bottom:2px solid #1E33FF;padding-bottom:10px;margin-bottom:16px;page-break-after:avoid}
+      .header-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+      .brand{display:flex;align-items:center;gap:10px}
+      .logo{width:40px;height:40px;object-fit:contain}
+      .brand-name{font-size:18px;font-weight:800;color:#1E33FF}
+      .meta{text-align:right}
+      .report-name{font-size:14px;font-weight:800;margin-bottom:4px}
+      .meta-line{font-size:10px;color:#64748b;margin-top:2px}
+      .pdf-footer{border-top:1px solid #e2e8f0;margin-top:20px;padding-top:8px;text-align:center;font-size:10px;color:#64748b}
+      h3,h4{margin:16px 0 12px 0;page-break-after:avoid}
+      p{margin:8px 0}
+      table{width:100%;border-collapse:collapse;font-size:11px;margin:12px 0;page-break-inside:auto}
+      thead{display:table-header-group}
+      tbody{display:table-row-group}
+      tr{page-break-inside:avoid;page-break-after:auto}
+      th{background:#f8fafc;font-weight:700;padding:8px;border:1px solid #ddd;text-align:left}
+      td{padding:8px;border:1px solid #ddd;text-align:left;vertical-align:top}
+      tr:nth-child(even){background-color:#f9fafb}
+      .month-section{margin-bottom:24px}
+      .month-title{font-size:16px;font-weight:700;margin:20px 0 12px 0;padding-bottom:6px;border-bottom:2px solid #1E33FF;color:#1E33FF;page-break-after:avoid}
+      @media print{body{margin:0;padding:0}table{page-break-inside:auto}tr{page-break-inside:avoid;page-break-after:auto}thead{display:table-header-group}}
     </style></head><body>
-      <table class="page">
-        <thead><tr><td>${headerHtml}</td></tr></thead>
-        <tbody><tr><td>${periodLine}${body}</td></tr></tbody>
-        <tfoot><tr><td><div class="pdf-footer">Generated by MyStayInn</div></td></tr></tfoot>
-      </table>
+      <div class="pdf-header">
+        ${headerHtml}
+      </div>
+      ${periodLine}
+      ${body}
+      <div class="pdf-footer">Generated by MyStayInn</div>
     </body></html>`;
   }, [
     currentProperty,
@@ -1942,7 +2699,7 @@ useEffect(() => {
     const pending = fd?.pendingDues ?? combinedPendingDues;
     const collections = fd?.collections ?? 0;
     const expense = fd?.expense ?? 0;
-    const profit = fd?.profitLoss ?? 0;
+    const profit = Math.round((fd?.collections ?? 0) - (fd?.expense ?? 0));
     const {
       detailedActiveRows,
       detailedOldRows,
@@ -2186,15 +2943,27 @@ useEffect(() => {
           const m2 = MONTHS[(currentMonthIdx - 2 + 12) % 12];
           months = [m0, m1, m2].map((m) => {
             const d = financialData[m] || { collections: 0, expense: 0, profitLoss: 0 };
-            return { month: m, collected: d.collections || 0, expense: d.expense || 0, profit: d.profitLoss || 0 };
+            return {
+              month: m,
+              collected: d.collections || 0,
+              expense: d.expense || 0,
+              profit: Math.round(Number(d.collections || 0) - Number(d.expense || 0)),
+            };
           });
         }
+        const totalColl = months.reduce((sum, x) => sum + x.collected, 0);
+        const totalExp = months.reduce((sum, x) => sum + x.expense, 0);
+        const totalPL = months.reduce((sum, x) => sum + x.profit, 0);
+        
         body = [
           "# | Month | Collected | Expense | Profit/Loss",
+          "--|-------|-----------|---------|------------",
           ...months.map(
             (x, i) =>
-              `${i + 1} | ${x.month} | ₹${Number(x.collected).toLocaleString()} | ₹${Number(x.expense).toLocaleString()} | ₹${Number(x.profit).toLocaleString()}`
+              `${i + 1} | ${x.month} | ₹${Number(x.collected).toLocaleString()} | ₹${Number(x.expense).toLocaleString()} | ${x.profit >= 0 ? '₹' : '-₹'}${Math.abs(x.profit).toLocaleString()}`
           ),
+          "--|-------|-----------|---------|------------",
+          `Total | | ₹${totalColl.toLocaleString()} | ₹${totalExp.toLocaleString()} | ${totalPL >= 0 ? '₹' : '-₹'}${Math.abs(totalPL).toLocaleString()}`,
         ].join("\n");
       }
         break;
@@ -2236,30 +3005,48 @@ useEffect(() => {
 
 /* Generate PDF, save with proper filename, then offer share (Save to device / Files) */
 /* Generate PDF, save with proper filename, then offer share (Save to device / Files) */
+/* Generate PDF with better error handling and fallbacks */
+/* Generate PDF with better error handling and fallbacks */
 const generateAndSharePdf = useCallback(async (reportName: string, period?: string, filterCtx?: { f1: string; f2: string }) => {
-  if (pdfGenerating) return;
+  if (pdfGenerating) {
+    Alert.alert("Please wait", "PDF generation is already in progress");
+    return;
+  }
+  
   setPdfGenerating(true);
   
+  // Show loading indicator
+  const loadingAlert = setTimeout(() => {
+    Alert.alert("Generating PDF", "Please wait while we create your PDF...", [{ text: "OK" }], { cancelable: false });
+  }, 500);
+  
   try {
-    console.log(`Generating PDF for: ${reportName}`);
-    const details = await ensureDetailedReportsLoaded();
+    console.log(`[PDF] Starting generation for: ${reportName}`);
     
-    // Load logo and log result
-    console.log("Loading logo for PDF...");
-    const logoUri = await getMyStayLogoDataUri();
-    console.log("Logo URI available:", !!logoUri);
-    if (logoUri) {
-      console.log("Logo URI length:", logoUri.length);
-      console.log("Logo URI starts with:", logoUri.substring(0, 50));
-    }
+    // Load details with timeout
+    const details = await Promise.race([
+      ensureDetailedReportsLoaded(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Loading tenant data timed out')), 30000))
+    ]);
     
-    // Update state
-    if (logoUri) {
-      setMyStayLogoDataUri(logoUri);
+    console.log('[PDF] Details loaded successfully');
+    
+    // Try to load logo, but continue without it if fails
+    let logoUri = '';
+    try {
+      logoUri = await getMyStayLogoDataUri();
+      if (logoUri) {
+        console.log('[PDF] Logo loaded successfully');
+      } else {
+        console.log('[PDF] Logo not available, using text fallback');
+      }
+    } catch (logoError) {
+      console.warn('[PDF] Logo loading failed, continuing without logo:', logoError);
     }
     
     // Check if print is available
     if (typeof Print?.printToFileAsync !== "function") {
+      clearTimeout(loadingAlert);
       Alert.alert(
         "PDF not available",
         "PDF export is not available. Share as text instead?",
@@ -2271,65 +3058,111 @@ const generateAndSharePdf = useCallback(async (reportName: string, period?: stri
       return;
     }
     
-    // Generate HTML
+    // Generate HTML with timeout
+    console.log('[PDF] Generating HTML...');
     const html = buildReportHtml(reportName, period, details, filterCtx, logoUri);
-    console.log("HTML contains logo:", html.includes('data:image/png;base64') ? "Yes" : "No");
     
-    // Verify HTML has content
     if (!html || html.length < 100) {
-      throw new Error("Generated HTML is too short");
+      throw new Error(`Generated HTML is too short (${html?.length || 0} chars)`);
     }
     
-    console.log("HTML length:", html.length);
+    console.log('[PDF] HTML generated, length:', html.length);
     
     // Create PDF
+    console.log('[PDF] Creating PDF file...');
     const { uri } = await Print.printToFileAsync({ 
       html,
       base64: false,
     });
     
-    console.log("PDF created at:", uri);
-    
-    const filename = getPdfFilename(reportName, period);
-    
-    // Move file
-    const sourceFile = new File(uri);
-    const destFile = new File(Paths.document, filename);
-    
-    if (destFile.exists) {
-      await destFile.delete();
+    if (!uri) {
+      throw new Error('No PDF URI returned');
     }
     
-    await sourceFile.copy(destFile);
-    console.log("File copied to:", destFile.uri);
+    console.log('[PDF] PDF created at:', uri);
     
-    // Share
+    const filename = getPdfFilename(reportName, period);
+    const destinationUri = `${FileSystemLegacy.documentDirectory}${filename}`;
+    
+    console.log('[PDF] Moving file to:', destinationUri);
+    
+    // Check if source exists using FileSystem
+    const sourceInfo = await FileSystemLegacy.getInfoAsync(uri);
+    if (!sourceInfo.exists) {
+      throw new Error('Source PDF file does not exist');
+    }
+    
+    // Delete existing file if needed
+    const destInfo = await FileSystemLegacy.getInfoAsync(destinationUri);
+    if (destInfo.exists) {
+      console.log('[PDF] Deleting existing file');
+      await FileSystemLegacy.deleteAsync(destinationUri);
+    }
+    
+    // Copy file
+    await FileSystemLegacy.copyAsync({
+      from: uri,
+      to: destinationUri
+    });
+    console.log('[PDF] File copied to:', destinationUri);
+    
+    // Verify copy
+    const verifyInfo = await FileSystemLegacy.getInfoAsync(destinationUri);
+    if (!verifyInfo.exists) {
+      throw new Error('Failed to copy PDF file');
+    }
+    
+    clearTimeout(loadingAlert);
+    
+    // Share or save
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
-      await Sharing.shareAsync(destFile.uri, { 
+      console.log('[PDF] Sharing PDF...');
+      await Sharing.shareAsync(destinationUri, { 
         mimeType: "application/pdf",
         dialogTitle: reportName,
       });
+      console.log('[PDF] Share completed');
     } else {
       Alert.alert("Success", `PDF saved as ${filename}`);
     }
     
   } catch (error: any) {
-    console.error("PDF Error:", error);
+    clearTimeout(loadingAlert);
+    console.error("[PDF] Error details:", error?.message || error);
+    
+    let errorMessage = "Failed to generate PDF";
+    let showRetry = true;
+    
+    if (error?.message?.includes('timeout')) {
+      errorMessage = "PDF generation timed out. The report may contain too much data. Try generating a filtered report with a smaller date range.";
+      showRetry = false;
+    } else if (error?.message?.includes('permission')) {
+      errorMessage = "Storage permission required to save PDF. Please check app permissions.";
+      showRetry = false;
+    } else if (error?.message?.includes('memory')) {
+      errorMessage = "Not enough memory to generate this report. Try reducing the date range.";
+      showRetry = false;
+    } else if (error?.message?.includes('html')) {
+      errorMessage = "Failed to generate report content. Try generating a smaller report.";
+    } else {
+      errorMessage = error?.message || "Unknown error occurred";
+    }
+    
     Alert.alert(
       "PDF Generation Failed",
-      error?.message || "Unknown error occurred",
+      errorMessage,
       [
         { text: "OK" },
-        { text: "Share as Text", onPress: () => offerShareAsTextFallback(reportName, period, filterCtx) }
+        { text: "Share as Text", onPress: () => offerShareAsTextFallback(reportName, period, filterCtx) },
+        ...(showRetry ? [{ text: "Retry", onPress: () => generateAndSharePdf(reportName, period, filterCtx) }] : [])
       ]
     );
   } finally {
     setPdfGenerating(false);
+    console.log('[PDF] Generation completed');
   }
-}, [buildReportHtml, ensureDetailedReportsLoaded, getPdfFilename, offerShareAsTextFallback, pdfGenerating]);
-/* ===== ADD THIS MISSING FUNCTION ===== */
-/* Subscription Guard & Downloader */
+}, [buildReportHtml, ensureDetailedReportsLoaded, getPdfFilename, offerShareAsTextFallback, pdfGenerating]);/* Subscription Guard & Downloader */
 const handleDownload = (reportName: string) => {
   generateAndSharePdf(reportName);
 };
@@ -2563,9 +3396,9 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
                     <View key={idx} className="mb-3">
                       <View className="flex-row justify-between items-center mb-1">
                         <Text className="text-slate-600 text-sm font-medium">{month.name}</Text>
-                        <Text className="text-slate-900 font-bold">₹{(month.data?.profitLoss ?? 0).toLocaleString()}</Text>
+                        <Text className="text-slate-900 font-bold">₹{Math.round((month.data?.collections ?? 0) - (month.data?.expense ?? 0)).toLocaleString()}</Text>
                       </View>
-                      <ProgressBar value={month.data?.profitLoss ?? 0} max={45000} color="bg-blue-500" />
+                      <ProgressBar value={Math.round((month.data?.collections ?? 0) - (month.data?.expense ?? 0))} max={45000} color="bg-blue-500" />
                     </View>
                   ))}
                 </View>
@@ -2580,6 +3413,7 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
               
               {(() => {
                 const currentData = financialData[financialView] || financialData[currentMonthName] || { collections: 0, expense: 0, pendingDues: 0, profitLoss: 0 };
+                const currentProfit = Math.round((currentData.collections ?? 0) - (currentData.expense ?? 0));
                 return (
                   <View className="space-y-4">
                     {/* Collections */}
@@ -2622,13 +3456,27 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
                     <View className=" rounded-2xl p-4">
                       <View className="flex-row justify-between items-center mb-2">
                         <Text className="text-blue-700 font-bold">Profit / Loss</Text>
-                        <Text className="text-blue-900 text-xl font-black">₹{currentData.profitLoss.toLocaleString()}</Text>
+                        <Text className="text-blue-900 text-xl font-black">₹{currentProfit.toLocaleString()}</Text>
                       </View>
-                      <ProgressBar value={currentData.profitLoss} max={45000} color="bg-blue-500" />
+                      <ProgressBar value={currentProfit} max={45000} color="bg-blue-500" />
                       <Text className="text-blue-600 text-xs mt-1">
-                        {((currentData.profitLoss / 45000) * 100).toFixed(0)}% of target
+                        {((currentProfit / 45000) * 100).toFixed(0)}% of target
                       </Text>
                     </View>
+
+                    {/* MoveOut P/L */}
+                    {(currentData.moveOutPL ?? 0) > 0 && (
+                      <View className=" rounded-2xl p-4" style={{ backgroundColor: '#f0fdf4' }}>
+                        <View className="flex-row justify-between items-center mb-2">
+                          <Text className="text-green-700 font-bold">MoveOut P/L</Text>
+                          <Text className="text-green-900 text-xl font-black">₹{(currentData.moveOutPL || 0).toLocaleString()}</Text>
+                        </View>
+                        <ProgressBar value={currentData.moveOutPL || 0} max={25000} color="bg-green-500" />
+                        <Text className="text-green-600 text-xs mt-1">
+                          Financial consideration from completed move-outs
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 );
               })()}

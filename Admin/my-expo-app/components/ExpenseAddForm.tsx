@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Platform,
 } from "react-native";
 import ScrollableDatePicker from "./ScrollableDatePicker";
 import CustomDropdown from "./CustomDropdown";

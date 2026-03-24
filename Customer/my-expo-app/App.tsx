@@ -20,6 +20,8 @@ import AnnouncementsSection from './components/AnnouncementsSection';
 import HomeRecentAnnouncements from './components/HomeRecentAnnouncements';
 import InboxDetailScreen from './components/InboxDetailScreen';
 import SettingsScreen from './components/SettingsScreen';
+import PrivacyPolicyScreen from './components/PrivacyPolicyScreen';
+import TermsScreen from './components/TermsScreen';
 import WelcomeScreen from './components/WelcomeScreen';
 import SplashScreen from './components/SplashScreen';
 import SignupScreen from './components/SignupScreen';
@@ -234,6 +236,8 @@ export default function App() {
               <Stack.Screen name="LoginPin" component={LoginPinScreen} />
               <Stack.Screen name="Home" component={HomeScreen} />
               <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Terms" component={TermsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Signup" component={SignupScreen} />
               <Stack.Screen name="BasicInfo" component={BasicInfoScreen} />
               <Stack.Screen name="Email" component={EmailScreen} />

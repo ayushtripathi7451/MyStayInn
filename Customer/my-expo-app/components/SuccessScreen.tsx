@@ -3,7 +3,8 @@ import { View, Text, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import SuccessIcon from "./SuccessIcon";
 
-export default function SuccessScreen({ navigation }: any) {
+export default function SuccessScreen({ navigation, route }: any) {
+  const uniqueId = route?.params?.uniqueId || "—";
   return (
     <SafeAreaView className="flex-1 bg-white px-6">
 
@@ -26,7 +27,7 @@ export default function SuccessScreen({ navigation }: any) {
           {/* UNIQUE ID */}
           <Text className="text-center font-semibold text-gray-500 mt-3 text-lg">
             Now your unique ID is{" "}
-            <Text className="font-bold text-gray-700">MYS25A000001</Text>
+            <Text className="font-bold text-gray-700">{uniqueId}</Text>
           </Text>
 
           {/* ✅✅ FULL WIDTH BUTTON FIX */}

@@ -1,5 +1,15 @@
+// PaymentManagementScreen.tsx - Updated with proper daily rent tracking
+
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator, RefreshControl } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useFocusEffect, NavigationProp } from "@react-navigation/native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -27,10 +37,22 @@ interface BookingWithDetails {
   isRentCashPaid?: boolean;
   rentOnlinePaidYearMonth?: string | null;
   rentCashPaidYearMonth?: string | null;
-  status?: 'active' | 'completed' | 'cancelled';
+  rentPeriod?: string;
+  dailyPayments?: {
+    id: string;
+    paymentDate: string;
+    amount: number;
+    paidOnline: boolean;
+    paidCash: boolean;
+    onlineAmount: number;
+    cashAmount: number;
+    isOverdue?: boolean;
+    overdueDays?: number;
+  }[];
+  status?: "active" | "completed" | "cancelled";
 }
 
-type DueKind = 'security_deposit' | 'rent_online' | 'rent_cash';
+type DueKind = "security_deposit" | "rent_online" | "rent_cash" | "daily_rent_online" | "daily_rent_cash";
 
 interface DueItem {
   id: string;
@@ -45,6 +67,9 @@ interface DueItem {
   date: string;
   monthLabel?: string;
   isMovedOut?: boolean;
+  paymentDate?: string; // For daily payments
+  isOverdue?: boolean;
+  overdueDays?: number;
 }
 
 interface TransactionItem {
@@ -63,7 +88,7 @@ interface TransactionItem {
 
 // Helper function for year-month formatting
 function yearMonth(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export default function PaymentManagementScreen({ route }: any) {
@@ -85,7 +110,10 @@ export default function PaymentManagementScreen({ route }: any) {
       setError(null);
       const params: Record<string, string> = { includeCompleted: "true" };
       if (propertyId) params.propertyId = propertyId;
-      const res = await bookingApi.get("/api/bookings/list/active-with-details", { params, timeout: 15000 });
+      const res = await bookingApi.get("/api/bookings/list/active-with-details", {
+        params,
+        timeout: 15000,
+      });
       if (res.data?.success && Array.isArray(res.data.bookings)) {
         const toBool = (v: any) => v === true || v === "true" || v === 1;
         setBookings(
@@ -102,8 +130,31 @@ export default function PaymentManagementScreen({ route }: any) {
             isRentCashPaid: toBool(b.isRentCashPaid),
             rentOnlinePaidYearMonth: b.rentOnlinePaidYearMonth || null,
             rentCashPaidYearMonth: b.rentCashPaidYearMonth || null,
-            moveInDate: b.moveInDate != null ? (typeof b.moveInDate === "string" ? b.moveInDate : new Date(b.moveInDate).toISOString?.() ?? String(b.moveInDate)) : "",
-            moveOutDate: b.moveOutDate != null ? (typeof b.moveOutDate === "string" ? b.moveOutDate : new Date(b.moveOutDate).toISOString?.() ?? String(b.moveOutDate)) : null,
+            dailyPayments: Array.isArray(b.dailyPayments)
+              ? b.dailyPayments.map((dp: any) => ({
+                  id: dp.id.toString(),
+                  paymentDate: dp.paymentDate,
+                  amount: Number(dp.amount),
+                  paidOnline: toBool(dp.paidOnline),
+                  paidCash: toBool(dp.paidCash),
+                  onlineAmount: Number(dp.onlineAmount || 0),
+                  cashAmount: Number(dp.cashAmount || 0),
+                  isOverdue: toBool(dp.isOverdue),
+                  overdueDays: Number(dp.overdueDays || 0),
+                }))
+              : [],
+            moveInDate:
+              b.moveInDate != null
+                ? typeof b.moveInDate === "string"
+                  ? b.moveInDate
+                  : new Date(b.moveInDate).toISOString?.() ?? String(b.moveInDate)
+                : "",
+            moveOutDate:
+              b.moveOutDate != null
+                ? typeof b.moveOutDate === "string"
+                  ? b.moveOutDate
+                  : new Date(b.moveOutDate).toISOString?.() ?? String(b.moveOutDate)
+                : null,
             status: b.status ?? "active",
           }))
         );
@@ -137,7 +188,9 @@ export default function PaymentManagementScreen({ route }: any) {
   const formatDate = (d: string) => {
     if (!d) return "—";
     const date = new Date(d);
-    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    return Number.isNaN(date.getTime())
+      ? "—"
+      : date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
   };
 
   const customerName = (b: BookingWithDetails) =>
@@ -147,12 +200,133 @@ export default function PaymentManagementScreen({ route }: any) {
   const roomNumber = (b: BookingWithDetails) => b.room?.roomNumber ?? "—";
   const propertyName = (b: BookingWithDetails) => b.room?.propertyName ?? "—";
 
+  // Generate daily rent due items
+  const generateDailyDueItems = (b: BookingWithDetails): DueItem[] => {
+    const items: DueItem[] = [];
+    const rentPeriod = String(b.rentPeriod || "month").toLowerCase();
+
+    // Only for daily rent bookings
+    if (rentPeriod !== "day") {
+      return items;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split("T")[0];
+
+    // Get daily payments for this booking
+    const dailyPayments = b.dailyPayments || [];
+
+    // If no daily payments, create one for today (this should be handled by cron)
+    if (dailyPayments.length === 0) {
+      const onlineAmount = b.scheduledOnlineRent || 0;
+      const cashAmount = b.scheduledCashRent || 0;
+
+      if (onlineAmount > 0) {
+        items.push({
+          id: `${b.id}-daily-online-${todayStr}`,
+          bookingId: b.id,
+          customerId: b.customerId,
+          name: customerName(b),
+          roomNumber: roomNumber(b),
+          propertyName: propertyName(b),
+          amount: onlineAmount,
+          dueType: "Daily Rent (Online)",
+          dueKind: "daily_rent_online",
+          date: b.moveInDate,
+          monthLabel: today.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+          isMovedOut: b.status === "completed",
+          paymentDate: todayStr,
+          isOverdue: false,
+          overdueDays: 0,
+        });
+      }
+
+      if (cashAmount > 0) {
+        items.push({
+          id: `${b.id}-daily-cash-${todayStr}`,
+          bookingId: b.id,
+          customerId: b.customerId,
+          name: customerName(b),
+          roomNumber: roomNumber(b),
+          propertyName: propertyName(b),
+          amount: cashAmount,
+          dueType: "Daily Rent (Cash)",
+          dueKind: "daily_rent_cash",
+          date: b.moveInDate,
+          monthLabel: today.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+          isMovedOut: b.status === "completed",
+          paymentDate: todayStr,
+          isOverdue: false,
+          overdueDays: 0,
+        });
+      }
+      return items;
+    }
+
+    // Process existing daily payments
+    for (const payment of dailyPayments) {
+      const paymentDate = new Date(payment.paymentDate);
+      paymentDate.setHours(0, 0, 0, 0);
+      const paymentStr = paymentDate.toISOString().split("T")[0];
+      const dateLabel = paymentDate.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+
+      // Check online portion
+      if (!payment.paidOnline && payment.onlineAmount > 0) {
+        items.push({
+          id: `${b.id}-daily-online-${payment.id}`,
+          bookingId: b.id,
+          customerId: b.customerId,
+          name: customerName(b),
+          roomNumber: roomNumber(b),
+          propertyName: propertyName(b),
+          amount: payment.onlineAmount,
+          dueType: "Daily Rent (Online)",
+          dueKind: "daily_rent_online",
+          date: b.moveInDate,
+          monthLabel: dateLabel,
+          isMovedOut: b.status === "completed",
+          paymentDate: paymentStr,
+          isOverdue: payment.isOverdue || false,
+          overdueDays: payment.overdueDays || 0,
+        });
+      }
+
+      // Check cash portion
+      if (!payment.paidCash && payment.cashAmount > 0) {
+        items.push({
+          id: `${b.id}-daily-cash-${payment.id}`,
+          bookingId: b.id,
+          customerId: b.customerId,
+          name: customerName(b),
+          roomNumber: roomNumber(b),
+          propertyName: propertyName(b),
+          amount: payment.cashAmount,
+          dueType: "Daily Rent (Cash)",
+          dueKind: "daily_rent_cash",
+          date: b.moveInDate,
+          monthLabel: dateLabel,
+          isMovedOut: b.status === "completed",
+          paymentDate: paymentStr,
+          isOverdue: payment.isOverdue || false,
+          overdueDays: payment.overdueDays || 0,
+        });
+      }
+    }
+
+    return items;
+  };
+
   // Calculate first due month based on move-in date
   const getFirstDueMonth = (moveInDate: string): string | null => {
     if (!moveInDate) return null;
     const moveIn = new Date(moveInDate);
     if (isNaN(moveIn.getTime())) return null;
-    
+
     const moveInDay = moveIn.getDate();
     const moveInYm = yearMonth(moveIn);
     const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
@@ -163,7 +337,7 @@ export default function PaymentManagementScreen({ route }: any) {
   const getLastDueMonth = (b: BookingWithDetails): string => {
     const current = new Date();
     const currentYm = yearMonth(current);
-    
+
     // If moved out, use move-out month as the last due month
     if (b.moveOutDate && b.status === "completed") {
       const moveOutDate = new Date(b.moveOutDate);
@@ -171,7 +345,7 @@ export default function PaymentManagementScreen({ route }: any) {
         return yearMonth(moveOutDate);
       }
     }
-    
+
     return currentYm;
   };
 
@@ -179,44 +353,49 @@ export default function PaymentManagementScreen({ route }: any) {
   const generateUnpaidMonths = (b: BookingWithDetails): DueItem[] => {
     const items: DueItem[] = [];
     const monthlyRent = b.scheduledOnlineRent || Number(b.rentAmount) || 0;
-    const lastPaidYm = b.rentOnlinePaidYearMonth;
-    
+    const paidMonthsStr = b.rentOnlinePaidYearMonth || "";
+
+    // ✅ Parse comma-separated list of paid months into a Set for fast lookup
+    const paidMonths = new Set(
+      paidMonthsStr.split(",").map((m: string) => m.trim()).filter(Boolean)
+    );
+
     if (monthlyRent <= 0) return items;
 
     const firstDueYm = getFirstDueMonth(b.moveInDate);
     if (!firstDueYm) return items;
 
     const lastDueYm = getLastDueMonth(b);
-    
+
     // Parse dates
-    const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
-    const [lastDueYear, lastDueMonth] = lastDueYm.split('-').map(Number);
-    const [lastPaidYear, lastPaidMonth] = lastPaidYm ? lastPaidYm.split('-').map(Number) : [firstYear, firstMonth - 1];
-    
-    // Start from the month after last paid
+    const [firstYear, firstMonth] = firstDueYm.split("-").map(Number);
+    const [lastDueYear, lastDueMonth] = lastDueYm.split("-").map(Number);
+
+    // Start from first due month
     let year = firstYear;
     let month = firstMonth;
-    
-    if (lastPaidYm) {
-      if (year < lastPaidYear || (year === lastPaidYear && month <= lastPaidMonth)) {
-        year = lastPaidYear;
-        month = lastPaidMonth + 1;
+
+    // Generate months until last due month (move-out or current)
+    while (year < lastDueYear || (year === lastDueYear && month <= lastDueMonth)) {
+      const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+
+      // ✅ Skip if already paid
+      if (paidMonths.has(monthKey)) {
+        month++;
         if (month > 12) {
           month = 1;
           year++;
         }
+        continue;
       }
-    }
-    
-    // Generate months until last due month (move-out or current)
-    while (year < lastDueYear || (year === lastDueYear && month <= lastDueMonth)) {
-      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
-        month: "short", 
-        year: "numeric" 
+
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
       });
-      
+
       items.push({
-        id: `${b.id}-rent-${year}-${month}`,
+        id: `${b.id}-rent-${monthKey}`,
         bookingId: b.id,
         customerId: b.customerId,
         name: customerName(b),
@@ -229,14 +408,84 @@ export default function PaymentManagementScreen({ route }: any) {
         monthLabel,
         isMovedOut: b.status === "completed",
       });
-      
+
       month++;
       if (month > 12) {
         month = 1;
         year++;
       }
     }
-    
+
+    return items;
+  };
+
+  // Generate all unpaid cash rent months for a booking (same logic as online rent)
+  const generateUnpaidCashMonths = (b: BookingWithDetails): DueItem[] => {
+    const items: DueItem[] = [];
+    const monthlyCashRent = b.scheduledCashRent || 0;
+    const paidMonthsStr = b.rentCashPaidYearMonth || "";
+
+    // ✅ Parse comma-separated list of paid months into a Set for fast lookup
+    const paidMonths = new Set(
+      paidMonthsStr.split(",").map((m: string) => m.trim()).filter(Boolean)
+    );
+
+    if (monthlyCashRent <= 0) return items;
+
+    const firstDueYm = getFirstDueMonth(b.moveInDate);
+    if (!firstDueYm) return items;
+
+    const lastDueYm = getLastDueMonth(b);
+
+    // Parse dates
+    const [firstYear, firstMonth] = firstDueYm.split("-").map(Number);
+    const [lastDueYear, lastDueMonth] = lastDueYm.split("-").map(Number);
+
+    // Start from first due month
+    let year = firstYear;
+    let month = firstMonth;
+
+    // Generate months until last due month (move-out or current)
+    while (year < lastDueYear || (year === lastDueYear && month <= lastDueMonth)) {
+      const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+
+      // ✅ Skip if already paid
+      if (paidMonths.has(monthKey)) {
+        month++;
+        if (month > 12) {
+          month = 1;
+          year++;
+        }
+        continue;
+      }
+
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
+      });
+
+      items.push({
+        id: `${b.id}-rent-cash-${monthKey}`,
+        bookingId: b.id,
+        customerId: b.customerId,
+        name: customerName(b),
+        roomNumber: roomNumber(b),
+        propertyName: propertyName(b),
+        amount: monthlyCashRent,
+        dueType: "Rent (cash)",
+        dueKind: "rent_cash",
+        date: b.moveInDate,
+        monthLabel,
+        isMovedOut: b.status === "completed",
+      });
+
+      month++;
+      if (month > 12) {
+        month = 1;
+        year++;
+      }
+    }
+
     return items;
   };
 
@@ -260,28 +509,20 @@ export default function PaymentManagementScreen({ route }: any) {
         isMovedOut: b.status === "completed",
       });
     }
-    
-    // Rent online - generate all unpaid months up to move-out date
-    const unpaidRentMonths = generateUnpaidMonths(b);
-    dueCustomers.push(...unpaidRentMonths);
-    
-    // Cash rent (simplified - assumes single amount)
-    const cashRecv = b.scheduledCashRent ?? b.cashPaymentRecv ?? 0;
-    if (cashRecv > 0 && !b.isRentCashPaid) {
-      dueCustomers.push({
-        id: `${b.id}-rent-cash`,
-        bookingId: b.id,
-        customerId: b.customerId,
-        name: customerName(b),
-        roomNumber: roomNumber(b),
-        propertyName: propertyName(b),
-        amount: cashRecv,
-        dueType: "Rent (cash)",
-        dueKind: "rent_cash",
-        date: b.moveInDate,
-        monthLabel: formatDate(b.moveInDate),
-        isMovedOut: b.status === "completed",
-      });
+
+    // Check if daily rent
+    if (String(b.rentPeriod || "month").toLowerCase() === "day") {
+      // Add daily rent dues
+      const dailyDue = generateDailyDueItems(b);
+      dueCustomers.push(...dailyDue);
+    } else {
+      // Monthly rent - online
+      const unpaidRentMonths = generateUnpaidMonths(b);
+      dueCustomers.push(...unpaidRentMonths);
+
+      // Monthly rent - cash
+      const unpaidCashMonths = generateUnpaidCashMonths(b);
+      dueCustomers.push(...unpaidCashMonths);
     }
   });
 
@@ -304,44 +545,107 @@ export default function PaymentManagementScreen({ route }: any) {
         isMovedOut: b.status === "completed",
       });
     }
-    
-    // Paid rent online (tracked by paid year-month)
+
+    // ✅ Paid rent online (tracked by comma-separated paid year-months)
     if (b.rentOnlinePaidYearMonth && (b.scheduledOnlineRent || Number(b.rentAmount) > 0)) {
-      const [year, month] = b.rentOnlinePaidYearMonth.split('-').map(Number);
-      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
-        month: "short", 
-        year: "numeric" 
-      });
-      
-      transactions.push({
-        id: `${b.id}-rent-${b.rentOnlinePaidYearMonth}`,
-        bookingId: b.id,
-        customerId: b.customerId,
-        name: customerName(b),
-        roomNumber: roomNumber(b),
-        propertyName: propertyName(b),
-        amount: b.scheduledOnlineRent || Number(b.rentAmount) || 0,
-        type: `Rent (online) - ${monthLabel}`,
-        date: b.moveInDate,
-        monthLabel,
-        isMovedOut: b.status === "completed",
+      const paidMonths = b.rentOnlinePaidYearMonth.split(",").map((m: string) => m.trim()).filter(Boolean);
+      const monthlyRent = b.scheduledOnlineRent || Number(b.rentAmount) || 0;
+
+      paidMonths.forEach((monthKey) => {
+        const [year, month] = monthKey.split("-").map(Number);
+        if (!year || !month) return;
+
+        const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+          month: "short",
+          year: "numeric",
+        });
+
+        transactions.push({
+          id: `${b.id}-rent-${monthKey}`,
+          bookingId: b.id,
+          customerId: b.customerId,
+          name: customerName(b),
+          roomNumber: roomNumber(b),
+          propertyName: propertyName(b),
+          amount: monthlyRent,
+          type: `Rent (online) - ${monthLabel}`,
+          date: b.moveInDate,
+          monthLabel,
+          isMovedOut: b.status === "completed",
+        });
       });
     }
-    
-    // Paid rent cash
-    if (b.isRentCashPaid && (b.scheduledCashRent ?? b.cashPaymentRecv ?? 0) > 0) {
-      transactions.push({
-        id: `${b.id}-rent-cash`,
-        bookingId: b.id,
-        customerId: b.customerId,
-        name: customerName(b),
-        roomNumber: roomNumber(b),
-        propertyName: propertyName(b),
-        amount: b.scheduledCashRent ?? b.cashPaymentRecv ?? 0,
-        type: "Rent (cash)",
-        date: b.moveInDate,
-        monthLabel: formatDate(b.moveInDate),
-        isMovedOut: b.status === "completed",
+
+    // ✅ Paid daily rent records (online/cash)
+    if (Array.isArray(b.dailyPayments)) {
+      b.dailyPayments.forEach((dp) => {
+        const dayLabel = new Date(dp.paymentDate).toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        });
+
+        if (dp.paidOnline && Number(dp.onlineAmount) > 0) {
+          transactions.push({
+            id: `${b.id}-daily-online-${dp.id}`,
+            bookingId: b.id,
+            customerId: b.customerId,
+            name: customerName(b),
+            roomNumber: roomNumber(b),
+            propertyName: propertyName(b),
+            amount: Number(dp.onlineAmount),
+            type: `Rent (online) - ${dayLabel}`,
+            date: dp.paymentDate,
+            monthLabel: dayLabel,
+            isMovedOut: b.status === "completed",
+          });
+        }
+
+        if (dp.paidCash && Number(dp.cashAmount) > 0) {
+          transactions.push({
+            id: `${b.id}-daily-cash-${dp.id}`,
+            bookingId: b.id,
+            customerId: b.customerId,
+            name: customerName(b),
+            roomNumber: roomNumber(b),
+            propertyName: propertyName(b),
+            amount: Number(dp.cashAmount),
+            type: `Rent (cash) - ${dayLabel}`,
+            date: dp.paymentDate,
+            monthLabel: dayLabel,
+            isMovedOut: b.status === "completed",
+          });
+        }
+      });
+    }
+
+    // ✅ Paid rent cash (tracked by comma-separated paid year-months)
+    if (b.rentCashPaidYearMonth && (b.scheduledCashRent ?? 0) > 0) {
+      const paidMonths = b.rentCashPaidYearMonth.split(",").map((m: string) => m.trim()).filter(Boolean);
+      const monthlyCashRent = b.scheduledCashRent ?? 0;
+
+      paidMonths.forEach((monthKey) => {
+        const [year, month] = monthKey.split("-").map(Number);
+        if (!year || !month) return;
+
+        const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+          month: "short",
+          year: "numeric",
+        });
+
+        transactions.push({
+          id: `${b.id}-rent-cash-${monthKey}`,
+          bookingId: b.id,
+          customerId: b.customerId,
+          name: customerName(b),
+          roomNumber: roomNumber(b),
+          propertyName: propertyName(b),
+          amount: monthlyCashRent,
+          type: `Rent (cash) - ${monthLabel}`,
+          date: b.moveInDate,
+          monthLabel,
+          isMovedOut: b.status === "completed",
+        });
       });
     }
   });
@@ -365,25 +669,67 @@ export default function PaymentManagementScreen({ route }: any) {
       Alert.alert("No Selection", "Please select customers to notify");
       return;
     }
-    
+
     Alert.alert(
-      "Notification Sent", 
+      "Notification Sent",
       `Payment reminder sent to ${selectedCustomers.length} customer(s)`,
       [{ text: "OK", onPress: () => setSelectedCustomers([]) }]
     );
   };
 
-  const handleMarkRentCashPaid = async (bookingId: string) => {
-    try {
-      setMarkingPaidBookingId(bookingId);
-      await bookingApi.patch(`/api/bookings/${bookingId}/mark-rent-cash-paid`);
-      await fetchBookings();
-    } catch (e: any) {
-      Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to mark as paid");
-    } finally {
-      setMarkingPaidBookingId(null);
+  const handleMarkDailyRentPaid = async (
+  bookingId: string,
+  paymentDate?: string,
+  type?: "online" | "cash"
+) => {
+  try {
+    setMarkingPaidBookingId(bookingId);
+
+    // Only allow cash payments to be marked manually
+    if (type !== "cash") {
+      Alert.alert("Info", "Online payments are processed automatically via payment gateway.");
+      return;
     }
-  };
+
+    await bookingApi.patch(`/api/bookings/${bookingId}/mark-daily-rent-paid`, {
+      date: paymentDate,
+      type,
+    });
+    await fetchBookings();
+    Alert.alert("Success", "Daily rent marked as paid");
+  } catch (e: any) {
+    Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to mark as paid");
+  } finally {
+    setMarkingPaidBookingId(null);
+  }
+};
+
+  const handleMarkRentCashPaid = async (bookingId: string, monthLabel?: string) => {
+  try {
+    setMarkingPaidBookingId(bookingId);
+
+    // Extract year-month from monthLabel (e.g., "Mar 2026" -> "2026-03")
+    let yearMonth: string | undefined;
+    if (monthLabel) {
+      const match = monthLabel.match(/(\w+)\s+(\d{4})/);
+      if (match) {
+        const [, monthName, year] = match;
+        const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth() + 1;
+        yearMonth = `${year}-${String(monthIndex).padStart(2, "0")}`;
+      }
+    }
+
+    await bookingApi.patch(`/api/bookings/${bookingId}/mark-rent-cash-paid`, {
+      yearMonth,
+    });
+    await fetchBookings();
+    Alert.alert("Success", "Cash rent marked as paid");
+  } catch (e: any) {
+    Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to mark as paid");
+  } finally {
+    setMarkingPaidBookingId(null);
+  }
+};
 
   const handleMarkSecurityPaid = async (bookingId: string) => {
     try {
@@ -422,7 +768,9 @@ export default function PaymentManagementScreen({ route }: any) {
           <Text className="text-sm text-gray-500 mt-1">
             Room {item.roomNumber} • {item.propertyName}
           </Text>
-          <Text className="text-xs text-gray-400 mt-1">{item.type} • {item.monthLabel || formatDate(item.date)}</Text>
+          <Text className="text-xs text-gray-400 mt-1">
+            {item.type} • {item.monthLabel || formatDate(item.date)}
+          </Text>
         </View>
         <View className="items-end">
           <Text className="text-lg font-bold text-green-600">₹{item.amount.toLocaleString()}</Text>
@@ -435,90 +783,113 @@ export default function PaymentManagementScreen({ route }: any) {
   );
 
   const renderDueItem = (item: DueItem) => {
-    const isRentCash = item.dueKind === "rent_cash";
-    const isSecurityDeposit = item.dueKind === "security_deposit";
-    const isMarking = markingPaidBookingId === item.bookingId;
-    
-    return (
-      <TouchableOpacity
-        key={item.id}
-        className="bg-white p-4 rounded-2xl mb-3 border border-gray-100 opacity-100"
-        onPress={() =>
-          navigation.navigate("TenantDetailScreen", {
-            tenantId: item.customerId,
-            initialTab: "payments",
-          })
-        }
-        activeOpacity={0.7}
-      >
-        <View className="flex-row items-start">
-          {!isRentCash && (
-            <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation();
-                handleCustomerSelect(item.id);
-              }}
-              className={`w-5 h-5 rounded border-2 mr-3 items-center justify-center mt-1 ${
-                selectedCustomers.includes(item.id) ? "bg-blue-500 border-blue-500" : "border-gray-300"
-              }`}
-            >
-              {selectedCustomers.includes(item.id) && (
-                <Ionicons name="checkmark" size={12} color="white" />
-              )}
-            </TouchableOpacity>
-          )}
-          {isRentCash && <View className="w-5 mr-3" />}
+  const isDailyRentOnline = item.dueKind === "daily_rent_online";
+  const isDailyRentCash = item.dueKind === "daily_rent_cash";
+  const isRentCash = item.dueKind === "rent_cash";
+  const isMarking = markingPaidBookingId === item.bookingId;
 
-          <View className="flex-1">
-            <View className="flex-row items-center gap-2 flex-wrap">
-              <Text className="text-base font-semibold text-gray-800">{item.name}</Text>
-              {item.isMovedOut && (
-                <View className="bg-slate-100 px-2 py-0.5 rounded">
-                  <Text className="text-slate-600 text-xs font-medium">Moved out</Text>
-                </View>
-              )}
-            </View>
-            <Text className="text-sm text-gray-500 mt-1">
-              Room {item.roomNumber} • {item.propertyName}
-            </Text>
-            <Text className="text-xs text-gray-400 mt-1">
-              {item.dueType} • {item.monthLabel || `Allocated ${formatDate(item.date)}`}
-            </Text>
-          </View>
+  return (
+    <TouchableOpacity
+      key={item.id}
+      className="bg-white p-4 rounded-2xl mb-3 border border-gray-100 opacity-100"
+      onPress={() =>
+        navigation.navigate("TenantDetailScreen", {
+          tenantId: item.customerId,
+          initialTab: "payments",
+        })
+      }
+      activeOpacity={0.7}
+    >
+      <View className="flex-row items-start">
+        {/* Only show checkbox for non-cash items (security deposit, monthly online, daily online) */}
+        {!isRentCash && !isDailyRentCash && (
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              handleCustomerSelect(item.id);
+            }}
+            className={`w-5 h-5 rounded border-2 mr-3 items-center justify-center mt-1 ${
+              selectedCustomers.includes(item.id) ? "bg-blue-500 border-blue-500" : "border-gray-300"
+            }`}
+          >
+            {selectedCustomers.includes(item.id) && (
+              <Ionicons name="checkmark" size={12} color="white" />
+            )}
+          </TouchableOpacity>
+        )}
+        {/* Cash items get empty space to maintain alignment */}
+        {(isRentCash || isDailyRentCash) && <View className="w-5 mr-3" />}
 
-          <View className="items-end">
-            <Text className="text-lg font-bold text-red-600">₹{item.amount.toLocaleString()}</Text>
-            {(isRentCash || isSecurityDeposit) && !item.isMovedOut ? (
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation();
-                  if (isSecurityDeposit) {
-                    handleMarkSecurityPaid(item.bookingId);
-                  } else {
-                    handleMarkRentCashPaid(item.bookingId);
-                  }
-                }}
-                disabled={isMarking}
-                className="mt-2 bg-green-500 px-3 py-1.5 rounded-lg"
-              >
-                {isMarking ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Text className="text-white text-xs font-bold">Mark as paid</Text>
-                )}
-              </TouchableOpacity>
-            ) : (
-              <View className={`px-2 py-1 rounded-full mt-1 ${item.isMovedOut ? "bg-slate-100" : "bg-amber-100"}`}>
-                <Text className={`text-xs font-medium ${item.isMovedOut ? "text-slate-600" : "text-amber-700"}`}>
-                  {item.isMovedOut ? "Moved out" : "Not paid"}
-                </Text>
+        <View className="flex-1">
+          <View className="flex-row items-center gap-2 flex-wrap">
+            <Text className="text-base font-semibold text-gray-800">{item.name}</Text>
+            {item.isMovedOut && (
+              <View className="bg-slate-100 px-2 py-0.5 rounded">
+                <Text className="text-slate-600 text-xs font-medium">Moved out</Text>
+              </View>
+            )}
+            {(item.isOverdue || (item.overdueDays && item.overdueDays > 0)) && (
+              <View className="bg-red-100 px-2 py-0.5 rounded">
+                <Text className="text-red-600 text-xs font-medium">Overdue {item.overdueDays}d</Text>
               </View>
             )}
           </View>
+          <Text className="text-sm text-gray-500 mt-1">
+            Room {item.roomNumber} • {item.propertyName}
+          </Text>
+          <Text className="text-xs text-gray-400 mt-1">
+            {item.dueType} • {item.monthLabel || `Allocated ${formatDate(item.date)}`}
+            {item.paymentDate && ` • ${item.paymentDate}`}
+          </Text>
         </View>
-      </TouchableOpacity>
-    );
-  };
+
+        <View className="items-end">
+          <Text className="text-lg font-bold text-red-600">₹{item.amount.toLocaleString()}</Text>
+          {/* Only show "Mark Paid" button for cash payments (both monthly and daily cash) */}
+          {(isDailyRentCash || isRentCash) && !item.isMovedOut ? (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                if (isDailyRentCash) {
+                  handleMarkDailyRentPaid(
+                    item.bookingId,
+                    item.paymentDate,
+                    "cash"
+                  );
+                } else if (isRentCash) {
+                  handleMarkRentCashPaid(item.bookingId, item.monthLabel);
+                }
+              }}
+              disabled={isMarking}
+              className="mt-2 bg-green-500 px-3 py-1.5 rounded-lg"
+            >
+              {isMarking ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text className="text-white text-xs font-bold">Mark as paid</Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            // For online payments, just show "Not paid" status without button
+            <View
+              className={`px-2 py-1 rounded-full mt-1 ${
+                item.isMovedOut ? "bg-slate-100" : "bg-amber-100"
+              }`}
+            >
+              <Text
+                className={`text-xs font-medium ${
+                  item.isMovedOut ? "text-slate-600" : "text-amber-700"
+                }`}
+              >
+                {item.isMovedOut ? "Moved out" : "Not paid"}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
 
   return (
     <View className="flex-1 bg-white">
@@ -526,10 +897,7 @@ export default function PaymentManagementScreen({ route }: any) {
       <SafeAreaView className="bg-[#f9f9f9]">
         <View className="bg-[#f7f8fb] pt-4 pb-8 px-6 flex-row justify-between items-center">
           <View className="flex-row items-center">
-            <TouchableOpacity
-              onPress={() => navigation.goBack()}
-              className="mr-4"
-            >
+            <TouchableOpacity onPress={() => navigation.goBack()} className="mr-4">
               <Ionicons name="arrow-back" size={24} color="#000" />
             </TouchableOpacity>
             <Text className="text-black text-3xl font-bold">Payments</Text>
@@ -543,7 +911,7 @@ export default function PaymentManagementScreen({ route }: any) {
               <Ionicons name="receipt-outline" size={16} color="white" />
               <Text className="text-white font-bold ml-1 text-sm">Expense</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               onPress={() => navigation.navigate("Settings")}
               className="w-9 h-9 rounded-full justify-center items-center"
@@ -560,7 +928,6 @@ export default function PaymentManagementScreen({ route }: any) {
 
       {/* Body */}
       <View className="flex-1 bg-[#F6F8FF] rounded-t-[40px] -mt-10 px-4 pt-6 overflow-hidden">
-        
         {/* Tab Switch */}
         <View className="bg-[#1E33FF] rounded-full mb-6 overflow-hidden">
           <View className="flex-row justify-between p-1">
@@ -578,7 +945,7 @@ export default function PaymentManagementScreen({ route }: any) {
                   activeTab === "transactions" ? "text-[#1E33FF]" : "text-white"
                 }`}
               >
-                Transactions 
+                Transactions
               </Text>
             </TouchableOpacity>
 
@@ -606,21 +973,20 @@ export default function PaymentManagementScreen({ route }: any) {
         {activeTab === "dues" && (
           <View className="bg-white p-4 rounded-2xl mb-4 border border-gray-100">
             <View className="flex-row justify-between items-center">
-              <TouchableOpacity
-                onPress={handleSelectAll}
-                className="flex-row items-center"
-              >
-                <View className={`w-5 h-5 rounded border-2 mr-2 items-center justify-center ${
-                  selectedCustomers.length === dueCustomers.length 
-                    ? 'bg-blue-500 border-blue-500' 
-                    : 'border-gray-300'
-                }`}>
+              <TouchableOpacity onPress={handleSelectAll} className="flex-row items-center">
+                <View
+                  className={`w-5 h-5 rounded border-2 mr-2 items-center justify-center ${
+                    selectedCustomers.length === dueCustomers.length
+                      ? "bg-blue-500 border-blue-500"
+                      : "border-gray-300"
+                  }`}
+                >
                   {selectedCustomers.length === dueCustomers.length && (
                     <Ionicons name="checkmark" size={12} color="white" />
                   )}
                 </View>
                 <Text className="text-gray-700 font-medium">
-                  {selectedCustomers.length === dueCustomers.length ? 'Deselect All' : 'Select All'}
+                  {selectedCustomers.length === dueCustomers.length ? "Deselect All" : "Select All"}
                 </Text>
               </TouchableOpacity>
 
@@ -630,7 +996,7 @@ export default function PaymentManagementScreen({ route }: any) {
               >
                 <MaterialCommunityIcons name="bell-outline" size={16} color="white" />
                 <Text className="text-white font-medium ml-1">
-                  Notify {selectedCustomers.length > 0 ? `(${selectedCustomers.length})` : 'All'}
+                  Notify {selectedCustomers.length > 0 ? `(${selectedCustomers.length})` : "All"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -667,7 +1033,9 @@ export default function PaymentManagementScreen({ route }: any) {
               </Text>
               {transactions.length === 0 ? (
                 <View className="bg-white p-6 rounded-2xl border border-gray-100">
-                  <Text className="text-gray-500 text-center">No transactions yet. When tenants pay security deposit or rent, they will appear here.</Text>
+                  <Text className="text-gray-500 text-center">
+                    No transactions yet. When tenants pay security deposit or rent, they will appear here.
+                  </Text>
                 </View>
               ) : (
                 transactions.map(renderTransactionItem)
@@ -680,7 +1048,10 @@ export default function PaymentManagementScreen({ route }: any) {
               </Text>
               {dueCustomers.length === 0 ? (
                 <View className="bg-white p-6 rounded-2xl border border-gray-100">
-                  <Text className="text-gray-500 text-center">No dues. When you allocate someone with unpaid security deposit or rent, they will appear here. For rent (cash), use Mark as paid when the tenant pays.</Text>
+                  <Text className="text-gray-500 text-center">
+                    No dues. When you allocate someone with unpaid security deposit or rent, they will appear
+                    here. For rent (cash), use Mark as paid when the tenant pays.
+                  </Text>
                 </View>
               ) : (
                 dueCustomers.map(renderDueItem)

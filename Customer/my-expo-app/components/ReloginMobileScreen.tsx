@@ -150,11 +150,8 @@ useEffect(() => {
         registerPushNotifications().catch(() => {});
       }
 
-      // 6. Navigate to MPIN login screen
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "LoginPin" }],
-      });
+      // 6. Skip PIN screen — go directly to the app
+      navigation.reset({ index: 0, routes: [{ name: "CompleteProfile" }] });
     } catch (error: any) {
       console.error("Login Error:", error);
       

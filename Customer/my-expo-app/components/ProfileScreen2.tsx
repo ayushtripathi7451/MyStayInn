@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
 import BottomNav from "./BottomNav";
 import { useTheme } from "../context/ThemeContext";
 import { api, userApi } from "../utils/api";
@@ -79,6 +80,7 @@ export default function ProfileScreen2({ navigation }: any) {
   const [aadhaarVerifiedByKycService, setAadhaarVerifiedByKycService] = useState(false);
   const [aadhaarDetailsFromKycService, setAadhaarDetailsFromKycService] = useState<any>(null);
   const [aadhaarCheckoutVisible, setAadhaarCheckoutVisible] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   /* 🎨 THEME COLORS */
   const isFemale = theme === "female";
@@ -218,6 +220,81 @@ useEffect(() => {
     );
   };
 
+  const handlePhotoUpload = async () => {
+    try {
+      // Request permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Required",
+          "Please allow access to your photo library to upload a profile photo."
+        );
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: "images",
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const imageUri = result.assets[0].uri;
+      
+      setUploadingPhoto(true);
+
+      // Convert image to base64
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      
+      reader.onloadend = async () => {
+        try {
+          const base64data = reader.result as string;
+          
+          console.log('[ProfileScreen2] Image converted to base64');
+          console.log('[ProfileScreen2] Base64 length:', base64data.length);
+          console.log('[ProfileScreen2] Base64 preview:', base64data.substring(0, 50));
+          
+          // Update profile with new photo
+          const updateRes = await userApi.put("/api/users/profile-info", {
+            profileImage: base64data,
+          });
+
+          console.log('[ProfileScreen2] Upload response:', updateRes.data);
+
+          if (updateRes.data.success) {
+            Alert.alert("Success", "Profile photo updated successfully!");
+            await refreshData(); // Refresh profile data
+          } else {
+            throw new Error(updateRes.data.message || "Failed to update photo");
+          }
+        } catch (error: any) {
+          console.error("Photo upload error:", error);
+          console.error("Error response:", error?.response?.data);
+          Alert.alert(
+            "Upload Failed",
+            error?.response?.data?.message || error?.message || "Failed to upload photo. Please try again."
+          );
+        } finally {
+          setUploadingPhoto(false);
+        }
+      };
+      
+      reader.readAsDataURL(blob);
+    } catch (error: any) {
+      console.error("Photo selection error:", error);
+      Alert.alert("Error", "Failed to select photo. Please try again.");
+      setUploadingPhoto(false);
+    }
+  };
+
   if (loading) {
     return (
       <View className="flex-1 bg-[#F4F6FF] items-center justify-center">
@@ -354,9 +431,14 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
             <TouchableOpacity
               className="absolute bottom-0 right-0 p-2 rounded-full"
               style={{ backgroundColor: primaryColor }}
-              onPress={() => navigation.navigate("CompleteProfile")}
+              onPress={handlePhotoUpload}
+              disabled={uploadingPhoto}
             >
-              <Ionicons name="camera-outline" size={16} color="#fff" />
+              {uploadingPhoto ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="camera-outline" size={16} color="#fff" />
+              )}
             </TouchableOpacity>
           </View>
 

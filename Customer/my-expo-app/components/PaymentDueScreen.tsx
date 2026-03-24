@@ -25,80 +25,180 @@ type DueItem = {
   monthLabel: string;
   amount: number;
   type: "security_deposit" | "rent_online" | "rent_cash";
+  paymentId?: string;
 };
 
-/** Derives all unpaid dues: security deposit, rent (online), rent (cash). 
- * Shows each unpaid month as a separate line item */
+/** 
+ * Derives all unpaid dues from the server response.
+ * Shows each unpaid month as a separate line item
+ */
 function deriveDueItemsFromRaw(raw: any): DueItem[] {
-  console.log('[PaymentDue] deriveDueItemsFromRaw Input:', raw);
-  
+  console.log('[PaymentDue] ========== deriveDueItemsFromRaw START ==========');
   const items: DueItem[] = [];
   if (!raw?.booking || !raw?.property) return items;
 
-  const moveInDate = raw.booking.moveInDate;
-  const monthlyRent = Number(raw.booking.scheduledOnlineRent) || Number(raw.booking.rentAmount) || 0;
-  const lastPaidYm = raw.booking.rentOnlinePaidYearMonth;
+  const booking = raw.booking;
+  const rentPeriod = String(booking.rentPeriod || 'month').toLowerCase();
+  const isDailyRent = rentPeriod === 'day';
+
+  const scheduledOnlineRent = Number(booking.scheduledOnlineRent) || 0;
+  const scheduledCashRent = Number(booking.scheduledCashRent) || 0;
+
+  console.log('[PaymentDue] rentPeriod:', rentPeriod);
+
+  if (isDailyRent) {
+    const dailyPayments = Array.isArray(booking.dailyPayments) ? booking.dailyPayments : [];
+    const sortedPayments = dailyPayments
+      .map((p: any) => ({
+        ...p,
+        paymentDateObj: new Date(p.paymentDate || p.date),
+      }))
+      .sort((a: any, b: any) => b.paymentDateObj.getTime() - a.paymentDateObj.getTime());
+
+    sortedPayments.forEach((p: any) => {
+      const monthLabel = p.paymentDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const rawAmount = Number(p.amount || 0);
+      const cashAmount = Number(p.cashAmount || 0);
+      const onlineAmount = Number(
+        p.onlineAmount != null
+          ? p.onlineAmount
+          : rawAmount > 0
+            ? Math.max(0, rawAmount - cashAmount)
+            : scheduledOnlineRent
+      );
+      const pid = p.id != null ? String(p.id) : undefined;
+
+      if (!toBool(p.paidOnline) && onlineAmount > 0) {
+        items.push({
+          id: `daily_online_${pid ?? monthLabel}`,
+          label: 'Daily Rent (online)',
+          monthLabel,
+          amount: onlineAmount,
+          type: 'rent_online',
+          paymentId: pid,
+        });
+      }
+
+      if (!toBool(p.paidCash) && cashAmount > 0) {
+        items.push({
+          id: `daily_cash_${pid ?? monthLabel}`,
+          label: 'Daily Rent (cash)',
+          monthLabel,
+          amount: cashAmount,
+          type: 'rent_cash',
+          paymentId: pid,
+        });
+      }
+    });
+
+    // Fallback for setups where daily rows are not yet created.
+    if (sortedPayments.length === 0) {
+      const today = new Date();
+      const monthLabel = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      if (scheduledOnlineRent > 0 && !toBool(booking.isRentOnlinePaid)) {
+        items.push({
+          id: `daily_online_fallback_${booking.id}`,
+          label: 'Daily Rent (online)',
+          monthLabel,
+          amount: scheduledOnlineRent,
+          type: 'rent_online',
+        });
+      }
+      if (scheduledCashRent > 0 && !toBool(booking.isRentCashPaid)) {
+        items.push({
+          id: `daily_cash_fallback_${booking.id}`,
+          label: 'Daily Rent (cash)',
+          monthLabel,
+          amount: scheduledCashRent,
+          type: 'rent_cash',
+        });
+      }
+    }
+
+    // Security deposit if not paid
+    const securityAmount = Number(booking.securityDeposit) || 0;
+    if (securityAmount > 0 && !toBool(booking.isSecurityPaid)) {
+      items.push({
+        id: 'security_deposit',
+        label: 'Security deposit',
+        monthLabel: new Date(booking.moveInDate).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+        amount: securityAmount,
+        type: 'security_deposit',
+      });
+    }
+
+    return items;
+  }
+
+  const monthlyRent = Number(booking.scheduledOnlineRent) || Number(booking.rentAmount) || 0;
   
+  // ✅ Parse paid months from comma-separated string into a Set
+  const paidMonthsStr = booking.rentOnlinePaidYearMonth || '';
+  const paidMonths = new Set(paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean));
+  
+  console.log('[PaymentDue] Paid months:', Array.from(paidMonths));
+  console.log('[PaymentDue] Monthly rent:', monthlyRent);
+
   // Calculate first due month based on move-in date
-  const moveIn = moveInDate ? new Date(moveInDate) : null;
+  const moveInDate = booking.moveInDate ? new Date(booking.moveInDate) : null;
   let firstDueYm = null;
-  if (moveIn) {
-    const moveInDay = moveIn.getDate();
-    const moveInYm = yearMonth(moveIn);
-    const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
+  if (moveInDate) {
+    const moveInDay = moveInDate.getDate();
+    const moveInYm = yearMonth(moveInDate);
+    const nextMonthYm = yearMonth(new Date(moveInDate.getFullYear(), moveInDate.getMonth() + 1, 1));
     firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
     console.log('[PaymentDue] First due month:', firstDueYm);
   }
 
-  // Generate items for each unpaid month
+  // ✅ Generate items for each unpaid month
   if (firstDueYm && monthlyRent > 0) {
     const current = new Date();
     const currentYm = yearMonth(current);
-    
-    // Parse dates for comparison
+
+    // Parse dates
     const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
-    const [lastPaidYear, lastPaidMonth] = lastPaidYm ? lastPaidYm.split('-').map(Number) : [firstYear, firstMonth - 1];
     const [currentYear, currentMonth] = currentYm.split('-').map(Number);
-    
+
     console.log('[PaymentDue] Date ranges:', {
       firstDue: `${firstYear}-${firstMonth}`,
-      lastPaid: lastPaidYm || 'none',
-      current: `${currentYear}-${currentMonth}`
+      current: `${currentYear}-${currentMonth}`,
+      paidMonths: Array.from(paidMonths),
     });
-    
-    // Start from the month after last paid, or first due if nothing paid
+
+    // Start from first due month
     let year = firstYear;
     let month = firstMonth;
-    
-    // If we have a last paid month, start from the next month
-    if (lastPaidYm) {
-      if (year < lastPaidYear || (year === lastPaidYear && month <= lastPaidMonth)) {
-        year = lastPaidYear;
-        month = lastPaidMonth + 1;
+
+    // ✅ Loop from first due month to current month
+    while (year < currentYear || (year === currentYear && month <= currentMonth)) {
+      const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+
+      // ✅ Skip if already paid
+      if (paidMonths.has(monthKey)) {
+        console.log(`[PaymentDue] Skipping paid month: ${monthKey}`);
+        month++;
         if (month > 12) {
           month = 1;
           year++;
         }
+        continue;
       }
-    }
-    
-    // Generate months until current month
-    while (year < currentYear || (year === currentYear && month <= currentMonth)) {
-      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
-        month: "short", 
-        year: "numeric" 
+
+      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
       });
-      
-      console.log(`[PaymentDue] Adding unpaid month: ${year}-${month}`);
-      
+
+      console.log(`[PaymentDue] ✅ Adding unpaid month: ${monthKey} -> ${monthLabel}`);
+
       items.push({
-        id: `rent_online_${year}-${month}`,
+        id: `rent_online_${monthKey}`,
         label: "Rent (online)",
         monthLabel,
         amount: monthlyRent,
         type: "rent_online",
       });
-      
+
       // Move to next month
       month++;
       if (month > 12) {
@@ -109,23 +209,24 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
   }
 
   // Add security deposit if not paid (only once)
-  const securityAmount = Number(raw.booking.securityDeposit) || 0;
-  if (securityAmount > 0 && !toBool(raw.booking.isSecurityPaid)) {
+  const securityAmount = Number(booking.securityDeposit) || 0;
+  if (securityAmount > 0 && !toBool(booking.isSecurityPaid)) {
     items.push({
       id: "security_deposit",
       label: "Security deposit",
-      monthLabel: new Date(raw.booking.moveInDate).toLocaleDateString("en-GB", { 
-        month: "short", 
-        year: "numeric" 
+      monthLabel: new Date(booking.moveInDate).toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
       }),
       amount: securityAmount,
       type: "security_deposit",
     });
+    console.log('[PaymentDue] ✅ Adding security deposit:', securityAmount);
   }
 
   // Add cash rent if configured (simplified - assumes single amount)
-  const cashRecv = Number(raw.booking.cashPaymentRecv) || 0;
-  if (cashRecv > 0 && !toBool(raw.booking.isRentCashPaid)) {
+  const cashRecv = Number(booking.cashPaymentRecv) || 0;
+  if (cashRecv > 0 && !toBool(booking.isRentCashPaid)) {
     items.push({
       id: "rent_cash",
       label: "Rent (cash)",
@@ -133,16 +234,16 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
       amount: cashRecv,
       type: "rent_cash",
     });
+    console.log('[PaymentDue] ✅ Adding cash rent:', cashRecv);
   }
 
-  console.log('[PaymentDue] Final items:', items);
+  console.log('[PaymentDue] Final items count:', items.length);
   return items;
 }
 
 export default function PaymentDueScreen({ navigation }: any) {
   const { raw, loading, refresh } = useCurrentStay();
   const { data: userData } = useUser();
-  // Only the logged-in customer's payment history (use profile id, not booking)
   const loggedInCustomerId = userData?.id ?? undefined;
   const { paidItems: paymentHistory, loading: historyLoading, refresh: refreshHistory } = usePaymentHistory(loggedInCustomerId);
 
@@ -161,7 +262,6 @@ export default function PaymentDueScreen({ navigation }: any) {
     return `${yyyy}-${mm}-${dd}`;
   };
 
-  // If user changes device date while staying on this screen, refresh dues immediately.
   const lastLocalDayRef = useRef<string>(getLocalYMD());
   useEffect(() => {
     const t = setInterval(() => {
@@ -172,7 +272,7 @@ export default function PaymentDueScreen({ navigation }: any) {
         refresh(true);
         refreshHistory();
       }
-    }, 5000); // Check every 5 seconds for better responsiveness
+    }, 5000);
     return () => clearInterval(t);
   }, [refresh, refreshHistory]);
 
@@ -189,14 +289,26 @@ export default function PaymentDueScreen({ navigation }: any) {
 
   const handlePayNow = (item: DueItem) => {
     if (item.type === "rent_cash") return;
+
+    let yearMonthValue: string | undefined;
+
+    if (item.id.startsWith("rent_online_")) {
+      yearMonthValue = item.id.replace("rent_online_", "");
+    } else if (item.id.startsWith("daily_online_")) {
+      // Keep monthly marker for backwards compatibility; concrete daily row uses paymentId.
+      const today = new Date();
+      yearMonthValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    console.log('[PaymentDue] Paying item:', item.id, 'yearMonthValue:', yearMonthValue);
+
     navigation.navigate("DepositCheckoutScreen", {
       type: item.type,
       amount: item.amount,
-      // For rent payments, include which month is being paid
-      ...(item.type === "rent_online" && { 
-        monthLabel: item.monthLabel,
-        returnTo: "PaymentDue"
-      }),
+      monthLabel: item.monthLabel,
+      yearMonth: yearMonthValue,
+      paymentId: item.paymentId,
+      returnTo: "PaymentDue"
     });
   };
 
@@ -205,6 +317,27 @@ export default function PaymentDueScreen({ navigation }: any) {
     refresh(true);
     refreshHistory();
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView className="flex-1 bg-slate-50">
+        <View className="flex-row items-center px-6 py-4">
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            className="w-10 h-10 bg-white rounded-full border border-gray-300 justify-center items-center"
+          >
+            <Ionicons name="chevron-back" size={22} color="#000" />
+          </TouchableOpacity>
+          <Text className="ml-4 text-2xl font-semibold">Payments</Text>
+        </View>
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#64748b" />
+          <Text className="text-gray-500 mt-3">Loading your payments...</Text>
+        </View>
+        <BottomNav />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50">
@@ -223,33 +356,22 @@ export default function PaymentDueScreen({ navigation }: any) {
         contentContainerStyle={{ paddingBottom: 120 }}
         className="px-4"
       >
-        {/* Due Amount – above payment history */}
+        {/* Due Amount Section */}
         <View className="flex-row justify-between items-center mb-3">
-          <Text className="text-lg font-semibold text-slate-800">
-            Due Amount
-          </Text>
+          <Text className="text-lg font-semibold text-slate-800">Due Amount</Text>
           {dueItems.length > 0 && (
-            <Text className="text-base text-slate-600">
-              Total: ₹{formatAmount(totalDue)}
-            </Text>
+            <Text className="text-base text-slate-600">Total: ₹{formatAmount(totalDue)}</Text>
           )}
         </View>
 
-        {loading ? (
-          <View className="py-6 items-center">
-            <ActivityIndicator size="small" color="#64748b" />
-          </View>
-        ) : dueItems.length === 0 ? (
+        {dueItems.length === 0 ? (
           <View className="bg-white rounded-2xl py-5 px-5 mb-4 border border-slate-200 shadow-sm">
-            <Text className="text-slate-600 text-base">
-              No pending dues.
-            </Text>
+            <Text className="text-slate-600 text-base">No pending dues.</Text>
             {!!raw?.booking?.rentInfoMessage && (
               <Text className="text-slate-500 text-sm mt-3 leading-5">
                 {String(raw.booking.rentInfoMessage)}
               </Text>
             )}
-            {/* Force Refresh Button */}
             <TouchableOpacity
               onPress={handleForceRefresh}
               className="mt-4 px-6 py-2 bg-yellow-500/20 rounded-full border border-yellow-500/30 self-start"
@@ -267,17 +389,11 @@ export default function PaymentDueScreen({ navigation }: any) {
                 className="bg-[#FFECEC] border-2 border-[#FFB3B3] rounded-2xl py-4 px-5 mb-3 flex-row justify-between items-center shadow-sm"
               >
                 <View className="flex-1">
-                  <Text className="text-red-800 font-semibold text-base">
-                    {item.label}
-                  </Text>
-                  <Text className="text-red-600/90 text-sm mt-1">
-                    {item.monthLabel}
-                  </Text>
+                  <Text className="text-red-800 font-semibold text-base">{item.label}</Text>
+                  <Text className="text-red-600/90 text-sm mt-1">{item.monthLabel}</Text>
                 </View>
                 <View className="flex-row items-center gap-3">
-                  <Text className="text-red-700 font-bold text-lg">
-                    ₹{formatAmount(item.amount)}
-                  </Text>
+                  <Text className="text-red-700 font-bold text-lg">₹{formatAmount(item.amount)}</Text>
                   {item.type === "rent_cash" ? (
                     <Text className="text-red-600/90 text-sm font-medium">Pay via cash</Text>
                   ) : (
@@ -286,32 +402,22 @@ export default function PaymentDueScreen({ navigation }: any) {
                       onPress={() => handlePayNow(item)}
                       className="bg-red-600 px-4 py-2.5 rounded-xl"
                     >
-                      <Text className="text-white text-sm font-semibold">
-                        Pay Now
-                      </Text>
+                      <Text className="text-white text-sm font-semibold">Pay Now</Text>
                     </TouchableOpacity>
                   )}
                 </View>
               </View>
             ))}
             <View className="bg-slate-200/70 rounded-2xl py-4 px-5 mt-3 flex-row justify-between items-center border border-slate-300">
-              <Text className="text-slate-700 font-semibold text-base">
-                Total due
-              </Text>
-              <Text className="text-slate-900 font-bold text-lg">
-                ₹{formatAmount(totalDue)}
-              </Text>
+              <Text className="text-slate-700 font-semibold text-base">Total due</Text>
+              <Text className="text-slate-900 font-bold text-lg">₹{formatAmount(totalDue)}</Text>
             </View>
-
-          
           </>
         )}
 
-        {/* Payment History – recent first, logged-in customer only */}
-        <Text className="text-lg font-semibold text-slate-800 mt-6 mb-3">
-          Payment History
-        </Text>
-        {loading || historyLoading ? (
+        {/* Payment History Section */}
+        <Text className="text-lg font-semibold text-slate-800 mt-6 mb-3">Payment History</Text>
+        {historyLoading ? (
           <View className="py-6 items-center">
             <ActivityIndicator size="small" color="#64748b" />
           </View>
@@ -326,21 +432,13 @@ export default function PaymentDueScreen({ navigation }: any) {
               className="bg-white rounded-2xl py-4 px-5 mb-3 border border-slate-200 flex-row justify-between items-center shadow-sm"
             >
               <View className="flex-1">
-                <Text className="text-slate-800 font-semibold text-base">
-                  {item.label}
-                </Text>
-                <Text className="text-slate-500 text-sm mt-1">
-                  {item.dateLabel}
-                </Text>
+                <Text className="text-slate-800 font-semibold text-base">{item.label}</Text>
+                <Text className="text-slate-500 text-sm mt-1">{item.dateLabel}</Text>
               </View>
               <View className="flex-row items-center gap-3">
-                <Text className="text-slate-800 font-bold text-lg">
-                  ₹{formatAmount(item.amount)}
-                </Text>
+                <Text className="text-slate-800 font-bold text-lg">₹{formatAmount(item.amount)}</Text>
                 <View className="bg-green-100 px-3 py-1.5 rounded-full border border-green-200">
-                  <Text className="text-green-700 text-sm font-semibold">
-                    Paid
-                  </Text>
+                  <Text className="text-green-700 text-sm font-semibold">Paid</Text>
                 </View>
               </View>
             </View>

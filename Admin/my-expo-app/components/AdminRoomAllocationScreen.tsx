@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import ScrollableDatePicker from "./ScrollableDatePicker";
-import { propertyApi } from "../utils/api";
+import { propertyApi, bookingApi } from "../utils/api";
 import { useProperty } from "../contexts/PropertyContext";
 
 interface Room {
@@ -40,6 +40,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
   const [loading, setLoading] = useState(true);
   const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
   const [selectedBeds, setSelectedBeds] = useState<string[]>([]);
+  const [occupiedBeds, setOccupiedBeds] = useState<string[]>([]);
   const [rentPeriod, setRentPeriod] = useState<'month' | 'day'>('month');
 
   const customer = route?.params?.customer;
@@ -112,6 +113,8 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
       }
       const roomList = Array.isArray(prop.rooms) ? prop.rooms : [];
       const available = roomList.filter((r: any) => r.isAvailable !== false);
+      
+      // Map rooms with bed labels
       const rooms: Room[] = available.map((room: any) => ({
         id: room.id.toString(),
         roomNumber: room.roomNumber,
@@ -122,8 +125,31 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
         isAvailable: room.isAvailable !== false,
         beds: generateBedLabels(room.capacity),
       }));
-      setAvailableRooms(rooms);
-      if (rooms.length > 0) {
+
+      // Filter out rooms where ALL beds are occupied
+      const roomsWithAvailableBeds: Room[] = [];
+      for (const room of rooms) {
+        try {
+          const occupiedBedsRes = await bookingApi.get(`/api/bookings/room/${room.id}/occupied-beds`);
+          const occupiedBeds = occupiedBedsRes.data?.occupiedBeds || [];
+          
+          // Only include room if it has at least one available bed
+          const hasAvailableBeds = occupiedBeds.length < room.capacity;
+          if (hasAvailableBeds) {
+            roomsWithAvailableBeds.push(room);
+          } else {
+            console.log(`Room ${room.roomNumber} is fully occupied (${occupiedBeds.length}/${room.capacity} beds)`);
+          }
+        } catch (error) {
+          console.error(`Error checking beds for room ${room.id}:`, error);
+          // If we can't check, include the room to be safe
+          roomsWithAvailableBeds.push(room);
+        }
+      }
+
+      setAvailableRooms(roomsWithAvailableBeds);
+      
+      if (roomsWithAvailableBeds.length > 0) {
         // Do not preselect a room/bed. Admin must explicitly select.
         setAllocationData((prev) => ({
           ...prev,
@@ -134,7 +160,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
         setSelectedBeds([]);
         setSplitPayment(false);
       } else {
-        Alert.alert("No Rooms", "No available rooms in this property. Add rooms first.");
+        Alert.alert("No Rooms", "No rooms with available beds in this property.");
       }
     } catch (error) {
       console.error('Error fetching property data:', error);
@@ -224,9 +250,27 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
   };
 
   // Check if all beds are selected (single occupancy)
+  // Single occupancy = selecting ALL beds in the room at once (not just available beds)
   const isSingleOccupancy = () => {
-    return allocationData.selectedRoom && 
-           selectedBeds.length === allocationData.selectedRoom.beds.length;
+    if (!allocationData.selectedRoom) return false;
+    
+    // Single occupancy means selecting ALL beds in the room (total capacity)
+    // Not just the available beds
+    return selectedBeds.length === allocationData.selectedRoom.capacity;
+  };
+
+  // Fetch occupied beds for a room
+  const fetchOccupiedBeds = async (roomId: string) => {
+    try {
+      const response = await bookingApi.get(`/api/bookings/room/${roomId}/occupied-beds`);
+      if (response.data.success) {
+        setOccupiedBeds(response.data.occupiedBeds || []);
+        console.log(`Occupied beds for room ${roomId}:`, response.data.occupiedBeds);
+      }
+    } catch (error) {
+      console.error('Error fetching occupied beds:', error);
+      setOccupiedBeds([]);
+    }
   };
 
   return (
@@ -535,7 +579,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => (
                 <TouchableOpacity 
-                  onPress={() => {
+                  onPress={async () => {
                     setAllocationData({
                       ...allocationData, 
                       selectedRoom: item,
@@ -545,6 +589,8 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
                     setSelectedBeds([]); // Do not preselect bed; admin selects explicitly
                     setSplitPayment(false); // Reset split payment
                     setShowRoomPicker(false);
+                    // Fetch occupied beds for this room
+                    await fetchOccupiedBeds(item.id);
                   }}
                   className={`p-5 rounded-3xl mb-3 flex-row justify-between items-center border ${
                     allocationData.selectedRoom?.id === item.id 
@@ -588,34 +634,52 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
             
             <ScrollView showsVerticalScrollIndicator={false}>
               <View className="flex-row flex-wrap">
-                {allocationData.selectedRoom?.beds.map((bed) => (
-                  <TouchableOpacity
-                    key={bed}
-                    onPress={() => toggleBedSelection(bed)}
-                    className={`w-[30%] m-1 p-6 rounded-2xl items-center justify-center border-2 ${
-                      selectedBeds.includes(bed)
-                        ? "bg-blue-50 border-blue-500"
-                        : "bg-slate-50 border-slate-200"
-                    }`}
-                  >
-                    <Ionicons 
-                      name="bed" 
-                      size={32} 
-                      color={selectedBeds.includes(bed) ? "#3B82F6" : "#94A3B8"} 
-                    />
-                    <Text className={`text-2xl font-black mt-2 ${
-                      selectedBeds.includes(bed) ? "text-blue-600" : "text-slate-600"
-                    }`}>
-                      {bed}
-                    </Text>
-                    {selectedBeds.includes(bed) && (
-                      <View className="absolute top-2 right-2 bg-blue-500 rounded-full p-1">
-                        <Ionicons name="checkmark" size={12} color="white" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                ))}
+                {allocationData.selectedRoom?.beds
+                  .filter(bed => !occupiedBeds.includes(bed)) // Only show available beds
+                  .map((bed) => {
+                    const isSelected = selectedBeds.includes(bed);
+                    
+                    return (
+                      <TouchableOpacity
+                        key={bed}
+                        onPress={() => toggleBedSelection(bed)}
+                        className={`w-[30%] m-1 p-6 rounded-2xl items-center justify-center border-2 ${
+                          isSelected
+                            ? "bg-blue-50 border-blue-500"
+                            : "bg-slate-50 border-slate-200"
+                        }`}
+                      >
+                        <Ionicons 
+                          name="bed" 
+                          size={32} 
+                          color={isSelected ? "#3B82F6" : "#94A3B8"} 
+                        />
+                        <Text className={`text-2xl font-black mt-2 ${
+                          isSelected ? "text-blue-600" : "text-slate-600"
+                        }`}>
+                          {bed}
+                        </Text>
+                        {isSelected && (
+                          <View className="absolute top-2 right-2 bg-blue-500 rounded-full p-1">
+                            <Ionicons name="checkmark" size={12} color="white" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
               </View>
+
+              {/* Occupied Beds Info */}
+              {occupiedBeds.length > 0 && (
+                <View className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200">
+                  <View className="flex-row items-center">
+                    <Ionicons name="information-circle" size={20} color="#F59E0B" />
+                    <Text className="ml-2 text-amber-700 font-bold">
+                      {occupiedBeds.length} bed(s) already occupied: {occupiedBeds.join(', ')}
+                    </Text>
+                  </View>
+                </View>
+              )}
 
               {/* Single Occupancy Info */}
               {isSingleOccupancy() && (
@@ -623,7 +687,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
                   <View className="flex-row items-center">
                     <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
                     <Text className="ml-2 text-green-700 font-bold">
-                      Single Occupancy - All beds selected
+                      Single Occupancy - All {allocationData.selectedRoom?.capacity} beds selected
                     </Text>
                   </View>
                 </View>

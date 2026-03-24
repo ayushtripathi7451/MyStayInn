@@ -37,18 +37,12 @@ export default function RoomsScreen({ navigation, route }: any) {
     pricingMode = "month"
   } = route.params || {};
 
-  const floorNames = ["Ground", "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth"];
-  
-  // Generate floor names dynamically if more than predefined names
+  // Floor naming: index 0 = Ground, index 1 = 1st, index 2 = 2nd, etc.
   const generateFloorName = (index: number) => {
-    if (index < floorNames.length) {
-      return floorNames[index];
-    }
-    // For floors beyond 10, use ordinal numbers
-    const ordinals = ["th", "st", "nd", "rd"];
-    const num = index + 1;
-    const suffix = ordinals[(num % 10 > 3 || Math.floor(num / 10) === 1) ? 0 : num % 10];
-    return `${num}${suffix} Floor`;
+    if (index === 0) return "Ground";
+    const suffixes = ["th", "st", "nd", "rd"];
+    const suffix = suffixes[(index % 10 > 3 || Math.floor(index / 10) === 1) ? 0 : index % 10];
+    return `${index}${suffix}`;
   };
   
   const usedFloors = Array.from({ length: floors }, (_, i) => generateFloorName(i));

@@ -110,6 +110,9 @@ export function* refreshCurrentStaySaga(
             currentDue: d.currentDue,
             rentPeriod: d.rentPeriod ?? state.raw.booking.rentPeriod,  // Preserve rentPeriod
             rentInfoMessage: d.rentInfoMessage ?? null,
+            dailyPayments: Array.isArray(d.dailyPayments)
+              ? d.dailyPayments
+              : (state.raw.booking.dailyPayments || []),
             // Also preserve these important fields
             scheduledOnlineRent: state.raw.booking.scheduledOnlineRent,
             scheduledCashRent: state.raw.booking.scheduledCashRent,
@@ -140,7 +143,14 @@ export function* refreshCurrentStaySaga(
 
   try {
     console.log('[CurrentStay Saga] Fetching fresh current stay data');
-    const res = yield call([userApi, 'get'], '/api/users/me/current-stay');
+    const d0 = new Date();
+    const yyyy = d0.getFullYear();
+    const mm = String(d0.getMonth() + 1).padStart(2, '0');
+    const dd = String(d0.getDate()).padStart(2, '0');
+    const clientNow = `${yyyy}-${mm}-${dd}`;
+    const res = yield call([userApi, 'get'], '/api/users/me/current-stay', {
+      params: { now: clientNow },
+    });
     const body = res?.data ?? {};
     let currentStay = body.currentStay ?? body.data?.currentStay ?? null;
     
@@ -148,12 +158,6 @@ export function* refreshCurrentStaySaga(
     
     if (currentStay?.booking) {
       try {
-        const d0 = new Date();
-        const yyyy = d0.getFullYear();
-        const mm = String(d0.getMonth() + 1).padStart(2, '0');
-        const dd = String(d0.getDate()).padStart(2, '0');
-        const clientNow = `${yyyy}-${mm}-${dd}`;
-        
         console.log('[CurrentStay Saga] Calling effective-dues API with now:', clientNow);
         
         const duesRes = yield call(
@@ -182,6 +186,9 @@ export function* refreshCurrentStaySaga(
               currentDue: d.currentDue,
               rentPeriod: d.rentPeriod ?? currentStay.booking.rentPeriod,  // Preserve rentPeriod
               rentInfoMessage: d.rentInfoMessage ?? null,
+              dailyPayments: Array.isArray(d.dailyPayments)
+                ? d.dailyPayments
+                : (currentStay.booking.dailyPayments || []),
             },
           };
           

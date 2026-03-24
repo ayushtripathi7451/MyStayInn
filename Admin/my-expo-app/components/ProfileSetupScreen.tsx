@@ -18,21 +18,36 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
+import { State, City } from "country-state-city";
 
 import ProfileHeader from "./SetupHeader";
 import MapFallback from "./MapFallback";
 
-// Configuration for API
-const API_BASE_URL = "https://api.countrystatecity.in/v1/countries/IN";
-const API_KEY = "925c2205399e5d13f37b6d9c78f7806f6b0bdbca1ae59a4a5ba3ff62041dabb3"; // Get your free key from countrystatecity.in
+// Using country-state-city library for state and city data
 
-export default function ProfileSetupScreen({ navigation }: any) {
+export default function ProfileSetupScreen({ navigation, route }: any) {
+  // Get data if returning from preview
+  const { 
+    returnToPreview = false,
+    facilitiesData: existingFacilitiesData,
+    floorsData: existingFloorsData,
+    allRooms: existingAllRooms,
+    usedFloors: existingUsedFloors,
+    fromVerify: existingFromVerify,
+    // Property data fields
+    propertyName: existingPropertyName,
+    propertyType: existingPropertyType,
+    propertyFor: existingPropertyFor,
+    address: existingAddress,
+    coordinates: existingCoordinates
+  } = route.params || {};
+
   /* -------------------- STATES -------------------- */
-  const [propertyType, setPropertyType] = useState("PG");
-  const [propertyFor, setPropertyFor] = useState("Boys");
-  const [propertyName, setPropertyName] = useState("");
+  const [propertyType, setPropertyType] = useState(existingPropertyType || "PG");
+  const [propertyFor, setPropertyFor] = useState(existingPropertyFor || "Boys");
+  const [propertyName, setPropertyName] = useState(existingPropertyName || "");
   
-  const [address, setAddress] = useState({
+  const [address, setAddress] = useState(existingAddress || {
     line1: "",
     line2: "",
     state: "",
@@ -41,10 +56,11 @@ export default function ProfileSetupScreen({ navigation }: any) {
     pincode: "",
   });
 
-  const [coordinates, setCoordinates] = useState({
+  const [coordinates, setCoordinates] = useState(existingCoordinates || {
     latitude: 28.6139,
     longitude: 77.209,
   });
+  const [locationSet, setLocationSet] = useState(!!existingCoordinates);
   const [mapRegion, setMapRegion] = useState({
     latitude: 28.6139,
     longitude: 77.209,
@@ -109,6 +125,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
   const setPinAt = (lat: number, lon: number) => {
     if (Number.isNaN(lat) || Number.isNaN(lon)) return;
     setCoordinates({ latitude: lat, longitude: lon });
+    setLocationSet(true);
     setMapRegion(regionFromCoords(lat, lon));
     mapRef.current?.animateToRegion(regionFromCoords(lat, lon), 300);
   };
@@ -134,38 +151,39 @@ export default function ProfileSetupScreen({ navigation }: any) {
     }
   };
 
-  /* -------------------- API CALLS -------------------- */
+  /* -------------------- FETCH STATES & CITIES -------------------- */
 
-  // Fetch all Indian States on component mount
+  // Fetch all Indian States on component mount using country-state-city library
   useEffect(() => {
-    const fetchStates = async () => {
-      setLoading(prev => ({ ...prev, states: true }));
-      try {
-        const response = await fetch(`${API_BASE_URL}/states`, {
-          headers: { "X-CSCAPI-KEY": API_KEY },
-        });
-        const data = await response.json();
-        setStateList(data.sort((a: any, b: any) => a.name.localeCompare(b.name)));
-      } catch (error) {
-        console.error("Error fetching states:", error);
-      } finally {
-        setLoading(prev => ({ ...prev, states: false }));
-      }
-    };
-    fetchStates();
+    setLoading(prev => ({ ...prev, states: true }));
+    try {
+      // Get all states of India (country code: IN)
+      const indianStates = State.getStatesOfCountry("IN");
+      const formattedStates = indianStates.map((state) => ({
+        name: state.name,
+        iso2: state.isoCode,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      setStateList(formattedStates);
+    } catch (error) {
+      console.error("Error fetching states:", error);
+    } finally {
+      setLoading(prev => ({ ...prev, states: false }));
+    }
   }, []);
 
-  // Fetch Cities when a state is selected
-  const fetchCities = async (stateCode: string) => {
+  // Fetch Cities when a state is selected using country-state-city library
+  const fetchCities = (stateCode: string) => {
     setLoading(prev => ({ ...prev, cities: true }));
     try {
-      const response = await fetch(`${API_BASE_URL}/states/${stateCode}/cities`, {
-        headers: { "X-CSCAPI-KEY": API_KEY },
-      });
-      const data = await response.json();
-      setCityList(data.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+      // Get all cities of the selected state in India
+      const cities = City.getCitiesOfState("IN", stateCode);
+      const formattedCities = cities.map((city) => ({
+        name: city.name,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      setCityList(formattedCities);
     } catch (error) {
       console.error("Error fetching cities:", error);
+      setCityList([]);
     } finally {
       setLoading(prev => ({ ...prev, cities: false }));
     }
@@ -188,7 +206,23 @@ export default function ProfileSetupScreen({ navigation }: any) {
 
   const onNext = () => {
     if (!validate()) return;
-    navigation.navigate("Facilities", { propertyName, propertyType, propertyFor, address, coordinates });
+    
+    const propertyData = { propertyName, propertyType, propertyFor, address, coordinates };
+    
+    if (returnToPreview) {
+      // Return to preview with updated data
+      navigation.navigate("PropertyPreview", {
+        propertyData,
+        facilitiesData: existingFacilitiesData,
+        floorsData: existingFloorsData,
+        allRooms: existingAllRooms,
+        usedFloors: existingUsedFloors,
+        fromVerify: existingFromVerify
+      });
+    } else {
+      // Normal flow - go to Facilities
+      navigation.navigate("Facilities", propertyData);
+    }
   };
 
   /* -------------------- UI COMPONENTS -------------------- */
@@ -483,20 +517,29 @@ export default function ProfileSetupScreen({ navigation }: any) {
             </MapFallback>
           </View>
           <View className="flex-row items-center justify-between mb-8">
-            <Text className="text-gray-400 text-xs">
-              Saved location: {coordinates.latitude.toFixed(5)}, {coordinates.longitude.toFixed(5)}
-            </Text>
-            <TouchableOpacity
-              onPress={() =>
-                Linking.openURL(
-                  `https://www.google.com/maps/search/?api=1&query=${coordinates.latitude},${coordinates.longitude}`
-                )
-              }
-              className="flex-row items-center px-2 py-1"
-            >
-              <Ionicons name="navigate" size={14} color="#2F3CFF" />
-              <Text className="ml-1 text-[#2F3CFF] text-xs font-medium">Open in Maps</Text>
-            </TouchableOpacity>
+            {locationSet ? (
+              <Text className="text-gray-400 text-xs">
+                Saved location: {coordinates.latitude.toFixed(5)}, {coordinates.longitude.toFixed(5)}
+              </Text>
+            ) : (
+              <View className="flex-row items-center gap-1">
+                <Ionicons name="warning-outline" size={14} color="#f59e0b" />
+                <Text className="text-amber-500 text-xs font-medium">Location not set — tap the map or search an address</Text>
+              </View>
+            )}
+            {locationSet && (
+              <TouchableOpacity
+                onPress={() =>
+                  Linking.openURL(
+                    `https://www.google.com/maps/search/?api=1&query=${coordinates.latitude},${coordinates.longitude}`
+                  )
+                }
+                className="flex-row items-center px-2 py-1"
+              >
+                <Ionicons name="navigate" size={14} color="#2F3CFF" />
+                <Text className="ml-1 text-[#2F3CFF] text-xs font-medium">Open in Maps</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* ACTION BUTTONS */}

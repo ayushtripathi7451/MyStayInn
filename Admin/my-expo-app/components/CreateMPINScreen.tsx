@@ -8,6 +8,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,6 +16,37 @@ import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MPINBoxes from "./MPINBoxes";
 import { api } from "../utils/api";
+
+const TERMS_SECTIONS = [
+  {
+    title: "Platform Role",
+    body: 'MyStayInn is a technology-based intermediary platform operated by TechMudita Pvt Ltd, connecting Property owners ("Admins") with customers ("Users"). MyStayInn does not own, manage, or operate any properties listed in its platforms.',
+  },
+  {
+    title: "Eligibility",
+    body: "Users must be 18 years or above and provide accurate and lawful information during registration and use of the platform.",
+  },
+  {
+    title: "Listings & Bookings",
+    body: "All property details, pricing, availability, and rules are provided by the respective Property owners. MyStayInn is not responsible for inaccuracies, service quality, or changes made by owners.",
+  },
+  {
+    title: "Payments & Refunds",
+    body: "Payments, if enabled, are processed through RBI-approved third-party payment gateways.",
+  },
+  {
+    title: "User Conduct",
+    body: "Users must comply with property rules, local laws, and safety regulations.",
+  },
+  {
+    title: "Limitation of Liability",
+    body: "MyStayInn and TechMudita Pvt Ltd shall not be liable for disputes or damages between Users and Property owners.",
+  },
+  {
+    title: "Governing Law",
+    body: "Terms are governed by the laws of India, and the courts at Bengaluru, Karnataka shall have exclusive jurisdiction.",
+  },
+];
 
 export default function CreateMPINScreen({ navigation }: any) {
   const [mpin, setMpin] = useState("");
@@ -24,6 +56,7 @@ export default function CreateMPINScreen({ navigation }: any) {
   const [isChecked, setIsChecked] = useState(false);
   const [mpinError, setMpinError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   const isValid =
     mpin.length === 4 &&
@@ -181,7 +214,10 @@ export default function CreateMPINScreen({ navigation }: any) {
               </View>
               <Text className="text-gray-700">
                 I agree to the{" "}
-                <Text className="font-semibold text-purple-600">
+                <Text
+                  className="font-semibold text-purple-600"
+                  onPress={() => setShowTerms(true)}
+                >
                   Terms & Conditions
                 </Text>
               </Text>
@@ -211,6 +247,36 @@ export default function CreateMPINScreen({ navigation }: any) {
             <Text className="font-semibold">Privacy Policy</Text>.
           </Text>
         </View>
+
+        {/* TERMS MODAL */}
+        <Modal visible={showTerms} animationType="slide" transparent>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+            <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "85%", padding: 24 }}>
+              <View className="flex-row items-center justify-between mb-4">
+                <Text className="text-xl font-bold text-gray-900">Terms & Conditions</Text>
+                <TouchableOpacity onPress={() => setShowTerms(false)}>
+                  <Ionicons name="close" size={24} color="#374151" />
+                </TouchableOpacity>
+              </View>
+              <Text className="text-xs text-gray-500 mb-4">MyStayInn – Operated by TechMudita Pvt Ltd</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {TERMS_SECTIONS.map((s) => (
+                  <View key={s.title} className="mb-5">
+                    <Text className="text-sm font-bold text-gray-800 mb-1">{s.title}</Text>
+                    <Text className="text-sm text-gray-600 leading-5">{s.body}</Text>
+                  </View>
+                ))}
+                <View style={{ height: 20 }} />
+              </ScrollView>
+              <TouchableOpacity
+                onPress={() => { setIsChecked(true); setShowTerms(false); }}
+                className="bg-purple-600 py-4 rounded-xl mt-4 items-center"
+              >
+                <Text className="text-white font-semibold text-base">I Agree</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );

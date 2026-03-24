@@ -15,8 +15,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { userApi, transactionApi } from "../utils/api";
 import { refreshCurrentStay } from "../src/store/actions";
-import { setCurrentStay } from "../src/store/redux/slices/currentStaySlice";
-import { mapCurrentStayToProperty } from "../src/store/sagas/currentStaySaga";
 
 type Props = {
   navigation: any;
@@ -65,6 +63,11 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
 
   const paramAmount =
     route?.params?.amount != null ? Number(route.params.amount) : undefined;
+  
+  const monthKey = route?.params?.monthKey; // e.g., "2026-04"
+  const yearMonth = route?.params?.yearMonth; // e.g., "2026-04" (consistent naming)
+  const paymentId = route?.params?.paymentId; // daily payment record id
+  const finalYearMonth = yearMonth || monthKey; // Support both param names
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -75,7 +78,11 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
 
   const fetchCurrentStay = useCallback(async () => {
     try {
-      const res = await userApi.get("/api/users/me/current-stay");
+      const d0 = new Date();
+      const clientNow = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, "0")}-${String(d0.getDate()).padStart(2, "0")}`;
+      const res = await userApi.get("/api/users/me/current-stay", {
+        params: { now: clientNow },
+      });
       const currentStay = res.data?.currentStay ?? null;
 
       if (!currentStay?.booking || !currentStay?.property) {
@@ -111,13 +118,15 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         paymentType,
         propertyId: currentStay.property.id,
         ownerId: currentStay.property.ownerId,
+        yearMonth: finalYearMonth, // Use consistent yearMonth
+        paymentId,
       });
     } catch {
       setDetails(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [paymentType, paramAmount, paymentId, finalYearMonth]);
 
   useEffect(() => {
     fetchCurrentStay();
@@ -165,6 +174,20 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
           details.paymentType === "rent_online"
             ? "first_rent"
             : "security_deposit",
+        // Pass the target month for rent payments
+        ...(details.paymentType === "rent_online" && details.yearMonth && {
+          yearMonth: details.yearMonth,
+        }),
+        ...(details.paymentType === "rent_online" && details.paymentId && {
+          dailyPaymentId: details.paymentId,
+          paymentDate: new Date().toISOString().split("T")[0],
+        }),
+      });
+      
+      console.log('[DepositCheckoutScreen] Payment link created:', {
+        type: details.paymentType,
+        yearMonth: details.yearMonth,
+        amount: details.amount,
       });
 
       const url = normalizeHttpUrl(resp.data?.link_url);
@@ -173,10 +196,13 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
       setSubmitting(false);
 
       if (opened) {
+        // ✅ Rely on webhook for all payments (recommended architecture)
+        // Frontend just opens the link, webhook handles the rest
         dispatch(refreshCurrentStay({ force: true }));
+        
         Alert.alert(
-          "Payment Submitted",
-          "If completed, it will reflect shortly.",
+          "Payment Link Opened",
+          "Complete the payment in your browser. Your payment status will update automatically.",
           [{ text: "OK", onPress: () => navigation.goBack() }]
         );
       }

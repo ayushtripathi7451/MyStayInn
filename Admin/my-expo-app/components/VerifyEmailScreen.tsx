@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../utils/api";
 import { getConfirmation, clearConfirmation } from "../utils/firebaseConfirmation";
+import auth from "@react-native-firebase/auth";
 
 export default function VerifyEmailScreen({ navigation, route }: any) {
   // Get user data from route params (confirmation comes from helper)
@@ -27,6 +28,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(30);
   const [canResend, setCanResend] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   // Refs for focusing next/previous input
   const inputs = [
@@ -77,9 +79,48 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
     setTimeout(() => inputs[0].current?.focus(), 100);
   }, []);
 
+  // Check if confirmation exists on mount
+  useEffect(() => {
+    if (!confirmation) {
+      Alert.alert(
+        "Session Expired",
+        "Please go back and request OTP again.",
+        [
+          { 
+            text: "OK", 
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: "Signup" }],
+              });
+            }
+          }
+        ]
+      );
+    }
+  }, []);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (!cleaningUp) {
+        clearConfirmation();
+      }
+    };
+  }, []);
+
   const verifyOTP = async () => {
     if (!isValid) {
       return Alert.alert("Wait", "Please enter the full 6-digit code.");
+    }
+
+    if (!confirmation) {
+      Alert.alert("Error", "Session expired. Please request OTP again.");
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Signup" }],
+      });
+      return;
     }
 
     try {
@@ -107,10 +148,14 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       // 4. Store your JWT token (both keys for compatibility)
       await AsyncStorage.setItem("USER_TOKEN", data.token);
       await AsyncStorage.setItem("authToken", data.token);
+      await AsyncStorage.setItem("userData", JSON.stringify(data.user));
       await AsyncStorage.setItem(
         "userProfile",
         JSON.stringify({ first, last, mobile, email })
       );
+
+      // Clear confirmation after successful verification
+      clearConfirmation();
 
       Alert.alert("Success", "Welcome to My-Stay! 🎉");
 
@@ -120,20 +165,97 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       });
     } catch (error: any) {
       console.error("Verification Error:", error);
-      const errorMessage = error.response?.data?.message || error.message || "Invalid OTP or registration failed.";
+      
+      let errorMessage = "Invalid OTP or registration failed.";
+      
+      if (error.code === 'auth/invalid-verification-code') {
+        errorMessage = "Invalid OTP. Please check and try again.";
+      } else if (error.code === 'auth/session-expired') {
+        errorMessage = "OTP session expired. Please request a new code.";
+        clearConfirmation();
+        setTimeout(() => {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "Signup" }],
+          });
+        }, 1500);
+      } else {
+        errorMessage = error.response?.data?.message || error.message || "Invalid OTP or registration failed.";
+      }
+      
       Alert.alert("Error", errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const resendOTP = () => {
-    // Note: You would typically trigger the Firebase sendOTP logic again here
-    setTimer(30);
-    setCanResend(false);
-    setOtp(["", "", "", "", "", ""]);
-    inputs[0].current?.focus();
-    Alert.alert("OTP Resent", "A new OTP has been sent to your phone");
+  const resendOTP = async () => {
+    try {
+      setLoading(true);
+      
+      // Clear old confirmation
+      clearConfirmation();
+      
+      // Sign out any existing user
+      const currentUser = auth().currentUser;
+      if (currentUser) {
+        await auth().signOut();
+      }
+      
+      // Wait a moment for Firebase to settle
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Send new OTP
+      const newConfirmation = await auth().signInWithPhoneNumber(mobile);
+      
+      // Store new confirmation
+      const { setConfirmation } = require("../utils/firebaseConfirmation");
+      setConfirmation(newConfirmation);
+      
+      // Reset UI
+      setTimer(30);
+      setCanResend(false);
+      setOtp(["", "", "", "", "", ""]);
+      inputs[0].current?.focus();
+      
+      Alert.alert("OTP Resent", "A new OTP has been sent to your phone");
+    } catch (error: any) {
+      console.error("Resend OTP Error:", error);
+      
+      let friendlyMessage = "Failed to resend OTP. Please try again.";
+      
+      if (error.code === 'auth/too-many-requests') {
+        friendlyMessage = "Too many attempts. Please wait a few minutes and try again.";
+      } else if (error.code === 'auth/invalid-phone-number') {
+        friendlyMessage = "Invalid phone number. Please go back and check.";
+      } else if (error.code === 'auth/quota-exceeded') {
+        friendlyMessage = "SMS quota exceeded. Please try again later.";
+      }
+      
+      Alert.alert("Error", friendlyMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle back button press - go directly to Signup
+  const handleBackPress = () => {
+    setCleaningUp(true);
+    clearConfirmation();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Signup" }],
+    });
+  };
+
+  // Handle change number - go directly to Signup
+  const handleChangeNumber = () => {
+    setCleaningUp(true);
+    clearConfirmation();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Signup" }],
+    });
   };
 
   return (
@@ -149,7 +271,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
           >
             {/* HEADER */}
             <View className="flex-row items-center mt-4">
-              <TouchableOpacity onPress={() => navigation.goBack()}>
+              <TouchableOpacity onPress={handleBackPress}>
                 <Ionicons name="chevron-back" size={26} color="black" />
               </TouchableOpacity>
 
@@ -201,7 +323,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
                   </Text>
                 </Text>
               ) : (
-                <TouchableOpacity onPress={resendOTP}>
+                <TouchableOpacity onPress={resendOTP} disabled={loading}>
                   <Text className="text-purple-700 font-semibold">
                     Resend OTP
                   </Text>
@@ -224,15 +346,15 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
             </TouchableOpacity>
 
             {/* CHANGE NUMBER */}
-            <Text className="text-center text-base mt-4">
+            {/* <Text className="text-center text-base mt-4">
               To update Mobile Number.{" "}
               <Text
                 className="font-semibold text-purple-700"
-                onPress={() => navigation.goBack()}
+                onPress={handleChangeNumber}
               >
                 Click here
               </Text>
-            </Text>
+            </Text> */}
           </ScrollView>
         </KeyboardAvoidingView>
 

@@ -38,7 +38,6 @@ export default function SettingsScreen() {
         <View className="mt-6">
           <Text className="text-xs font-black text-slate-400 uppercase tracking-[2px] mb-3 px-2">Account</Text>
           <View className="bg-white rounded-[24px] overflow-hidden shadow-sm border border-white">
-            <SettingItem icon="key-outline" label="Change MPIN" onPress={() => navigation.navigate("CreateNewMPIN" as never)} showBorder />
             <SettingItem icon="log-out-outline" label="Move Out Request" onPress={() => navigation.navigate("MoveOutRequestScreen" as never)} />
           </View>
         </View>
@@ -55,8 +54,8 @@ export default function SettingsScreen() {
         <View className="mt-6">
           <Text className="text-xs font-black text-slate-400 uppercase tracking-[2px] mb-3 px-2">Security & Legal</Text>
           <View className="bg-white rounded-[24px] overflow-hidden shadow-sm border border-white">
-            <SettingItem icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => Alert.alert("Privacy Policy", "View our privacy policy at mystayinn.com")} showBorder />
-            <SettingItem icon="document-outline" label="Terms & Conditions" onPress={() => Alert.alert("Terms & Conditions", "View terms at mystayinn.com")} />
+            <SettingItem icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => navigation.navigate('PrivacyPolicy')} showBorder />
+            <SettingItem icon="document-outline" label="Terms & Conditions" onPress={() => navigation.navigate('Terms')} />
           </View>
         </View>
 

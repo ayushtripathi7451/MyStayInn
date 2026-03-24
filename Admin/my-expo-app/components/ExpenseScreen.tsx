@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Image, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, Image, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -42,6 +42,10 @@ export default function ExpenseScreen() {
       </SafeAreaView>
 
       {/* ✅ WHITE BODY WITH PROPER CLIPPING */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
       <View className="flex-1 bg-[#F6F8FF] rounded-t-[40px] -mt-10 px-4 pt-6 overflow-hidden">
 
         {/* ✅ FIXED TAB SWITCH (NO OVERFLOW) */}
@@ -90,7 +94,7 @@ export default function ExpenseScreen() {
         </View>
 
         {/* ✅ CONTENT AREA */}
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 120 }}>
           
           {/* ========== EXPENSE FLOW ========== */}
           {tab === "expense" && expenseStep === "list" && (
@@ -124,6 +128,7 @@ export default function ExpenseScreen() {
 
         </ScrollView>
       </View>
+      </KeyboardAvoidingView>
 
       {/* ✅ FIXED BOTTOM NAV */}
       <BottomNav />

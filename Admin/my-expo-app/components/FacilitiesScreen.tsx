@@ -6,8 +6,22 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 export default function FacilitiesScreen({ navigation, route }: any) {
   // Get data from previous screen - ProfileSetup passes individual properties
-  const { propertyName, propertyType, propertyFor, address, coordinates } = route.params || {};
+  const { 
+    propertyName, 
+    propertyType, 
+    propertyFor, 
+    address, 
+    coordinates,
+    returnToPreview = false,
+    facilitiesData: existingFacilitiesData,
+    floorsData: existingFloorsData,
+    allRooms: existingAllRooms,
+    usedFloors: existingUsedFloors,
+    fromVerify: existingFromVerify
+  } = route.params || {};
+  
   const propertyData = { propertyName, propertyType, propertyFor, address, coordinates };
+  
   // --- PROPERTY FACILITIES ---
   const propertyFacilitiesList = [
     { label: "Wifi", icon: "wifi-outline" },
@@ -24,7 +38,7 @@ export default function FacilitiesScreen({ navigation, route }: any) {
   ];
 
   const [propertyFacilities, setPropertyFacilities] = useState(
-    propertyFacilitiesList.map(() => false)
+    existingFacilitiesData?.propertyFacilities || propertyFacilitiesList.map(() => false)
   );
 
   const togglePropertyFacility = (idx: number) => {
@@ -32,13 +46,13 @@ export default function FacilitiesScreen({ navigation, route }: any) {
   };
 
   // --- PARKING ---
-  const [hasParking, setHasParking] = useState(false);
-  const [parkingType, setParkingType] = useState({ two: false, four: false });
+  const [hasParking, setHasParking] = useState(existingFacilitiesData?.hasParking || false);
+  const [parkingType, setParkingType] = useState(existingFacilitiesData?.parkingType || { two: false, four: false });
 
   // --- FOOD ---
-  const [foodAvailable, setFoodAvailable] = useState(false);
-  const [foodType, setFoodType] = useState<"Pure Veg" | "Non-Veg" | "Both" | null>(null);
-  const [cuisineType, setCuisineType] = useState<"North" | "South" | "Both" | null>(null);
+  const [foodAvailable, setFoodAvailable] = useState(existingFacilitiesData?.foodAvailable || false);
+  const [foodType, setFoodType] = useState<"Pure Veg" | "Non-Veg" | "Both" | null>(existingFacilitiesData?.foodType || null);
+  const [cuisineType, setCuisineType] = useState<"North" | "South" | "Both" | null>(existingFacilitiesData?.cuisineType || null);
 
   // --- ROOM FACILITIES (Optimized with MaterialCommunityIcons) ---
   const roomFacilitiesList = [
@@ -54,7 +68,7 @@ export default function FacilitiesScreen({ navigation, route }: any) {
   ];
 
   const [roomFacilities, setRoomFacilities] = useState(
-    roomFacilitiesList.map(() => false)
+    existingFacilitiesData?.roomFacilities || roomFacilitiesList.map(() => false)
   );
 
   const toggleRoomFacility = (idx: number) => {
@@ -202,9 +216,8 @@ export default function FacilitiesScreen({ navigation, route }: any) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            onPress={() => navigation.navigate("Floors", {
-              propertyData,
-              facilitiesData: {
+            onPress={() => {
+              const facilitiesData = {
                 propertyFacilities,
                 hasParking,
                 parkingType,
@@ -212,8 +225,26 @@ export default function FacilitiesScreen({ navigation, route }: any) {
                 foodType,
                 cuisineType,
                 roomFacilities,
+              };
+              
+              if (returnToPreview) {
+                // Return to preview with updated data
+                navigation.navigate("PropertyPreview", {
+                  propertyData,
+                  facilitiesData,
+                  floorsData: existingFloorsData,
+                  allRooms: existingAllRooms,
+                  usedFloors: existingUsedFloors,
+                  fromVerify: existingFromVerify
+                });
+              } else {
+                // Normal flow - go to Floors
+                navigation.navigate("Floors", {
+                  propertyData,
+                  facilitiesData
+                });
               }
-            })}
+            }}
             activeOpacity={0.8}
             style={{
               shadowColor: "#2F3CFF",
@@ -224,8 +255,8 @@ export default function FacilitiesScreen({ navigation, route }: any) {
             }}
             className="flex-row items-center justify-center px-10 py-4 rounded-2xl bg-[#2F3CFF]"
           >
-            <Text className="text-white font-bold text-lg mr-1">Next Step</Text>
-            <Ionicons name="chevron-forward" size={20} color="white" />
+            <Text className="text-white font-bold text-lg mr-1">{returnToPreview ? "Save & Return" : "Next Step"}</Text>
+            <Ionicons name={returnToPreview ? "checkmark" : "chevron-forward"} size={20} color="white" />
           </TouchableOpacity>
         </View>
       </ScrollView>

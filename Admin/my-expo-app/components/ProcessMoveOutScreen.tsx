@@ -95,7 +95,18 @@ export default function ProcessMoveOutScreen(props: any) {
         booking = bookings.find((b: any) => b.status === "active") || bookings[0] || null;
       }
       const securityDeposit = Number(r.securityDepositAmount) ?? 0;
-      const currentDueVal = Number(r.currentDue) ?? 0;
+      let currentDueVal = Number(r.currentDue) ?? 0;
+      
+      // If currentDue is not provided in the move-out request, try to get it from booking
+      if (currentDueVal === 0 && booking) {
+        // Calculate from booking data: unpaid security + unpaid rent
+        const unpaidSecurity = booking.isSecurityPaid ? 0 : (Number(booking.securityDeposit) || 0);
+        const unpaidRent = booking.isRentPaid ? 0 : (Number(booking.rentAmount) || 0);
+        currentDueVal = unpaidSecurity + unpaidRent;
+      }
+      
+      const ownerFilledReturned = Number(r.securityDepositReturned) ?? null;
+      
       setMoveOutData({
         processId: requestId,
         requestId,
@@ -113,11 +124,17 @@ export default function ProcessMoveOutScreen(props: any) {
         monthlyRent: 0,
         currentDue: currentDueVal,
         securityDeposit,
+        ownerFilledReturned,
         type: "customer_initiated",
         status: "scheduled",
       });
       setCurrentDue(String(currentDueVal));
-      setSecurityDepositReturned(String(Math.max(0, securityDeposit - currentDueVal)));
+      // If owner already filled the returned amount, use that; otherwise auto-calculate
+      if (ownerFilledReturned !== null && ownerFilledReturned >= 0) {
+        setSecurityDepositReturned(String(ownerFilledReturned));
+      } else {
+        setSecurityDepositReturned(String(Math.max(0, securityDeposit - currentDueVal)));
+      }
     } catch {
       setLoadError("Failed to load move-out");
       setMoveOutData(null);
@@ -130,11 +147,15 @@ export default function ProcessMoveOutScreen(props: any) {
     loadMoveOutData();
   }, [loadMoveOutData]);
 
+  // Auto-calculate securityDepositReturned only if owner didn't fill it
   useEffect(() => {
     if (moveOutData && currentDue !== "") {
-      const due = parseFloat(currentDue) || 0;
-      const returned = moveOutData.securityDeposit - due;
-      setSecurityDepositReturned(Math.max(0, returned).toString());
+      // Only auto-calculate if owner didn't pre-fill it
+      if (!moveOutData.ownerFilledReturned || moveOutData.ownerFilledReturned === null) {
+        const due = parseFloat(currentDue) || 0;
+        const returned = moveOutData.securityDeposit - due;
+        setSecurityDepositReturned(Math.max(0, returned).toString());
+      }
     }
   }, [currentDue, moveOutData]);
 
@@ -395,7 +416,7 @@ export default function ProcessMoveOutScreen(props: any) {
             {/* Editable Current Due */}
             <View>
               <View className="flex-row justify-between items-center mb-2">
-                <Text className="text-slate-500 font-medium">Current Due</Text>
+                <Text className="text-slate-500 font-medium">Current Due (Total Unpaid)</Text>
                 <Text className="text-xs text-slate-400">(Editable)</Text>
               </View>
               <View className="flex-row items-center bg-slate-50 rounded-xl px-4 py-3 border border-slate-200">
@@ -408,6 +429,9 @@ export default function ProcessMoveOutScreen(props: any) {
                   keyboardType="numeric"
                 />
               </View>
+              <Text className="text-slate-400 text-xs mt-2">
+                Enter total unpaid rent amount (from tenant's current stay card)
+              </Text>
             </View>
 
             <View className="flex-row justify-between">
@@ -424,7 +448,12 @@ export default function ProcessMoveOutScreen(props: any) {
           
 
           <View className="mb-4">
-            <Text className="text-slate-600 font-medium mb-2">Amount Returned to Customer</Text>
+            <View className="flex-row justify-between items-center mb-2">
+              <Text className="text-slate-600 font-medium">Amount Returned to Customer</Text>
+              {moveOutData?.ownerFilledReturned !== null && moveOutData?.ownerFilledReturned >= 0 && (
+                <Text className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">From Owner</Text>
+              )}
+            </View>
             <View className="flex-row items-center bg-slate-50 rounded-xl px-4 py-3">
               <Text className="text-slate-500 font-bold text-lg">₹</Text>
               <TextInput
@@ -436,7 +465,9 @@ export default function ProcessMoveOutScreen(props: any) {
               />
             </View>
             <Text className="text-slate-400 text-xs mt-2">
-              Auto-calculated after deducting current due. You can adjust if needed.
+              {moveOutData?.ownerFilledReturned !== null && moveOutData?.ownerFilledReturned >= 0 
+                ? "Owner filled this value during move-out initiation. Auto-adjusts when current due changes."
+                : "Auto-calculated after deducting current due. You can adjust if needed."}
             </Text>
           </View>
 

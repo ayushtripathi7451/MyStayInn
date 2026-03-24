@@ -1,8 +1,10 @@
 import React from "react";
-import { View, Text, ScrollView, TouchableOpacity, Platform } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Platform, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ProfileHeader from "./SetupHeader";
 import { Ionicons } from "@expo/vector-icons";
+import { propertyApi } from "../utils/api";
+import { debugToken } from "../utils/tokenDebug";
 
 export default function PropertyPreviewScreen({ navigation, route }: any) {
   const { 
@@ -13,6 +15,20 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
     usedFloors = [],
     fromVerify = false // Flag to know if we came from verify screen
   } = route.params || {};
+
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  // Use React Navigation's focus effect to refresh data when returning from edit screens
+  React.useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // When screen comes into focus, route.params will have updated data
+      if (route.params) {
+        // Data is already updated via route.params
+      }
+    });
+
+    return unsubscribe;
+  }, [navigation, route.params]);
 
   // Calculate totals
   const totalRooms = Array.isArray(allRooms) ? allRooms.reduce((acc: number, floor: any[]) => acc + (Array.isArray(floor) ? floor.length : 0), 0) : 0;
@@ -40,9 +56,42 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
       ).filter(Boolean) 
     : [];
 
-  const handleEditProperty = () => navigation.navigate("ProfileSetup");
-  const handleEditFacilities = () => navigation.navigate("Facilities", { ...propertyData });
-  const handleEditRooms = () => navigation.navigate("Rooms", { floors: floorsData.floors, avgRooms: floorsData.avgRooms });
+  const handleEditProperty = () => {
+    navigation.navigate("ProfileSetup", { 
+      ...propertyData,
+      returnToPreview: true,
+      facilitiesData,
+      floorsData,
+      allRooms,
+      usedFloors,
+      fromVerify
+    });
+  };
+  
+  const handleEditFacilities = () => {
+    navigation.navigate("Facilities", { 
+      ...propertyData,
+      returnToPreview: true,
+      facilitiesData,
+      floorsData,
+      allRooms,
+      usedFloors,
+      fromVerify
+    });
+  };
+  
+  const handleEditRooms = () => {
+    navigation.navigate("Floors", { 
+      propertyData,
+      facilitiesData,
+      returnToPreview: true,
+      floorsData,
+      allRooms,
+      usedFloors,
+      fromVerify
+    });
+  };
+  
   const handleContinue = () => navigation.navigate("Verify", { propertyData, facilitiesData, floorsData, allRooms, usedFloors });
 
   const generateID = () => {
@@ -51,9 +100,173 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
     return `MYP${year}X${rand}`;
   };
 
-  const handleSubmit = () => {
-    const id = generateID();
-    navigation.navigate("PropertySuccess", { id });
+  // Map room type to RoomType enum
+  const mapRoomType = (type: string): string => {
+    const typeMap: { [key: string]: string } = {
+      'Single': 'single',
+      'Double': 'double',
+      'Triple': 'triple',
+      'Quadruple': 'dormitory',
+      'Five': 'dormitory',
+      '>6': 'dormitory',
+    };
+    return typeMap[type] || 'single';
+  };
+
+  // Map property type to PropertyType enum
+  const mapPropertyType = (type: string): string => {
+    const typeMap: { [key: string]: string } = {
+      'PG': 'pg',
+      'Hostel': 'hostel',
+      'Apartment': 'apartment',
+      'Hotel': 'hotel',
+      'Flat': 'flat',
+    };
+    return typeMap[type] || 'pg';
+  };
+
+  // Get capacity from room type
+  const getCapacity = (type: string): number => {
+    const capacityMap: { [key: string]: number } = {
+      'Single': 1,
+      'Double': 2,
+      'Triple': 3,
+      'Quadruple': 4,
+      'Five': 5,
+      '>6': 6,
+    };
+    return capacityMap[type] || 1;
+  };
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+
+      // Debug: Check if token exists
+      const tokenDebug = await debugToken();
+      console.log("Token debug before API call:", tokenDebug);
+      
+      if (!tokenDebug.hasToken) {
+        Alert.alert("Error", "No authentication token found. Please login again.");
+        return;
+      }
+
+      // Transform property facilities to amenities array
+      const propertyFacilitiesList = [
+        "Wifi", "CCTV", "Lift", "Security 24x7", "Hot Water", 
+        "Self Cooking allowed", "House Keeping", "Washing Machine", 
+        "Power Backup", "Indoor Games", "Gym"
+      ];
+
+      const roomFacilitiesList = [
+        "Table & Chair", "Wardrobe", "Cupboard Lock", "Geyser", 
+        "Fridge", "Attached Bath", "AC", "Balcony", "RO Water"
+      ];
+
+      const propertyAmenities = [];
+      
+      // Add property facilities
+      if (facilitiesData?.propertyFacilities) {
+        facilitiesData.propertyFacilities.forEach((isSelected: boolean, index: number) => {
+          if (isSelected) {
+            propertyAmenities.push(propertyFacilitiesList[index]);
+          }
+        });
+      }
+
+      // Add parking info
+      if (facilitiesData?.hasParking) {
+        if (facilitiesData.parkingType?.two) propertyAmenities.push("Two Wheeler Parking");
+        if (facilitiesData.parkingType?.four) propertyAmenities.push("Four Wheeler Parking");
+      }
+
+      // Add food info
+      if (facilitiesData?.foodAvailable) {
+        propertyAmenities.push(`Food Available - ${facilitiesData.foodType || 'N/A'}`);
+        if (facilitiesData.cuisineType) {
+          propertyAmenities.push(`Cuisine: ${facilitiesData.cuisineType}`);
+        }
+      }
+
+      // Room amenities
+      const roomAmenities: string[] = [];
+      if (facilitiesData?.roomFacilities) {
+        facilitiesData.roomFacilities.forEach((isSelected: boolean, index: number) => {
+          if (isSelected) {
+            roomAmenities.push(roomFacilitiesList[index]);
+          }
+        });
+      }
+
+      // Transform rooms data
+      const rooms = allRooms.flatMap((floorRooms: any[], floorIdx: number) => 
+        floorRooms.map((room: any) => ({
+          roomNumber: room.number,
+          roomType: mapRoomType(room.type),
+          floor: floorIdx,
+          capacity: getCapacity(room.type),
+          pricePerMonth: parseFloat(room.price) || 0,
+          pricePerDay: room.perMonth === "Day" ? parseFloat(room.price) || 0 : null,
+          amenities: roomAmenities,
+          images: [],
+          isAvailable: true,
+        }))
+      );
+
+      // Property location: support both coordinates object and top-level lat/lng (industry standard)
+      const lat = propertyData?.coordinates?.latitude ?? propertyData?.latitude;
+      const lng = propertyData?.coordinates?.longitude ?? propertyData?.longitude;
+      const hasLocation =
+        typeof lat === "number" && !Number.isNaN(lat) &&
+        typeof lng === "number" && !Number.isNaN(lng);
+
+      const propertyPayload: Record<string, any> = {
+        name: propertyData?.propertyName || "Unnamed Property",
+        description: `${propertyData?.propertyType || 'PG'} for ${propertyData?.propertyFor || 'Students'}`,
+        propertyType: mapPropertyType(propertyData?.propertyType || 'PG'),
+        address: propertyData?.address?.line1 
+          ? `${propertyData.address.line1}, ${propertyData.address.line2 || ''}`.trim()
+          : "Address not provided",
+        city: propertyData?.address?.city || "Unknown",
+        state: propertyData?.address?.state || "Unknown",
+        pincode: propertyData?.address?.pincode || "000000",
+        totalRooms: totalRooms,
+        amenities: propertyAmenities,
+        images: [],
+        rules: {
+          noticePeriod: floorsData?.noticePeriod || 30,
+          securityDeposit: floorsData?.securityDeposit || 10000,
+          pricingMode: floorsData?.pricingMode || "month",
+        },
+        rooms: rooms,
+      };
+      if (hasLocation) {
+        propertyPayload.latitude = Number(lat);
+        propertyPayload.longitude = Number(lng);
+        propertyPayload.coordinates = { latitude: Number(lat), longitude: Number(lng) };
+      }
+
+      // Make API call
+      const response = await propertyApi.post('/api/properties', propertyPayload);
+
+      if (response.data.success) {
+        const propertyId = response.data.property.uniqueId || generateID();
+        Alert.alert("Success", "Property created successfully!");
+        navigation.navigate("PropertySuccess", { id: propertyId });
+      } else {
+        throw new Error(response.data.message || "Failed to create property");
+      }
+    } catch (error: any) {
+      console.error("Error creating property:", error);
+      Alert.alert(
+        "Error", 
+        error.response?.data?.message || error.message || "Failed to create property. Please try again."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Get all room types and their prices
@@ -371,12 +584,20 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
           {fromVerify ? (
             <TouchableOpacity
               onPress={handleSubmit}
-              className="flex-[2] bg-green-600 py-4 rounded-2xl items-center shadow-lg shadow-green-300"
+              disabled={isSubmitting}
+              className={`flex-[2] py-4 rounded-2xl items-center shadow-lg ${isSubmitting ? 'bg-gray-400' : 'bg-green-600 shadow-green-300'}`}
             >
-              <View className="flex-row items-center">
-                <Text className="text-white font-bold text-base mr-2">Confirm & Submit</Text>
-                <Ionicons name="checkmark-circle" size={18} color="white" />
-              </View>
+              {isSubmitting ? (
+                <View className="flex-row items-center">
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text className="text-white font-bold text-base ml-2">Submitting...</Text>
+                </View>
+              ) : (
+                <View className="flex-row items-center">
+                  <Text className="text-white font-bold text-base mr-2">Confirm & Submit</Text>
+                  <Ionicons name="checkmark-circle" size={18} color="white" />
+                </View>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity

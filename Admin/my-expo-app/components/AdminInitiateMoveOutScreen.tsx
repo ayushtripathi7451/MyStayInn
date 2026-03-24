@@ -130,7 +130,7 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
         </View>
 
         <View className="bg-white rounded-[24px] p-6 mt-4 shadow-sm border border-white">
-          <Text className="text-slate-700 font-bold mb-2">Security deposit returned (optional)</Text>
+          <Text className="text-slate-700 font-bold mb-2">Security Deposit Returned (Optional)</Text>
           <TextInput
             value={securityDepositReturned}
             onChangeText={setSecurityDepositReturned}
@@ -140,7 +140,12 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
             className="border border-slate-200 rounded-xl px-4 py-3 text-slate-900"
           />
           {securityDeposit > 0 && (
-            <Text className="text-slate-500 text-sm mt-1">Collected: ₹{securityDeposit.toLocaleString()}</Text>
+            <>
+              <Text className="text-slate-500 text-sm mt-2">Originally Collected: ₹{securityDeposit.toLocaleString()}</Text>
+              <Text className="text-slate-400 text-xs mt-2">
+                Enter the amount to be returned to tenant after deducting any dues/damage. This will pre-fill the settlement screen.
+              </Text>
+            </>
           )}
         </View>
 

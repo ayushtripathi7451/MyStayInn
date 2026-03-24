@@ -1,31 +1,58 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Switch, Platform } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Switch, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ProfileHeader from "./SetupHeader";
 import { Ionicons } from "@expo/vector-icons";
 
 export default function FloorsScreen({ navigation, route }: any) {
   // Get data from previous screens
-  const { propertyData = {}, facilitiesData = {} } = route.params || {};
-  const [floors, setFloors] = useState(1);
-  const [roomsPerFloor, setRoomsPerFloor] = useState("4");
+  const { 
+    propertyData = {}, 
+    facilitiesData = {},
+    returnToPreview = false,
+    floorsData: existingFloorsData,
+    allRooms: existingAllRooms,
+    usedFloors: existingUsedFloors,
+    fromVerify: existingFromVerify
+  } = route.params || {};
+  
+  const [floors, setFloors] = useState(existingFloorsData?.floors || 1);
+  const [roomsPerFloor, setRoomsPerFloor] = useState(String(existingFloorsData?.avgRooms || 4));
 
   // New fields for notice period and security deposit
-  const [noticePeriod, setNoticePeriod] = useState("30");
-  const [securityDeposit, setSecurityDeposit] = useState("");
+  const [noticePeriod, setNoticePeriod] = useState(String(existingFloorsData?.noticePeriod || 30));
+  const [securityDeposit, setSecurityDeposit] = useState(String(existingFloorsData?.securityDeposit || ""));
   
   // Toggle for per month pricing (removed daily option)
   const pricingMode = "month";
 
+  // Initialize sharing configs from existing data if available
+  const initializeSharingConfigs = () => {
+    const defaultConfigs = {
+      Single: { enabled: true, price: "" },
+      Double: { enabled: true, price: "" },
+      Triple: { enabled: true, price: "" },
+      Quadruple: { enabled: false, price: "" },
+      Five: { enabled: false, price: "" },
+      ">6": { enabled: false, price: "" },
+    };
+
+    if (existingFloorsData?.defaultPrices) {
+      Object.keys(defaultConfigs).forEach((type) => {
+        if (existingFloorsData.defaultPrices[type]) {
+          defaultConfigs[type as keyof typeof defaultConfigs] = {
+            enabled: true,
+            price: String(existingFloorsData.defaultPrices[type])
+          };
+        }
+      });
+    }
+
+    return defaultConfigs;
+  };
+
   // State expanded to include all requested sharing types
-  const [sharingConfigs, setSharingConfigs] = useState({
-    Single: { enabled: true, price: "" },
-    Double: { enabled: true, price: "" },
-    Triple: { enabled: true, price: "" },
-    Quadruple: { enabled: false, price: "" },
-    Five: { enabled: false, price: "" },
-    ">6": { enabled: false, price: "" },
-  });
+  const [sharingConfigs, setSharingConfigs] = useState(initializeSharingConfigs());
 
   const toggleSharing = (type: keyof typeof sharingConfigs) => {
     setSharingConfigs((prev) => ({
@@ -48,7 +75,12 @@ export default function FloorsScreen({ navigation, route }: any) {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ProfileHeader activeTab="Floors" />
-      <ScrollView className="px-6" showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView className="px-6" showsVerticalScrollIndicator={false}>
         
         <Text className="text-2xl font-bold text-gray-900 mt-6 tracking-tight">Floor Configuration</Text>
         <Text className="text-gray-500 mb-6">Set up your property layout and base pricing</Text>
@@ -167,32 +199,51 @@ export default function FloorsScreen({ navigation, route }: any) {
                   .map(([type, cfg]) => [type, cfg.price])
               );
 
-              navigation.navigate("Rooms", {
-                propertyData,
-                facilitiesData,
+              const floorsData = {
                 floors,
                 avgRooms: Number(roomsPerFloor),
                 defaultPrices: activePrices,
                 noticePeriod: Number(noticePeriod),
                 securityDeposit: Number(securityDeposit),
                 pricingMode,
-              });
+              };
+
+              if (returnToPreview) {
+                // Return to preview with updated data
+                navigation.navigate("PropertyPreview", {
+                  propertyData,
+                  facilitiesData,
+                  floorsData,
+                  allRooms: existingAllRooms,
+                  usedFloors: existingUsedFloors,
+                  fromVerify: existingFromVerify
+                });
+              } else {
+                // Normal flow - go to Rooms
+                navigation.navigate("Rooms", {
+                  propertyData,
+                  facilitiesData,
+                  ...floorsData
+                });
+              }
             }}
-            disabled={Object.entries(sharingConfigs).some(([_, cfg]) => cfg.enabled && (!cfg.price || cfg.price.trim() === ""))}
+            disabled={Object.entries(sharingConfigs).some(([_, cfg]) => cfg.enabled && (!cfg.price || cfg.price.trim() === "")) || !securityDeposit.trim()}
             className={`px-12 py-4 rounded-2xl shadow-lg ${
-              Object.entries(sharingConfigs).some(([_, cfg]) => cfg.enabled && (!cfg.price || cfg.price.trim() === ""))
+              Object.entries(sharingConfigs).some(([_, cfg]) => cfg.enabled && (!cfg.price || cfg.price.trim() === "")) || !securityDeposit.trim()
                 ? "bg-gray-300"
                 : "bg-[#2F3CFF] shadow-blue-300"
             }`}
           >
             <Text className={`font-bold text-lg ${
-              Object.entries(sharingConfigs).some(([_, cfg]) => cfg.enabled && (!cfg.price || cfg.price.trim() === ""))
+              Object.entries(sharingConfigs).some(([_, cfg]) => cfg.enabled && (!cfg.price || cfg.price.trim() === "")) || !securityDeposit.trim()
                 ? "text-gray-500"
                 : "text-white"
-            }`}>Next Step</Text>
+            }`}>{returnToPreview ? "Save & Return" : "Next Step"}</Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+          </ScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -9,6 +9,10 @@ import {
   Alert,
   ActivityIndicator,
   Switch,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import SetupHeader from "./SetupHeader";
@@ -24,7 +28,6 @@ const SECTIONS = [
   { key: "dinner", label: "Dinner" },
 ];
 
-type TimeStr = string; // "HH:mm"
 interface SectionState {
   enabled: boolean;
   startTime: Date;
@@ -176,125 +179,125 @@ export default function FoodScreen({ navigation, route }: any) {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <SetupHeader activeTab="Food" />
-      <ScrollView
-        className="px-6"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}
-      >
-        <Text className="text-2xl font-bold text-gray-900 mt-6 tracking-tight">Food menu & timings</Text>
-        <Text className="text-gray-500 mb-6">Set menu for each day. You can notify tenants when food is ready.</Text>
+      <KeyboardAvoidingView
+  behavior={Platform.OS === "ios" ? "padding" : "height"}
+  style={{ flex: 1 }}
+>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            className="px-6"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 0 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text className="text-2xl font-bold text-gray-900 mt-6 tracking-tight">Food menu & timings</Text>
+            <Text className="text-gray-500 mb-6">Set menu for each day. You can notify tenants when food is ready.</Text>
 
-        {/* Day tabs */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          className="mt-4 -mx-6 px-6"
-          contentContainerStyle={{ gap: 8 }}
-        >
-          {DAY_NAMES.map((name, idx) => (
-            <TouchableOpacity
-              key={idx}
-              onPress={() => setActiveDay(idx)}
-              className={`px-4 py-3 rounded-2xl ${activeDay === idx ? "bg-[#2F3CFF]" : "bg-gray-100 border border-gray-200"}`}
+            {/* Day tabs */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="mt-4 -mx-6 px-6"
+              contentContainerStyle={{ gap: 8 }}
             >
-              <Text className={activeDay === idx ? "text-white font-semibold" : "text-gray-600"}>{name.slice(0, 3)}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+              {DAY_NAMES.map((name, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  onPress={() => setActiveDay(idx)}
+                  className={`px-4 py-3 rounded-2xl ${activeDay === idx ? "bg-[#2F3CFF]" : "bg-gray-100 border border-gray-200"}`}
+                >
+                  <Text className={activeDay === idx ? "text-white font-semibold" : "text-gray-600"}>{name.slice(0, 3)}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
-        {/* Sections for active day */}
-        <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">
-          <Text className="text-lg font-bold text-gray-900 mb-4">{DAY_NAMES[activeDay]}</Text>
-          {SECTIONS.map(({ key, label }) => {
-            const s = dayState[key] ?? defaultSection();
-            const startTime = s.startTime instanceof Date ? s.startTime : new Date(s.startTime || 0);
-            const endTime = s.endTime instanceof Date ? s.endTime : new Date(s.endTime || 0);
-            return (
-              <View key={key} className="mb-6 p-4 bg-white rounded-2xl border border-gray-100">
-                <View className="flex-row items-center justify-between mb-3">
-                  <Text className="font-bold text-gray-800">{label}</Text>
-                  <Switch
-                    value={s.enabled}
-                    onValueChange={(v) => updateSection(activeDay, key, "enabled", v)}
-                    trackColor={{ false: "#D1D5DB", true: "#A5B4FC" }}
-                    thumbColor={s.enabled ? ACTIVE_COLOR : "#F3F4F6"}
-                  />
-                </View>
-                {s.enabled && (
-                  <>
-                    <View className="flex-row flex-wrap gap-4 mb-3">
-                      <View className="flex-1 min-w-[120]">
-                        <Text className="text-gray-500 text-xs mb-1 font-medium">Start time</Text>
-                        <ScrollableDatePicker
-                          selectedDate={startTime}
-                          onDateChange={(d) => updateSection(activeDay, key, "startTime", d)}
-                          mode="time"
-                          placeholder="Start"
-                          containerStyle="border border-gray-200 bg-white rounded-2xl px-3 py-2"
-                        />
-                      </View>
-                      <View className="flex-1 min-w-[120]">
-                        <Text className="text-gray-500 text-xs mb-1 font-medium">End time</Text>
-                        <ScrollableDatePicker
-                          selectedDate={endTime}
-                          onDateChange={(d) => updateSection(activeDay, key, "endTime", d)}
-                          mode="time"
-                          placeholder="End"
-                          containerStyle="border border-gray-200 bg-white rounded-2xl px-3 py-2"
-                        />
-                      </View>
-                    </View>
-                    <View className="mb-3">
-                      <Text className="text-gray-500 text-xs mb-1 font-medium">Menu</Text>
-                      <TextInput
-                        value={s.menu}
-                        onChangeText={(t) => updateSection(activeDay, key, "menu", t)}
-                        placeholder="e.g. Poha, Idli, Coffee"
-                        className="border border-gray-200 bg-white rounded-2xl px-4 py-3 text-gray-800"
-                      />
-                    </View>
-                    {/* <View className="flex-row items-center justify-between">
-                      <Text className="text-gray-600 text-sm">Notify tenants at start time (food ready)</Text>
+            {/* Sections for active day */}
+            <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">
+              <Text className="text-lg font-bold text-gray-900 mb-4">{DAY_NAMES[activeDay]}</Text>
+              {SECTIONS.map(({ key, label }) => {
+                const s = dayState[key] ?? defaultSection();
+                const startTime = s.startTime instanceof Date ? s.startTime : new Date(s.startTime || 0);
+                const endTime = s.endTime instanceof Date ? s.endTime : new Date(s.endTime || 0);
+                return (
+                  <View key={key} className="mb-6 p-4 bg-white rounded-2xl border border-gray-100">
+                    <View className="flex-row items-center justify-between mb-3">
+                      <Text className="font-bold text-gray-800">{label}</Text>
                       <Switch
-                        value={s.notifyAtStart}
-                        onValueChange={(v) => updateSection(activeDay, key, "notifyAtStart", v)}
+                        value={s.enabled}
+                        onValueChange={(v) => updateSection(activeDay, key, "enabled", v)}
                         trackColor={{ false: "#D1D5DB", true: "#A5B4FC" }}
-                        thumbColor={s.notifyAtStart ? ACTIVE_COLOR : "#F3F4F6"}
+                        thumbColor={s.enabled ? ACTIVE_COLOR : "#F3F4F6"}
                       />
-                    </View> */}
+                    </View>
+                    {s.enabled && (
+                      <>
+                        <View className="flex-row flex-wrap gap-4 mb-3">
+                          <View className="flex-1 min-w-[120px]">
+                            <Text className="text-gray-500 text-xs mb-1 font-medium">Start time</Text>
+                            <ScrollableDatePicker
+                              selectedDate={startTime}
+                              onDateChange={(d) => updateSection(activeDay, key, "startTime", d)}
+                              mode="time"
+                              placeholder="Start"
+                              containerStyle="border border-gray-200 bg-white rounded-2xl px-3 py-2"
+                            />
+                          </View>
+                          <View className="flex-1 min-w-[120px]">
+                            <Text className="text-gray-500 text-xs mb-1 font-medium">End time</Text>
+                            <ScrollableDatePicker
+                              selectedDate={endTime}
+                              onDateChange={(d) => updateSection(activeDay, key, "endTime", d)}
+                              mode="time"
+                              placeholder="End"
+                              containerStyle="border border-gray-200 bg-white rounded-2xl px-3 py-2"
+                            />
+                          </View>
+                        </View>
+                        <View className="mb-3">
+                          <Text className="text-gray-500 text-xs mb-1 font-medium">Menu</Text>
+                          <TextInput
+                            value={s.menu}
+                            onChangeText={(t) => updateSection(activeDay, key, "menu", t)}
+                            placeholder="e.g. Poha, Idli, Coffee"
+                            className="border border-gray-200 bg-white rounded-2xl px-4 py-3 text-gray-800"
+                          />
+                        </View>
+                      </>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Actions */}
+            <View className="flex-row items-center justify-between mt-12 mb-6">
+              <TouchableOpacity
+                onPress={() => navigation.goBack()}
+                activeOpacity={0.7}
+                className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-gray-100 border border-gray-200"
+              >
+                <Ionicons name="chevron-back" size={20} color="#4B5563" />
+                <Text className="text-gray-600 font-bold ml-1">Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleSave}
+                disabled={saving}
+                activeOpacity={0.8}
+                className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-[#2F3CFF]"
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="food-apple-outline" size={20} color="white" />
+                    <Text className="text-white font-bold ml-1">Save food menu</Text>
                   </>
                 )}
-              </View>
-            );
-          })}
-        </View>
-
-        <View className="flex-row items-center justify-between mt-12 mb-6">
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.7}
-            className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-gray-100 border border-gray-200"
-          >
-            <Ionicons name="chevron-back" size={20} color="#4B5563" />
-            <Text className="text-gray-600 font-bold ml-1">Back</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleSave}
-            disabled={saving}
-            activeOpacity={0.8}
-            className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-[#2F3CFF]"
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="food-apple-outline" size={20} color="white" />
-                <Text className="text-white font-bold ml-1">Save food menu</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

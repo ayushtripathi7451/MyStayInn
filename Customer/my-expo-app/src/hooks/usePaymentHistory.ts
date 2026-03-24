@@ -44,9 +44,12 @@ export function usePaymentHistory(customerId: string | undefined) {
       }>(`/api/bookings/customer/${customerId}`, { timeout: 15000 });
       const list = res.data?.success && Array.isArray(res.data.bookings) ? res.data.bookings : [];
       const paid: PaymentHistoryItem[] = [];
+      
       list.forEach((b: any) => {
         const dateStr = b.moveInDate != null ? String(b.moveInDate).replace("Z", "") : "";
         const dateLabel = formatDateLabel(b.moveInDate);
+        
+        // Security deposit (only once)
         if (toBool(b.isSecurityPaid) && (Number(b.securityDeposit) || 0) > 0) {
           paid.push({
             id: `${b.id}-security`,
@@ -56,16 +59,36 @@ export function usePaymentHistory(customerId: string | undefined) {
             date: dateStr,
           });
         }
-        const online = Number(b.onlinePaymentRecv) || 0;
-        if (online > 0 && toBool(b.isRentOnlinePaid)) {
-          paid.push({
-            id: `${b.id}-rent-online`,
-            label: "Rent (online)",
-            amount: online,
-            dateLabel,
-            date: dateStr,
+        
+        // ✅ Rent online - parse comma-separated paid months
+        const paidMonthsStr = b.rentOnlinePaidYearMonth || '';
+        if (paidMonthsStr) {
+          const paidMonths = paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean);
+          const monthlyRent = Number(b.scheduledOnlineRent) || Number(b.rentAmount) || 0;
+          
+          paidMonths.forEach((monthKey: string) => {
+            const [year, month] = monthKey.split('-').map(Number);
+            if (!year || !month) return;
+            
+            const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", { 
+              month: "short", 
+              year: "numeric" 
+            });
+            
+            // Use the month's date for sorting
+            const monthDate = new Date(year, month - 1, 1).toISOString();
+            
+            paid.push({
+              id: `${b.id}-rent-${monthKey}`,
+              label: `Rent (online) - ${monthLabel}`,
+              amount: monthlyRent,
+              dateLabel: monthLabel,
+              date: monthDate,
+            });
           });
         }
+        
+        // Rent cash
         const cash = Number(b.cashPaymentRecv) || 0;
         if (cash > 0 && toBool(b.isRentCashPaid)) {
           paid.push({
@@ -77,6 +100,7 @@ export function usePaymentHistory(customerId: string | undefined) {
           });
         }
       });
+      
       // Sort by date descending (newest first)
       paid.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
       setItems(paid);

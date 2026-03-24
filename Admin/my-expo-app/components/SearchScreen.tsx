@@ -73,20 +73,100 @@ function roomBelongsToProperty(room: any, propertyMatchValues: string[]): boolea
   );
 }
 
-/** Total pending due for a booking: security (if unpaid) + rent online (if unpaid) + rent cash (if unpaid). Matches Customer app DueAmount logic. */
+/** Total pending due for a booking: security (if unpaid) + all unpaid rent months (online + cash). Uses proper multi-month tracking. */
 function getTotalDueFromBooking(b: any): number {
   const toBool = (v: any) => v === true || v === "true" || v === 1;
   const security = Number(b.securityDeposit) || 0;
   const isSecurityPaid = toBool(b.isSecurityPaid);
-  const onlineRecv = Number(b.onlinePaymentRecv) || 0;
-  const cashRecv = Number(b.cashPaymentRecv) || 0;
-  const isRentOnlinePaid = toBool(b.isRentOnlinePaid);
-  const isRentCashPaid = toBool(b.isRentCashPaid);
+  
   let due = 0;
-  if (security > 0 && !isSecurityPaid) due += security;
-  if (onlineRecv > 0 && !isRentOnlinePaid) due += onlineRecv;
-  if (cashRecv > 0 && !isRentCashPaid) due += cashRecv;
+  
+  // Add security deposit if not paid
+  if (security > 0 && !isSecurityPaid) {
+    due += security;
+  }
+  
+  // Calculate online rent due (all unpaid months)
+  const onlineDue = calculateRentDue(b, 'online');
+  due += onlineDue;
+  
+  // Calculate cash rent due (all unpaid months)
+  const cashDue = calculateRentDue(b, 'cash');
+  due += cashDue;
+  
   return due;
+}
+
+/** Calculate rent due for online or cash, accounting for multi-month tracking and move-in date logic */
+function calculateRentDue(b: any, type: 'online' | 'cash'): number {
+  const toBool = (v: any) => v === true || v === "true" || v === 1;
+  const rentPeriod = String(b.rentPeriod || 'month').toLowerCase();
+  
+  // For day-based rent, use simple logic
+  if (rentPeriod === 'day') {
+    if (type === 'online') {
+      return toBool(b.isRentOnlinePaid) ? 0 : (Number(b.rentAmount) || Number(b.onlinePaymentRecv) || 0);
+    } else {
+      return toBool(b.isRentCashPaid) ? 0 : (Number(b.cashPaymentRecv) || 0);
+    }
+  }
+  
+  // For monthly rent, calculate all unpaid months
+  const monthlyAmount = type === 'online' 
+    ? (Number(b.scheduledOnlineRent) || Number(b.rentAmount) || 0)
+    : (Number(b.scheduledCashRent) || 0);
+    
+  if (monthlyAmount <= 0) return 0;
+  
+  // Parse move-in date to determine first due month
+  const moveInDate = b.moveInDate ? new Date(b.moveInDate) : null;
+  if (!moveInDate || isNaN(moveInDate.getTime())) {
+    // No move-in date, can't calculate properly
+    return 0;
+  }
+  
+  const moveInDay = moveInDate.getDate();
+  const moveInYm = `${moveInDate.getFullYear()}-${String(moveInDate.getMonth() + 1).padStart(2, '0')}`;
+  const nextMonth = new Date(moveInDate.getFullYear(), moveInDate.getMonth() + 1, 1);
+  const nextMonthYm = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
+  const firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
+  
+  // Get current month
+  const now = new Date();
+  const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  
+  // Don't show rent before first due month
+  if (currentYm < firstDueYm) {
+    return 0;
+  }
+  
+  // Parse paid months
+  const paidMonthsStr = type === 'online' 
+    ? (b.rentOnlinePaidYearMonth || '')
+    : (b.rentCashPaidYearMonth || '');
+  const paidMonths = new Set(paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean));
+  
+  // Generate all months from first due to current
+  const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
+  const [currentYear, currentMonth] = currentYm.split('-').map(Number);
+  
+  let year = firstYear;
+  let month = firstMonth;
+  let unpaidCount = 0;
+  
+  while (year < currentYear || (year === currentYear && month <= currentMonth)) {
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    if (!paidMonths.has(monthKey)) {
+      unpaidCount++;
+    }
+    month++;
+    if (month > 12) {
+      month = 1;
+      year++;
+    }
+  }
+  
+  return monthlyAmount * unpaidCount;
 }
 
 export default function AdminCustomerModule({ navigation }: any) {
@@ -638,7 +718,7 @@ const customers = useMemo(() => {
 
         {/* Floor wise - Expandable (floors from current property's rooms) */}
         {filter === "FLOOR" && !loading && propertyId && customers.length > 0 && (
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 160 }}>
             {floors.length === 0 ? (
               <View className="py-10 px-4 items-center">
                 <Ionicons name="business-outline" size={48} color="#94A3B8" />
@@ -699,6 +779,7 @@ const customers = useMemo(() => {
           <FlatList
             data={allRooms}
             keyExtractor={(room) => room}
+            contentContainerStyle={{ paddingBottom: 160 }}
             renderItem={({ item: room }) => {
               const occupant = getRoomOccupant(room);
               return (
@@ -779,6 +860,7 @@ const customers = useMemo(() => {
           <FlatList
             data={processedCustomers}
             keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingBottom: 160 }}
             renderItem={({ item }) => <CustomerCard item={item} />}
             ListEmptyComponent={
               <Text className="text-center text-gray-400 mt-10">

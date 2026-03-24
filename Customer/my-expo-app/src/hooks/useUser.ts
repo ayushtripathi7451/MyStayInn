@@ -24,7 +24,7 @@ export function useUser() {
     loading,
     error,
     refresh,
-    name: data ? `${data.firstName ?? ''} ${(data.lastName ?? '').trim()}`.trim() || 'Guest' : null,
+    name: data ? `${data.firstName ?? ''} `.trim() || 'Guest' : null,
     uniqueId: data?.uniqueId ?? null,
   };
 }

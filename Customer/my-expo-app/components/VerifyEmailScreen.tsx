@@ -14,10 +14,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../utils/api";
-import { getConfirmation } from "../utils/firebaseConfirmation";
+import { getConfirmation, clearConfirmation } from "../utils/firebaseConfirmation";
+import auth from "@react-native-firebase/auth";
 
-export default function VerifyEmailScreen({ navigation, route }: any) {
-  // Get user data from route params (confirmation comes from helper)
+export default function VerifyEmailScreen({ navigation, route }) {
+  // Get user data from route params
   const { mobile, first, last, gender, email } = route.params || {};
   
   // Get confirmation from helper
@@ -27,6 +28,54 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(30);
   const [canResend, setCanResend] = useState(false);
+
+  // Clean up when navigating back
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', async (e) => {
+      // Prevent default back behavior if we want to redirect
+      if (e.data.action.type === 'GO_BACK') {
+        e.preventDefault();
+        
+        // Navigate directly to Signup screen
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "Signup" }],
+        });
+      }
+      
+      // Clear confirmation when going back
+      clearConfirmation();
+      
+      // Sign out any anonymous user
+      const currentUser = auth().currentUser;
+      if (currentUser && (!currentUser.email || currentUser.isAnonymous)) {
+        await auth().signOut();
+      }
+    });
+    
+    return unsubscribe;
+  }, [navigation]);
+
+  // Check if confirmation exists on mount
+  useEffect(() => {
+    if (!confirmation) {
+      Alert.alert(
+        "Session Expired",
+        "Please go back and request OTP again.",
+        [
+          { 
+            text: "OK", 
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: "Signup" }],
+              });
+            }
+          }
+        ]
+      );
+    }
+  }, []);
 
   // Refs for focusing next/previous input
   const inputs = [
@@ -39,7 +88,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   ];
 
   // Handle individual digit change
-  const handleChange = (text: string, index: number) => {
+  const handleChange = (text, index) => {
     const newOtp = [...otp];
     newOtp[index] = text;
     setOtp(newOtp);
@@ -51,7 +100,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   };
 
   // Handle backspace navigation
-  const handleKeyPress = (e: any, index: number) => {
+  const handleKeyPress = (e, index) => {
     if (e.nativeEvent.key === "Backspace" && otp[index] === "" && index > 0) {
       inputs[index - 1].current?.focus();
     }
@@ -61,7 +110,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
 
   // Timer logic for Resend OTP
   useEffect(() => {
-    let interval: any;
+    let interval;
     if (timer > 0) {
       interval = setInterval(() => {
         setTimer((t) => t - 1);
@@ -82,6 +131,16 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       return Alert.alert("Wait", "Please enter the full 6-digit code.");
     }
 
+    // Check if confirmation still exists
+    if (!confirmation) {
+      Alert.alert("Error", "Session expired. Please request OTP again.");
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Signup" }],
+      });
+      return;
+    }
+
     try {
       setLoading(true);
       const otpString = otp.join("");
@@ -92,7 +151,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       // 2. Get the secure ID Token
       const firebaseIdToken = await userCredential.user.getIdToken();
 
-      // 3. Register on Customer Backend using api.ts
+      // 3. Register on Customer Backend
       const response = await api.post("/api/auth/register/customer", {
         firstName: first,
         lastName: last,
@@ -104,12 +163,16 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
 
       const data = response.data;
 
-      // 4. Store your JWT token
+      // 4. Store JWT token
       await AsyncStorage.setItem("USER_TOKEN", data.token);
+      await AsyncStorage.setItem("userData", JSON.stringify(data.user));
       await AsyncStorage.setItem(
         "userProfile",
         JSON.stringify({ first, last, mobile, email })
       );
+
+      // Clear confirmation after successful verification
+      clearConfirmation();
 
       Alert.alert("Success", "Welcome to My-Stay! 🎉");
 
@@ -117,31 +180,90 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
         index: 0,
         routes: [{ name: "CreateMPINScreen" }],
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error("Verification Error:", error);
+      
       // Log validation errors array from backend if present
       const resData = error.response?.data;
       if (resData?.errors) {
         console.error("Backend validation errors:", JSON.stringify(resData.errors, null, 2));
       }
-      const errorMessage =
-        resData?.message ||
-        (resData?.errors?.[0]?.msg) ||
-        error.message ||
-        "Invalid OTP or registration failed.";
+      
+      let errorMessage = "Invalid OTP or registration failed.";
+      
+      // Handle Firebase specific errors
+      if (error.code === 'auth/invalid-verification-code') {
+        errorMessage = "Invalid OTP. Please check and try again.";
+      } else if (error.code === 'auth/session-expired') {
+        errorMessage = "OTP session expired. Please request a new code.";
+        // Clear confirmation and go back to Signup
+        clearConfirmation();
+        setTimeout(() => {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "Signup" }],
+          });
+        }, 1500);
+      } else {
+        errorMessage = resData?.message ||
+                      (resData?.errors?.[0]?.msg) ||
+                      error.message ||
+                      "Invalid OTP or registration failed.";
+      }
+      
       Alert.alert("Error", errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const resendOTP = () => {
-    // Note: You would typically trigger the Firebase sendOTP logic again here
-    setTimer(30);
-    setCanResend(false);
-    setOtp(["", "", "", "", "", ""]);
-    inputs[0].current?.focus();
-    Alert.alert("OTP Resent", "A new OTP has been sent to your phone");
+  const resendOTP = async () => {
+    try {
+      setLoading(true);
+      
+      // Clear old confirmation
+      clearConfirmation();
+      
+      // Sign out any existing user
+      const currentUser = auth().currentUser;
+      if (currentUser) {
+        await auth().signOut();
+      }
+      
+      // Small delay to ensure clean state
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Send new OTP
+      const newConfirmation = await auth().signInWithPhoneNumber(mobile);
+      
+      // Store new confirmation
+      const { setConfirmation } = require("../utils/firebaseConfirmation");
+      setConfirmation(newConfirmation);
+      
+      // Reset UI
+      setTimer(30);
+      setCanResend(false);
+      setOtp(["", "", "", "", "", ""]);
+      inputs[0].current?.focus();
+      
+      Alert.alert("OTP Resent", "A new OTP has been sent to your phone");
+    } catch (error) {
+      console.error("Resend OTP Error:", error);
+      
+      let friendlyMessage = "Failed to resend OTP. Please try again.";
+      
+      if (error.code === 'auth/too-many-requests') {
+        friendlyMessage = "Too many attempts. Please wait a few minutes and try again.";
+      } else if (error.code === 'auth/invalid-phone-number') {
+        friendlyMessage = "Invalid phone number. Please go back and check.";
+      } else if (error.code === 'auth/quota-exceeded') {
+        friendlyMessage = "SMS quota exceeded. Please try again later.";
+      }
+      
+      Alert.alert("Error", friendlyMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -157,7 +279,15 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
           >
             {/* HEADER */}
             <View className="flex-row items-center mt-4">
-              <TouchableOpacity onPress={() => navigation.goBack()}>
+              <TouchableOpacity 
+                onPress={() => {
+                  // Navigate directly to Signup when back button is pressed
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: "Signup" }],
+                  });
+                }}
+              >
                 <Ionicons name="chevron-back" size={26} color="black" />
               </TouchableOpacity>
 
@@ -209,7 +339,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
                   </Text>
                 </Text>
               ) : (
-                <TouchableOpacity onPress={resendOTP}>
+                <TouchableOpacity onPress={resendOTP} disabled={loading}>
                   <Text className="text-purple-700 font-semibold">
                     Resend OTP
                   </Text>
@@ -232,15 +362,20 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
             </TouchableOpacity>
 
             {/* CHANGE NUMBER */}
-            <Text className="text-center text-base mt-4">
+            {/* <Text className="text-center text-base mt-4">
               To update Mobile Number.{" "}
               <Text
                 className="font-semibold text-purple-700"
-                onPress={() => navigation.goBack()}
+                onPress={() => {
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: "Signup" }],
+                  });
+                }}
               >
                 Click here
               </Text>
-            </Text>
+            </Text> */}
           </ScrollView>
         </KeyboardAvoidingView>
 

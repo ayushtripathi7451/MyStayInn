@@ -127,7 +127,7 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
 
   return (
     <View
-      className="mx-4 mb-60 w-11/12 overflow-hidden rounded-[32px] p-8"
+      className="mx-4 mb-10 w-11/12 overflow-hidden rounded-[32px] p-8"
       style={{
         backgroundColor: 'rgba(255,255,255,0.12)',
         borderWidth: 1.5,
@@ -157,8 +157,8 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
         caretHidden={true}
         onBlur={handleBlur}
         editable={!loading}
-        // Input positioned inside the card to trigger shift
-        style={{ opacity: 0, position: 'absolute', top: 20, left: 0, right: 0, height: 1 }}
+        // Positioned over the PIN dots so KeyboardAvoidingView knows what to keep visible
+        style={{ position: 'absolute', bottom: 80, left: 0, right: 0, height: 50, opacity: 0 }}
       />
 
       <TouchableOpacity activeOpacity={1} onPress={handleFocus} disabled={loading}>

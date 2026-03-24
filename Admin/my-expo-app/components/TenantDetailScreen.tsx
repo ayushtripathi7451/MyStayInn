@@ -489,45 +489,218 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
         )}
 
         {currentTab === "payments" && (
-          <View className="mt-4">
-            <View className="bg-white rounded-[24px] p-6 shadow-sm border border-white">
-              <Text className="text-lg font-black text-slate-900 mb-4">Payments</Text>
-              {bookingHistory.length > 0 ? (
-                <View className="space-y-3">
-                  {bookingHistory.map((item: any, index: number) => {
-                    const roomResLabel = item.roomNumber || item.room?.roomNumber || "—";
-                    const deposit = Number(item.securityDeposit || 0);
-                    const amountPaid = item.isSecurityPaid ? "Paid" : "Pending";
-                    return (
-                      <View key={item.id || index} className="py-3 border-b border-slate-100">
-                        <View className="flex-row items-center justify-between">
-                          <View>
-                            <Text className="font-bold text-slate-900">
-                              {item.status === "active" ? "Active stay" : "Past stay"} - Room {roomResLabel}
+          <View className="mt-4 space-y-4">
+            {bookingHistory.length === 0 ? (
+              <View className="bg-white rounded-[24px] p-6 shadow-sm border border-white">
+                <Text className="text-slate-500 text-center">No payment data available</Text>
+              </View>
+            ) : (
+              bookingHistory.map((item: any, index: number) => {
+                const roomLabel = item.roomNumber || item.room?.roomNumber || "—";
+                const deposit = Number(item.securityDeposit || 0);
+                const rp = String(item.rentPeriod || "month").toLowerCase();
+                const isDay = rp === "day";
+                const schedOnline = Number(item.scheduledOnlineRent || 0);
+                const schedCash = Number(item.scheduledCashRent || 0);
+                const paidOnlineMonths = (item.rentOnlinePaidYearMonth || "").split(",").map((m: string) => m.trim()).filter(Boolean);
+                const paidCashMonths = (item.rentCashPaidYearMonth || "").split(",").map((m: string) => m.trim()).filter(Boolean);
+                const dailyPayments: any[] = Array.isArray(item.dailyPayments) ? item.dailyPayments : [];
+
+                // Generate expected months from move-in to today (same rules as customerDueDisplay)
+                const toYm = (d: Date) =>
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                const now = new Date();
+                const nowYm = toYm(now);
+
+                const buildExpectedMonths = (): string[] => {
+                  if (!item.moveInDate) return [];
+                  const mi = new Date(item.moveInDate);
+                  if (isNaN(mi.getTime())) return [];
+                  const miDay = mi.getDate();
+                  // first due: same month if move-in ≤ 10, else next month
+                  const firstDue =
+                    miDay <= 10
+                      ? toYm(mi)
+                      : toYm(new Date(mi.getFullYear(), mi.getMonth() + 1, 1));
+                  // end: today's month (active) or move-out month (inactive)
+                  let endYm = nowYm;
+                  if (item.moveOutDate) {
+                    const mo = new Date(item.moveOutDate);
+                    if (!isNaN(mo.getTime())) endYm = toYm(mo);
+                  }
+                  if (firstDue > endYm) return [];
+                  const months: string[] = [];
+                  let cur = firstDue;
+                  while (cur <= endYm) {
+                    months.push(cur);
+                    const [y, m] = cur.split("-").map(Number);
+                    const next = new Date(y, m, 1);
+                    cur = toYm(next);
+                  }
+                  return months;
+                };
+
+                const allMonths = !isDay ? buildExpectedMonths() : [];
+
+                return (
+                  <View key={item.id || index} className="bg-white rounded-[24px] p-6 shadow-sm border border-white mb-4">
+                    <View className="flex-row items-center justify-between mb-4">
+                      <View>
+                        <Text className="text-base font-black text-slate-900">
+                          {item.status === "active" ? "Active Stay" : "Past Stay"} — Room {roomLabel}
+                        </Text>
+                        <Text className="text-slate-500 text-xs mt-0.5">
+                          Move-in: {item.moveInDate ? formatDate(item.moveInDate) : "—"}
+                          {item.moveOutDate ? `  •  Move-out: ${formatDate(item.moveOutDate)}` : ""}
+                        </Text>
+                      </View>
+                      <View className={`px-2 py-1 rounded-full ${item.status === "active" ? "bg-green-50" : "bg-slate-100"}`}>
+                        <Text className={`text-xs font-bold uppercase ${item.status === "active" ? "text-green-600" : "text-slate-500"}`}>
+                          {item.status === "active" ? "Active" : "Inactive"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Security Deposit */}
+                    {deposit > 0 && (
+                      <View className="flex-row items-center justify-between py-3 border-b border-slate-100">
+                        <View>
+                          <Text className="font-semibold text-slate-800">Security Deposit</Text>
+                          <Text className="text-slate-400 text-xs">One-time</Text>
+                        </View>
+                        <View className="items-end">
+                          <Text className="font-bold text-slate-900">₹{deposit.toLocaleString()}</Text>
+                          <View className={`px-2 py-0.5 rounded-full mt-1 ${item.isSecurityPaid ? "bg-green-100" : "bg-red-100"}`}>
+                            <Text className={`text-xs font-bold ${item.isSecurityPaid ? "text-green-700" : "text-red-700"}`}>
+                              {item.isSecurityPaid ? "Paid" : "Due"}
                             </Text>
-                            <Text className="text-slate-500 text-sm">
-                              {item.moveInDate ? formatDate(item.moveInDate) : "—"}
-                            </Text>
-                          </View>
-                          <View className="items-end">
-                            <Text className="font-bold text-slate-900">₹{deposit.toLocaleString()}</Text>
-                            <View className={`px-2 py-1 rounded-full mt-1 ${item.isSecurityPaid ? "bg-green-100" : "bg-amber-100"}`}>
-                              <Text className={`text-xs font-bold ${item.isSecurityPaid ? "text-green-700" : "text-amber-700"}`}>{amountPaid}</Text>
-                            </View>
                           </View>
                         </View>
                       </View>
-                    );
-                  })}
-                  <View className="flex-row items-center justify-between py-3">
-                    <Text className="font-bold text-slate-900">Current due</Text>
-                    <Text className={`font-bold ${dueAmount > 0 ? "text-red-600" : "text-green-600"}`}>₹{dueAmount.toLocaleString()}</Text>
+                    )}
+
+                    {/* Monthly Rent Rows */}
+                    {!isDay && (schedOnline > 0 || schedCash > 0) && (
+                      <>
+                        {allMonths.length > 0 ? (
+                          allMonths.map((ym: string) => {
+                            const onlinePaid = paidOnlineMonths.includes(ym);
+                            const cashPaid = paidCashMonths.includes(ym);
+                            const [yr, mo] = ym.split("-");
+                            const label = new Date(Number(yr), Number(mo) - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+                            return (
+                              <View key={ym} className="py-3 border-b border-slate-100">
+                                <Text className="font-semibold text-slate-800 mb-2">Rent — {label}</Text>
+                                {schedOnline > 0 && (
+                                  <View className="flex-row items-center justify-between mb-1">
+                                    <Text className="text-slate-500 text-sm">💳 Online</Text>
+                                    <View className="flex-row items-center gap-2">
+                                      <Text className="font-semibold text-slate-800">₹{schedOnline.toLocaleString()}</Text>
+                                      <View className={`px-2 py-0.5 rounded-full ${onlinePaid ? "bg-green-100" : "bg-red-100"}`}>
+                                        <Text className={`text-xs font-bold ${onlinePaid ? "text-green-700" : "text-red-700"}`}>{onlinePaid ? "Paid" : "Due"}</Text>
+                                      </View>
+                                    </View>
+                                  </View>
+                                )}
+                                {schedCash > 0 && (
+                                  <View className="flex-row items-center justify-between">
+                                    <Text className="text-slate-500 text-sm">💰 Cash</Text>
+                                    <View className="flex-row items-center gap-2">
+                                      <Text className="font-semibold text-slate-800">₹{schedCash.toLocaleString()}</Text>
+                                      <View className={`px-2 py-0.5 rounded-full ${cashPaid ? "bg-green-100" : "bg-red-100"}`}>
+                                        <Text className={`text-xs font-bold ${cashPaid ? "text-green-700" : "text-red-700"}`}>{cashPaid ? "Paid" : "Due"}</Text>
+                                      </View>
+                                    </View>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })
+                        ) : (
+                          <View className="py-3 border-b border-slate-100">
+                            <Text className="text-slate-400 text-sm">Rent not due yet — starts next month</Text>
+                          </View>
+                        )}
+                      </>
+                    )}
+
+                    {/* Daily Rent Rows */}
+                    {isDay && (
+                      <>
+                        {dailyPayments.length === 0 ? (
+                          // No records yet — show today as due if booking is active
+                          item.status === "active" ? (
+                            <View className="py-3 border-b border-slate-100">
+                              <View className="flex-row items-center justify-between mb-1">
+                                <Text className="font-semibold text-slate-800">
+                                  {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                </Text>
+                                <View className="px-2 py-0.5 rounded-full bg-red-100">
+                                  <Text className="text-xs font-bold text-red-700">Due</Text>
+                                </View>
+                              </View>
+                              {schedOnline > 0 && (
+                                <View className="flex-row items-center justify-between mt-1">
+                                  <Text className="text-slate-500 text-sm">💳 Online</Text>
+                                  <Text className="text-slate-700 text-sm">₹{schedOnline.toLocaleString()}</Text>
+                                </View>
+                              )}
+                              {schedCash > 0 && (
+                                <View className="flex-row items-center justify-between mt-1">
+                                  <Text className="text-slate-500 text-sm">💰 Cash</Text>
+                                  <Text className="text-slate-700 text-sm">₹{schedCash.toLocaleString()}</Text>
+                                </View>
+                              )}
+                            </View>
+                          ) : (
+                            <View className="py-3 border-b border-slate-100">
+                              <Text className="text-slate-400 text-sm">No daily payment records</Text>
+                            </View>
+                          )
+                        ) : (
+                          dailyPayments.map((dp: any) => {
+                            const dpDate = dp.paymentDate ? new Date(dp.paymentDate) : null;
+                            const dpLabel = dpDate ? dpDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+                            const fullyPaid = dp.paidOnline && dp.paidCash;
+                            const partiallyPaid = dp.paidOnline || dp.paidCash;
+                            return (
+                              <View key={dp.id} className="py-3 border-b border-slate-100">
+                                <View className="flex-row items-center justify-between mb-1">
+                                  <Text className="font-semibold text-slate-800">{dpLabel}</Text>
+                                  
+                                </View>
+                                {dp.onlineAmount > 0 && (
+                                  <View className="flex-row items-center justify-between mt-1">
+                                    <Text className="text-slate-500 text-sm">💳 Online</Text>
+                                    <View className="flex-row items-center gap-2">
+                                      <Text className="text-slate-700 text-sm">₹{Number(dp.onlineAmount).toLocaleString()}</Text>
+                                      <View className={`px-2 py-0.5 rounded-full ${dp.paidOnline ? "bg-green-100" : "bg-red-100"}`}>
+                                        <Text className={`text-xs font-bold ${dp.paidOnline ? "text-green-700" : "text-red-700"}`}>{dp.paidOnline ? "Paid" : "Due"}</Text>
+                                      </View>
+                                    </View>
+                                  </View>
+                                )}
+                                {dp.cashAmount > 0 && (
+                                  <View className="flex-row items-center justify-between mt-1">
+                                    <Text className="text-slate-500 text-sm">💰 Cash</Text>
+                                    <View className="flex-row items-center gap-2">
+                                      <Text className="text-slate-700 text-sm">₹{Number(dp.cashAmount).toLocaleString()}</Text>
+                                      <View className={`px-2 py-0.5 rounded-full ${dp.paidCash ? "bg-green-100" : "bg-red-100"}`}>
+                                        <Text className={`text-xs font-bold ${dp.paidCash ? "text-green-700" : "text-red-700"}`}>{dp.paidCash ? "Paid" : "Due"}</Text>
+                                      </View>
+                                    </View>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })
+                        )}
+                      </>
+                    )}
                   </View>
-                </View>
-              ) : (
-                <Text className="text-slate-500">No payment data available</Text>
-              )}
-            </View>
+                );
+              })
+            )}
           </View>
         )}
 

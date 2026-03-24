@@ -1,77 +1,84 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { propertyApi } from '../utils/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface Property {
   id: string;
   name: string;
   address: string;
-  totalRooms: number;
-  occupiedRooms: number;
-  monthlyRevenue: number;
-  monthlyExpenses: number;
-  pendingDues: number;
-  bookingRequests: number;
-  moveOutRequests: number;
-  openTickets: number;
+  city?: string;
+  state?: string;
+  totalRooms?: number;
+  status?: string;
+  propertyType?: string;
+  uniqueId?: string;
 }
 
 interface PropertyContextType {
   properties: Property[];
-  currentProperty: Property;
+  currentProperty: Property | null;
   setCurrentProperty: (property: Property) => void;
-  addProperty: (property: Property) => void;
+  loading: boolean;
+  refresh: () => Promise<void>;
 }
 
 const PropertyContext = createContext<PropertyContextType | undefined>(undefined);
 
-// Static property data
-const defaultProperties: Property[] = [
-  {
-    id: '1',
-    name: 'Mahima Panorama',
-    address: 'Sector 12, Noida',
-    totalRooms: 120,
-    occupiedRooms: 98,
-    monthlyRevenue: 0,
-    monthlyExpenses: 0,
-    pendingDues: 0,
-    bookingRequests: 12,
-    moveOutRequests: 4,
-    openTickets: 7,
-  },
-  {
-    id: '2',
-    name: 'Green Valley Heights',
-    address: 'Sector 18, Gurgaon',
-    totalRooms: 80,
-    occupiedRooms: 65,
-    monthlyRevenue: 89000,
-    monthlyExpenses: 18000,
-    pendingDues: 23000,
-    bookingRequests: 8,
-    moveOutRequests: 2,
-    openTickets: 3,
-  },
-  {
-    id: '3',
-    name: 'Sunrise Residency',
-    address: 'Koramangala, Bangalore',
-    totalRooms: 150,
-    occupiedRooms: 142,
-    monthlyRevenue: 198000,
-    monthlyExpenses: 35000,
-    pendingDues: 67000,
-    bookingRequests: 15,
-    moveOutRequests: 6,
-    openTickets: 5,
-  },
-];
+const CURRENT_PROPERTY_KEY = 'currentProperty';
 
 export function PropertyProvider({ children }: { children: ReactNode }) {
-  const [properties, setProperties] = useState<Property[]>(defaultProperties);
-  const [currentProperty, setCurrentProperty] = useState<Property>(defaultProperties[0]);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [currentProperty, setCurrentPropertyState] = useState<Property | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const addProperty = (property: Property) => {
-    setProperties(prev => [...prev, property]);
+  const fetchProperties = async () => {
+    try {
+      setLoading(true);
+      const res = await propertyApi.get('/api/properties/list');
+      if (res.data?.success && Array.isArray(res.data.properties)) {
+        const fetched: Property[] = res.data.properties.map((p: any) => ({
+          id: p.uniqueId || String(p.id),
+          name: p.name,
+          address: [p.address, p.city, p.state].filter(Boolean).join(', '),
+          city: p.city,
+          state: p.state,
+          totalRooms: p.totalRooms,
+          status: p.status,
+          propertyType: p.propertyType,
+          uniqueId: p.uniqueId,
+        }));
+        setProperties(fetched);
+
+        // Restore previously selected property or default to first
+        const saved = await AsyncStorage.getItem(CURRENT_PROPERTY_KEY);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            const match = fetched.find(p => p.id === parsed.id);
+            setCurrentPropertyState(match || fetched[0] || null);
+          } catch {
+            setCurrentPropertyState(fetched[0] || null);
+          }
+        } else {
+          setCurrentPropertyState(fetched[0] || null);
+        }
+      }
+    } catch (e) {
+      console.warn('[PropertyContext] Failed to fetch properties:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProperties();
+  }, []);
+
+  const setCurrentProperty = async (property: Property) => {
+    setCurrentPropertyState(property);
+    try {
+      await AsyncStorage.setItem(CURRENT_PROPERTY_KEY, JSON.stringify(property));
+    } catch {}
   };
 
   return (
@@ -80,7 +87,8 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
         properties,
         currentProperty,
         setCurrentProperty,
-        addProperty,
+        loading,
+        refresh: fetchProperties,
       }}
     >
       {children}

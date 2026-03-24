@@ -97,9 +97,22 @@ export default function SearchAdminScreen({ navigation }: any) {
   const primaryText = theme === "female" ? "#EC4899" : "#1E33FF";
 
   const isValidPhone = (text: string) => /^\d{10}$/.test(normalizePhone(text));
-  const isValidAdminId = (text: string) =>
-    text.length >= 10 &&
-    (text.toUpperCase().startsWith("MYS") || text.toUpperCase().startsWith("MYO"));
+  const isValidAdminId = (text: string) => {
+  return /^(mys|myo)\d{2}[a-z]\d{6}$/i.test(text.trim());
+};
+
+  // Property ID validation: must be exactly 11 characters starting with "myp" (case insensitive)
+  const isValidPropertyId = (text: string) => {
+  return /^myp\d{2}[a-z]\d{6}$/i.test(text.trim());
+};
+
+  const searchPropertyById = useCallback(async (propertyId: string) => {
+    const res = await propertyApi.get<{ success: boolean; property?: any }>(
+      `/api/properties/public/${encodeURIComponent(propertyId)}`
+    );
+    if (!res.data?.success || !res.data.property) return null;
+    return res.data.property;
+  }, []);
 
   const searchOwnersByQuery = useCallback(async (searchQuery: string) => {
     const q = searchQuery.trim();
@@ -153,7 +166,7 @@ export default function SearchAdminScreen({ navigation }: any) {
             name: "Property owner",
           },
           property: {
-            id: p.id || p.uniqueId,
+            id: p.uniqueId || p.id,
             name: p.name || "Property",
             location: locationStr,
             roomType: String(roomType),
@@ -192,113 +205,189 @@ export default function SearchAdminScreen({ navigation }: any) {
     }
   }, [query]);
 
-  const runSearchById = useCallback(async () => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setResults([]);
-      setSearchError(null);
-      return;
-    }
-    if (!isValidPhone(trimmed) && !isValidAdminId(trimmed)) {
-      setResults([]);
-      setSearchError(
-        "Enter a valid 10-digit phone number or Owner ID (e.g. MYS25A000001 / MYO25A000001)"
-      );
-      return;
-    }
-    setSearching(true);
+const runSearchById = useCallback(async () => {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    setResults([]);
     setSearchError(null);
-    try {
-      const owners = await searchOwnersByQuery(trimmed);
-      if (owners.length === 0) {
-        setResults([]);
-        setSearchError("No owner found with this phone or ID.");
-        return;
-      }
-      const items: SearchItem[] = [];
-      for (const owner of owners) {
-        const name =
-          `${owner.firstName || ""} ${owner.lastName || ""}`.trim() || "Owner";
-        const phone = (owner.phone || "").replace(/\D/g, "").slice(-10);
-        const admin: Admin = {
-          id: owner.uniqueId || owner.id,
-          name,
-          phone: phone || undefined,
-          imageUrl: owner.profileExtras?.profileImage,
-        };
-        const properties = await fetchPropertiesForOwner(owner.uniqueId || owner.id);
-        if (properties.length === 0) {
+    return;
+  }
+  
+  // Check if it's a property ID (starts with myp, case insensitive)
+  const normalizedQuery = trimmed.toLowerCase();
+
+// Detect property ID typing
+if (normalizedQuery.startsWith("myp")) {
+
+  // ❌ Don't search until full ID
+  if (trimmed.length < 11) {
+    setResults([]);
+    setSearchError("Enter full Property ID (e.g. MYP26A000001)");
+    return;
+  }
+
+  // ❌ Invalid format
+  if (!isValidPropertyId(trimmed)) {
+    setResults([]);
+    setSearchError("Invalid Property ID format");
+    return;
+  }
+
+  // ✅ VALID → Search now
+  setSearching(true);
+  setSearchError(null);
+
+  try {
+    const property = await searchPropertyById(trimmed.toLowerCase());
+
+    if (!property) {
+      setResults([]);
+      setSearchError("No property found with this ID.");
+      return;
+    }
+
+    // map result (your existing mapping)
+    const room = (property.rooms && property.rooms[0]) || {};
+    const roomType = room.roomType || property.propertyType || "—";
+    const price = room.pricePerMonth ?? 0;
+    const locationStr =
+      [property.address, property.city, property.state]
+        .filter(Boolean)
+        .join(", ") || "—";
+
+    setResults([
+      {
+        admin: {
+          id: property.ownerUniqueId || property.ownerId, // ✅ Use ownerUniqueId from backend
+          name: property.ownerName || "Property owner", // ✅ Use ownerName from backend
+        },
+        property: {
+          id: property.uniqueId, // 👈 IMPORTANT
+          name: property.name,
+          location: locationStr,
+          roomType,
+          occupancy: room.capacity
+            ? `${room.capacity} sharing`
+            : "—",
+          rent: price
+            ? `₹${Number(price).toLocaleString()} / month`
+            : "—",
+        },
+        fullProperty: property,
+        enrollmentStatus: "APPROVED",
+      },
+    ]);
+
+  } catch (err) {
+  setResults([]);
+  setSearchError("Failed to search property.");
+} finally {
+    setSearching(false);
+  }
+
+  return;
+}
+  
+  // Original admin/phone search logic
+  if (!isValidPhone(trimmed) && !isValidAdminId(trimmed)) {
+    setResults([]);
+    setSearchError(
+      "Enter a valid 10-digit phone number, Owner ID (e.g. MYS25A000001), or Property ID (e.g. MYP26A000001)"
+    );
+    return;
+  }
+  setSearching(true);
+  setSearchError(null);
+  try {
+    const owners = await searchOwnersByQuery(trimmed);
+    if (owners.length === 0) {
+      setResults([]);
+      setSearchError("No owner found with this phone or ID.");
+      return;
+    }
+    const items: SearchItem[] = [];
+    for (const owner of owners) {
+      const name =
+        `${owner.firstName || ""} ${owner.lastName || ""}`.trim() || "Owner";
+      const phone = (owner.phone || "").replace(/\D/g, "").slice(-10);
+      const admin: Admin = {
+        id: owner.uniqueId || owner.id,
+        name,
+        phone: phone || undefined,
+        imageUrl: owner.profileExtras?.profileImage,
+      };
+      const properties = await fetchPropertiesForOwner(owner.uniqueId || owner.id);
+      if (properties.length === 0) {
+        items.push({
+          admin,
+          property: {
+            id: "",
+            name: "No property listed",
+            location: "—",
+            roomType: "—",
+            occupancy: "—",
+            rent: "—",
+          },
+          enrollmentStatus: "APPROVED",
+        });
+      } else {
+        for (const p of properties) {
+          const room = (p.rooms && p.rooms[0]) || {};
+          const roomType = room.roomType || p.propertyType || "—";
+          const price =
+            room.pricePerMonth ?? p.rooms?.[0]?.pricePerMonth ?? 0;
+          const locationStr =
+            [p.address, p.city, p.state].filter(Boolean).join(", ") || "—";
           items.push({
             admin,
             property: {
-              id: "",
-              name: "No property listed",
-              location: "—",
-              roomType: "—",
-              occupancy: "—",
-              rent: "—",
+              id: p.uniqueId || p.id,
+              name: p.name || "Property",
+              location: locationStr,
+              roomType: String(roomType),
+              occupancy: room.capacity
+                ? `${room.capacity} sharing`
+                : "—",
+              rent: price
+                ? `₹${Number(price).toLocaleString()} / month`
+                : "—",
+            },
+            fullProperty: {
+              ...p,
+              location: locationStr,
+              roomType: String(roomType),
+              occupancy: room.capacity
+                ? `${room.capacity} sharing`
+                : "—",
+              rent: price
+                ? `₹${Number(price).toLocaleString()} / month`
+                : "—",
+              latitude: p.latitude ?? p.coordinates?.latitude,
+              longitude: p.longitude ?? p.coordinates?.longitude,
             },
             enrollmentStatus: "APPROVED",
           });
-        } else {
-          for (const p of properties) {
-            const room = (p.rooms && p.rooms[0]) || {};
-            const roomType = room.roomType || p.propertyType || "—";
-            const price =
-              room.pricePerMonth ?? p.rooms?.[0]?.pricePerMonth ?? 0;
-            const locationStr =
-              [p.address, p.city, p.state].filter(Boolean).join(", ") || "—";
-            items.push({
-              admin,
-              property: {
-                id: p.id || p.uniqueId,
-                name: p.name || "Property",
-                location: locationStr,
-                roomType: String(roomType),
-                occupancy: room.capacity
-                  ? `${room.capacity} sharing`
-                  : "—",
-                rent: price
-                  ? `₹${Number(price).toLocaleString()} / month`
-                  : "—",
-              },
-              fullProperty: {
-                ...p,
-                location: locationStr,
-                roomType: String(roomType),
-                occupancy: room.capacity
-                  ? `${room.capacity} sharing`
-                  : "—",
-                rent: price
-                  ? `₹${Number(price).toLocaleString()} / month`
-                  : "—",
-                latitude: p.latitude ?? p.coordinates?.latitude,
-                longitude: p.longitude ?? p.coordinates?.longitude,
-              },
-              enrollmentStatus: "APPROVED",
-            });
-          }
         }
       }
-      setResults(items);
-    } catch (err: any) {
-      console.error("[SearchAdminScreen] search error:", err);
-      setResults([]);
-      const data = err?.response?.data;
-      const msg =
-        (data && (typeof data.message === "string" ? data.message : data.error)) ||
-        (err?.response?.status === 401 && "Please log in to search.") ||
-        (err?.response?.status === 404 && "Owner or property not found.") ||
-        (err?.response?.status >= 500 && "Server error. Please try again later.") ||
-        (err?.message && !err.message.startsWith("Request failed") ? err.message : null) ||
-        (err?.code === "ERR_NETWORK" && "Network error. Check your connection.") ||
-        "Failed to search. Please try again.";
-      setSearchError(msg);
-    } finally {
-      setSearching(false);
     }
-  }, [query, searchOwnersByQuery, fetchPropertiesForOwner]);
-
+    setResults(items);
+  } catch (err: any) {
+    console.error("[SearchAdminScreen] search error:", err);
+    setResults([]);
+    const data = err?.response?.data;
+    const msg =
+      (data && (typeof data.message === "string" ? data.message : data.error)) ||
+      (err?.response?.status === 401 && "Please log in to search.") ||
+      (err?.response?.status === 404 && "Owner or property not found.") ||
+      (err?.response?.status >= 500 && "Server error. Please try again later.") ||
+      (err?.message && !err.message.startsWith("Request failed") ? err.message : null) ||
+      (err?.code === "ERR_NETWORK" && "Network error. Check your connection.") ||
+      "Failed to search. Please try again.";
+    setSearchError(msg);
+  } finally {
+    setSearching(false);
+  }
+}, [query, searchOwnersByQuery, fetchPropertiesForOwner, searchPropertyById]);
   useEffect(() => {
     if (tab !== "id") return;
     const trimmed = query.trim();
@@ -307,11 +396,7 @@ export default function SearchAdminScreen({ navigation }: any) {
       setSearchError(null);
       return;
     }
-    if (!isValidPhone(trimmed) && !isValidAdminId(trimmed)) {
-      setResults([]);
-      setSearchError(null);
-      return;
-    }
+    
     const t = setTimeout(runSearchById, 500);
     return () => clearTimeout(t);
   }, [tab, query, runSearchById]);
@@ -396,7 +481,7 @@ export default function SearchAdminScreen({ navigation }: any) {
           {item.property.name}
         </Text>
 
-        {/* ✅ ENROLLMENT STATUS */}
+        {/* ENROLLMENT STATUS */}
         <Text
           className={`text-sm font-semibold ${getStatusColor(
             item.enrollmentStatus
@@ -434,6 +519,13 @@ export default function SearchAdminScreen({ navigation }: any) {
         Admin ID: {item.admin.id}
         {item.admin.phone ? `  |  Phone: ${item.admin.phone}` : ""}
       </Text>
+      
+      {/* Display Property ID if available */}
+      {item.property.id && (
+        <Text className="text-gray-400 text-[12px] mt-1">
+          Property ID: {item.property.id}
+        </Text>
+      )}
     </TouchableOpacity>
   );
 
@@ -492,7 +584,7 @@ export default function SearchAdminScreen({ navigation }: any) {
             <TextInput
               placeholder={
                 tab === "id"
-                  ? "Admin's phone number or Unique ID (e.g. MYS25A000001 / MYO25A000001)"
+                  ? "Phone, Admin ID (MYS...) or Property ID (myp...)"
                   : "Search by area, sector, city"
               }
               value={query}

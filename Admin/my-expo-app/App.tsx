@@ -82,6 +82,8 @@ import ReloginMobileScreen from "./components/ReloginMobileScreen";
 import CustomersEnterScreen from "./components/CustomersEnterScreen";
 import ReportsHubScreen from "./components/ReportsHubScreen";
 import SettingsScreen from "./components/SettingsScreen";
+import PrivacyPolicyScreen from "./components/PrivacyPolicyScreen";
+import TermsScreen from "./components/TermsScreen";
 import SendNotificationScreen from "./components/SendNotificationScreen";
 import NotificationHistoryScreen from "./components/NotificationHistoryScreen";
 import {
@@ -134,7 +136,7 @@ function HomeScreen({ navigation }: any) {
   const { emptyBeds, occupancyRate, enrollmentCount, refresh: refreshDashboard } = useDashboardStats(currentProperty?.id);
   const propertyUniqueId = propertiesList?.find((p: any) => p.uniqueId === currentProperty?.id || String(p.id) === currentProperty?.id || p.name === currentProperty?.name)?.uniqueId ?? propertiesList?.[0]?.uniqueId ?? currentProperty?.id;
   const { moveOutCount, openTicketCount, refresh: refreshPropertyStats } = usePropertyHomeStats(currentProperty?.id, currentProperty?.name, propertyUniqueId);
-  const { collected, pendingDues, expense, profit, online, cash, loading: financialLoading, refresh: refreshFinancial } = useHomeFinancialStats(currentProperty?.id);
+  const { collected, pendingDues, expense, profit, online, cash, moveOutPL, loading: financialLoading, refresh: refreshFinancial } = useHomeFinancialStats(currentProperty?.id);
   const currentMonth = new Date().toLocaleString("default", { month: "long" });
   const [setupStatus, setSetupStatus] = useState<{ rulesFilled: boolean; foodFilled: boolean } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -311,6 +313,24 @@ function HomeScreen({ navigation }: any) {
       }
       color={statProfit >= 0 ? "bg-emerald-50" : "bg-rose-50"}
     />
+
+    {moveOutPL > 0 && (
+      <StatBox
+        label="MoveOut P/L"
+        value={`₹${Number(moveOutPL).toLocaleString()}`}
+        icon={
+          <MaterialCommunityIcons
+            name="exit-to-app"
+            size={22}
+            color="#10B981"
+          />
+        }
+        onPress={() =>
+          navigation.navigate("ReportsHubScreen")
+        }
+        color="bg-green-50"
+      />
+    )}
   </View>
 </ScrollView>
 
@@ -554,6 +574,8 @@ export default function App() {
             <Stack.Screen name="LoginPin" component={LoginPinScreen} />
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Terms" component={TermsScreen} options={{ headerShown: false }} />
 
             <Stack.Screen name="Signup" component={SignupScreen} />
             <Stack.Screen name="BasicInfo" component={BasicInfoScreen} />

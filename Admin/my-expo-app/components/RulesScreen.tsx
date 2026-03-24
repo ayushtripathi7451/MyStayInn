@@ -8,6 +8,10 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import ProfileHeader from "./SetupHeader";
@@ -145,106 +149,121 @@ export default function RulesScreen({ navigation, route }: any) {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ProfileHeader activeTab="Rules" />
-      <ScrollView
-        className="px-6"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
       >
-        <Text className="text-2xl font-bold text-gray-900 mt-6 tracking-tight">Property rules & regulations</Text>
-        <Text className="text-gray-500 mb-6">Select and edit rules for your property. Tenants will see these.</Text>
-
-        {/* Standard rules (includes dynamic notice; exit fee row is last with inline amount) */}
-        <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Standard rules</Text>
-          {/* Dynamic notice rule with ${days} in UI */}
-          <View className="flex-row items-start py-3 border-b border-gray-100">
-            <View className="w-6 h-6 rounded border-2 border-gray-300 mr-3 mt-0.5 items-center justify-center bg-white">
-              <Ionicons name="checkmark" size={16} color={ACTIVE_COLOR} />
-            </View>
-            <Text className="flex-1 text-gray-700 text-sm">
-              Residents must provide prior notice of {noticePeriodDays.trim() || "30"} days before vacating, failing which deposit will be forfeited.
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            className="px-6"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 60 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text className="text-2xl font-bold text-gray-900 mt-6 tracking-tight">
+              Property rules & regulations
             </Text>
-          </View>
-          {FIXED_RULES.filter((r) => !r.isExitFee).map((r) => (
-            <TouchableOpacity
-              key={r.key}
-              onPress={() => toggleRule(r.key)}
-              className="flex-row items-start py-3 border-b border-gray-100"
-            >
-              <View className="w-6 h-6 rounded border-2 border-gray-300 mr-3 mt-0.5 items-center justify-center bg-white">
-                {checked[r.key] !== false && <Ionicons name="checkmark" size={16} color={ACTIVE_COLOR} />}
+            <Text className="text-gray-500 mb-6">
+              Select and edit rules for your property. Tenants will see these.
+            </Text>
+
+            {/* Standard rules */}
+            <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">
+              <Text className="text-lg font-bold text-gray-900 mb-3">Standard rules</Text>
+              
+              <View className="flex-row items-start py-3 border-b border-gray-100">
+                <View className="w-6 h-6 rounded border-2 border-gray-300 mr-3 mt-0.5 items-center justify-center bg-white">
+                  <Ionicons name="checkmark" size={16} color={ACTIVE_COLOR} />
+                </View>
+                <Text className="flex-1 text-gray-700 text-sm">
+                  Residents must provide prior notice of {noticePeriodDays.trim() || "30"} days before vacating, failing which deposit will be forfeited.
+                </Text>
               </View>
-              <Text className="flex-1 text-gray-700 text-sm">{r.text}</Text>
-            </TouchableOpacity>
-          ))}
-          {/* Exit fee: same row style, unchecked by default, inline editable amount */}
-          <TouchableOpacity
-            onPress={() => toggleRule("exit_fee")}
-            className="flex-row items-center py-3"
-            activeOpacity={0.7}
-          >
-            <View className="w-6 h-6 rounded border-2 border-gray-300 mr-3 items-center justify-center bg-white">
-              {checked.exit_fee && <Ionicons name="checkmark" size={16} color={ACTIVE_COLOR} />}
-            </View>
-            <View className="flex-1 flex-row flex-wrap items-center">
-              <Text className="text-gray-700 text-sm">Standard exit fee of ₹</Text>
-              <TextInput
-                value={exitFeeAmount}
-                onChangeText={setExitFeeAmount}
-                placeholder="0"
-                keyboardType="number-pad"
-                onPressIn={(e) => e.stopPropagation()}
-                className="min-w-[72px] max-w-[100px] border border-gray-200 rounded-lg bg-white px-2 py-1.5 text-gray-800 text-sm"
-              />
-              <Text className="text-gray-700 text-sm"> will be deducted at the time of vacating.</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
 
-        {/* Add your own rules */}
-        <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">
-          <Text className="text-lg font-bold text-gray-900 mb-3">Add your own rules</Text>
-          {[0, 1, 2, 3, 4].map((i) => (
-            <TextInput
-              key={i}
-              value={customRules[i] ?? ""}
-              onChangeText={(t) => {
-                const next = [...customRules];
-                next[i] = t;
-                setCustomRules(next);
-              }}
-              placeholder={`Custom rule ${i + 1} (optional)`}
-              className="border border-gray-200 rounded-2xl px-4 py-3 mt-2 bg-white text-gray-800"
-            />
-          ))}
-        </View>
+              {FIXED_RULES.filter((r) => !r.isExitFee).map((r) => (
+                <TouchableOpacity
+                  key={r.key}
+                  onPress={() => toggleRule(r.key)}
+                  className="flex-row items-start py-3 border-b border-gray-100"
+                >
+                  <View className="w-6 h-6 rounded border-2 border-gray-300 mr-3 mt-0.5 items-center justify-center bg-white">
+                    {checked[r.key] !== false && <Ionicons name="checkmark" size={16} color={ACTIVE_COLOR} />}
+                  </View>
+                  <Text className="flex-1 text-gray-700 text-sm">{r.text}</Text>
+                </TouchableOpacity>
+              ))}
 
-        <View className="flex-row items-center justify-between mt-12 mb-6">
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.7}
-            className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-gray-100 border border-gray-200"
-          >
-            <Ionicons name="chevron-back" size={20} color="#4B5563" />
-            <Text className="text-gray-600 font-bold ml-1">Back</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleSave}
-            disabled={saving}
-            activeOpacity={0.8}
-            className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-[#2F3CFF]"
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <>
-                <Ionicons name="save-outline" size={20} color="white" />
-                <Text className="text-white font-bold ml-1">Save rules</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+              {/* Exit fee row */}
+              <TouchableOpacity
+                onPress={() => toggleRule("exit_fee")}
+                className="flex-row items-center py-3"
+                activeOpacity={0.7}
+              >
+                <View className="w-6 h-6 rounded border-2 border-gray-300 mr-3 items-center justify-center bg-white">
+                  {checked.exit_fee && <Ionicons name="checkmark" size={16} color={ACTIVE_COLOR} />}
+                </View>
+                <View className="flex-1 flex-row flex-wrap items-center">
+                  <Text className="text-gray-700 text-sm">Standard exit fee of ₹</Text>
+                  <TextInput
+                    value={exitFeeAmount}
+                    onChangeText={setExitFeeAmount}
+                    placeholder="0"
+                    keyboardType="number-pad"
+                    onPressIn={(e) => e.stopPropagation()}
+                    className="min-w-[72px] max-w-[100px] border border-gray-200 rounded-lg bg-white px-2 py-1.5 text-gray-800 text-sm mx-1"
+                  />
+                  <Text className="text-gray-700 text-sm">will be deducted at vacating.</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Custom rules */}
+            <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">
+              <Text className="text-lg font-bold text-gray-900 mb-3">Add your own rules</Text>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <TextInput
+                  key={i}
+                  value={customRules[i] ?? ""}
+                  onChangeText={(t) => {
+                    const next = [...customRules];
+                    next[i] = t;
+                    setCustomRules(next);
+                  }}
+                  placeholder={`Custom rule ${i + 1} (optional)`}
+                  className="border border-gray-200 rounded-2xl px-4 py-3 mt-2 bg-white text-gray-800"
+                />
+              ))}
+            </View>
+
+            {/* Footer Buttons */}
+            <View className="flex-row items-center justify-between mt-12 mb-6">
+              <TouchableOpacity
+                onPress={() => navigation.goBack()}
+                activeOpacity={0.7}
+                className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-gray-100 border border-gray-200"
+              >
+                <Ionicons name="chevron-back" size={20} color="#4B5563" />
+                <Text className="text-gray-600 font-bold ml-1">Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleSave}
+                disabled={saving}
+                activeOpacity={0.8}
+                className="flex-row items-center justify-center px-8 py-4 rounded-2xl bg-[#2F3CFF]"
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <>
+                    <Ionicons name="save-outline" size={20} color="white" />
+                    <Text className="text-white font-bold ml-1">Save rules</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

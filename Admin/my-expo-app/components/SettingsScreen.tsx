@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Switch, TouchableOpacity, ScrollView, Alert, Modal, Dimensions } from "react-native";
+import { View, Text, Switch, TouchableOpacity, ScrollView, Alert, Modal, Dimensions, ActivityIndicator } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,7 +11,7 @@ const { width } = Dimensions.get("window");
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavigationProp<any>>();
-  const { properties, currentProperty, setCurrentProperty } = useProperty();
+  const { properties, currentProperty, setCurrentProperty, loading: propertiesLoading, refresh } = useProperty();
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [pushNotifications, setPushNotifications] = useState(true);
 
@@ -81,16 +81,9 @@ export default function SettingsScreen() {
           <View className="bg-white rounded-[24px] overflow-hidden shadow-sm border border-white">
             <SettingItem icon="notifications-outline" label="Send Notification" onPress={() => navigation.navigate("SendNotificationScreen")} showBorder />
 
-            <SettingToggle
-              icon="phone-portrait-outline"
-              label="Receive Push Alerts (This Device)"
-              value={pushNotifications}
-              onValueChange={setPushNotifications}
-            />
+            
           </View>
-          <Text className="text-[11px] text-slate-500 px-3 mt-2">
-            Sending notifications to tenants works from server and is not blocked by this switch.
-          </Text>
+          
         </View>
 
         {/* Reports */}
@@ -105,8 +98,8 @@ export default function SettingsScreen() {
         <View className="mt-6">
           <Text className="text-xs font-black text-slate-400 uppercase tracking-[2px] mb-3 px-2">Security & Legal</Text>
           <View className="bg-white rounded-[24px] overflow-hidden shadow-sm border border-white">
-            <SettingItem icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => Alert.alert("Privacy Policy", "View our privacy policy at mystayinn.com")} showBorder />
-            <SettingItem icon="document-outline" label="Terms & Conditions" onPress={() => Alert.alert("Terms & Conditions", "View terms at mystayinn.com")} />
+            <SettingItem icon="shield-checkmark-outline" label="Privacy Policy" onPress={() => navigation.navigate('PrivacyPolicy')} showBorder />
+            <SettingItem icon="document-outline" label="Terms & Conditions" onPress={() => navigation.navigate('Terms')} />
           </View>
         </View>
 
@@ -136,21 +129,35 @@ export default function SettingsScreen() {
                 <Text className="text-lg font-bold text-center text-gray-800">My Properties</Text>
               </View>
               <ScrollView className="max-h-64">
-                {properties.map((property) => (
-                  <TouchableOpacity
-                    key={property.id}
-                    onPress={() => handlePropertySelect(property)}
-                    className={`p-4 border-b border-gray-50 ${currentProperty?.id === property.id ? "bg-blue-50" : ""}`}
-                  >
-                    <View className="flex-row items-center justify-between">
-                      <View className="flex-1">
-                        <Text className="text-base font-semibold text-gray-800">{property.name}</Text>
-                        <Text className="text-sm text-gray-500 mt-1">{property.address}</Text>
+                {propertiesLoading ? (
+                  <View className="py-8 items-center">
+                    <ActivityIndicator size="large" color="#2563EB" />
+                    <Text className="text-gray-500 mt-3">Loading properties...</Text>
+                  </View>
+                ) : properties.length === 0 ? (
+                  <View className="py-8 items-center px-4">
+                    <Text className="text-gray-500 text-center">No properties found.</Text>
+                    <TouchableOpacity onPress={refresh} className="mt-3 bg-blue-50 px-4 py-2 rounded-lg">
+                      <Text className="text-blue-600 font-semibold">Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  properties.map((property) => (
+                    <TouchableOpacity
+                      key={property.id}
+                      onPress={() => handlePropertySelect(property)}
+                      className={`p-4 border-b border-gray-50 ${currentProperty?.id === property.id ? "bg-blue-50" : ""}`}
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <View className="flex-1">
+                          <Text className="text-base font-semibold text-gray-800">{property.name}</Text>
+                          <Text className="text-sm text-gray-500 mt-1">{property.address}</Text>
+                        </View>
+                        {currentProperty?.id === property.id && <Ionicons name="checkmark-circle" size={20} color="#2563EB" />}
                       </View>
-                      {currentProperty?.id === property.id && <Ionicons name="checkmark-circle" size={20} color="#2563EB" />}
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  ))
+                )}
               </ScrollView>
               <TouchableOpacity onPress={handleAddNewProperty} className="p-4 border-t border-gray-100">
                 <View className="flex-row items-center justify-center">

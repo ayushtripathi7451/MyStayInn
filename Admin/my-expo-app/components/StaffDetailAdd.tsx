@@ -1,8 +1,16 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+} from "react-native";
 import CustomDropdown from "./CustomDropdown";
 import { useProperty } from "../contexts/PropertyContext";
 import { expenseApi } from "../utils/api";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 
 const EXPENSE_TYPES = [
   "Staff Salary",
@@ -98,73 +106,86 @@ export default function StaffDetailAdd({
         : "Enter description";
 
   return (
-    <View className="flex-1 bg-[#F6F8FF] p-3">
-      <Text className="text-gray-700 mb-1">Expense Type</Text>
-      <CustomDropdown
-        options={EXPENSE_TYPES}
-        selectedValue={type}
-        onSelect={setType}
-        placeholder="Select expense type"
-        containerStyle="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300"
-      />
-
-      <Text className="text-gray-700 mb-1">{nameLabel}</Text>
-      <TextInput
-        className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300"
-        value={name}
-        onChangeText={setName}
-        placeholder={namePlaceholder}
-      />
-
-      {type === "Staff Salary" && (
-        <>
-          <Text className="text-gray-700 mb-1">Role</Text>
-          <TextInput
-            className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300"
-            value={role}
-            onChangeText={setRole}
-            placeholder="Enter role/position"
+    <KeyboardAwareScrollView
+      contentContainerStyle={{ flexGrow: 1, padding: 12, paddingBottom: 40 }}
+      enableOnAndroid={true}
+      extraScrollHeight={20}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+          <Text className="text-gray-700 mb-1 font-medium">Expense Type</Text>
+          <CustomDropdown
+            options={EXPENSE_TYPES}
+            selectedValue={type}
+            onSelect={setType}
+            placeholder="Select expense type"
+            containerStyle="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300"
           />
-        </>
-      )}
 
-      <Text className="text-gray-700 mb-1">Amount</Text>
-      <TextInput
-        keyboardType="numeric"
-        className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300"
-        value={amount}
-        onChangeText={setAmount}
-        placeholder="Enter amount"
-      />
+          <Text className="text-gray-700 mb-1 font-medium">{nameLabel}</Text>
+          <TextInput
+            className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300 text-gray-800"
+            value={name}
+            onChangeText={setName}
+            placeholder={namePlaceholder}
+            placeholderTextColor="#9CA3AF"
+          />
 
-      <Text className="text-gray-700 mb-1">Due Date</Text>
-      <TextInput
-        placeholder="e.g. 5th of every month"
-        className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300"
-        value={dueDate}
-        onChangeText={setDueDate}
-      />
-
-      <View className="flex-row gap-3 mt-6">
-        <TouchableOpacity
-          onPress={onBack}
-          disabled={saving}
-          className="flex-1 py-4 bg-white border border-gray-300 rounded-xl items-center"
-        >
-          <Text className="text-gray-700 font-medium">Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={handleSave}
-          disabled={saving}
-          className="flex-1 py-4 bg-[#645CFF] rounded-xl items-center shadow-lg shadow-indigo-300 flex-row justify-center"
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text className="text-white font-semibold">Save Expense</Text>
+          {type === "Staff Salary" && (
+            <>
+              <Text className="text-gray-700 mb-1 font-medium">Role</Text>
+              <TextInput
+                className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300 text-gray-800"
+                value={role}
+                onChangeText={setRole}
+                placeholder="Enter role/position"
+                placeholderTextColor="#9CA3AF"
+              />
+            </>
           )}
-        </TouchableOpacity>
-      </View>
-    </View>
+
+          <Text className="text-gray-700 mb-1 font-medium">Amount</Text>
+          <TextInput
+            keyboardType="numeric"
+            className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300 text-gray-800"
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="Enter amount"
+            placeholderTextColor="#9CA3AF"
+          />
+
+          <Text className="text-gray-700 mb-1 font-medium">Due Date</Text>
+          <TextInput
+            placeholder="e.g. 5th of every month"
+            className="bg-white rounded-xl px-4 py-3 mb-4 border border-gray-300 text-gray-800"
+            value={dueDate}
+            onChangeText={setDueDate}
+            placeholderTextColor="#9CA3AF"
+          />
+
+          {/* Action Buttons */}
+          <View className="flex-row gap-3 mt-4">
+            <TouchableOpacity
+              onPress={onBack}
+              disabled={saving}
+              className="flex-1 py-4 bg-white border border-gray-300 rounded-xl items-center"
+            >
+              <Text className="text-gray-700 font-bold">Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              onPress={handleSave}
+              disabled={saving}
+              activeOpacity={0.8}
+              className="flex-1 py-4 bg-[#645CFF] rounded-xl items-center shadow-lg shadow-indigo-300 flex-row justify-center"
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text className="text-white font-bold">Save Expense</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+    </KeyboardAwareScrollView>
   );
 }

@@ -21,6 +21,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
+import { State, City } from "country-state-city";
 import { api, userApi } from "../utils/api";
 import type { StructuredAddress } from "../utils/address";
 import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
@@ -39,47 +40,7 @@ const formatExpiryDate = (expiresAt?: string | null) => {
   return d.toLocaleDateString();
 };
 
-const ADDRESS_API = "https://api.countrystatecity.in/v1/countries/IN";
-const ADDRESS_API_KEY = "925c2205399e5d13f37b6d9c78f7806f6b0bdbca1ae59a4a5ba3ff62041dabb3";
-
-const INDIAN_STATES_FALLBACK: { name: string; iso2: string }[] = [
-  { name: "Andaman and Nicobar Islands", iso2: "AN" },
-  { name: "Andhra Pradesh", iso2: "AP" },
-  { name: "Arunachal Pradesh", iso2: "AR" },
-  { name: "Assam", iso2: "AS" },
-  { name: "Bihar", iso2: "BR" },
-  { name: "Chandigarh", iso2: "CH" },
-  { name: "Chhattisgarh", iso2: "CT" },
-  { name: "Dadra and Nagar Haveli and Daman and Diu", iso2: "DH" },
-  { name: "Delhi", iso2: "DL" },
-  { name: "Goa", iso2: "GA" },
-  { name: "Gujarat", iso2: "GJ" },
-  { name: "Haryana", iso2: "HR" },
-  { name: "Himachal Pradesh", iso2: "HP" },
-  { name: "Jammu and Kashmir", iso2: "JK" },
-  { name: "Jharkhand", iso2: "JH" },
-  { name: "Karnataka", iso2: "KA" },
-  { name: "Kerala", iso2: "KL" },
-  { name: "Ladakh", iso2: "LA" },
-  { name: "Lakshadweep", iso2: "LD" },
-  { name: "Madhya Pradesh", iso2: "MP" },
-  { name: "Maharashtra", iso2: "MH" },
-  { name: "Manipur", iso2: "MN" },
-  { name: "Meghalaya", iso2: "ML" },
-  { name: "Mizoram", iso2: "MZ" },
-  { name: "Nagaland", iso2: "NL" },
-  { name: "Odisha", iso2: "OR" },
-  { name: "Puducherry", iso2: "PY" },
-  { name: "Punjab", iso2: "PB" },
-  { name: "Rajasthan", iso2: "RJ" },
-  { name: "Sikkim", iso2: "SK" },
-  { name: "Tamil Nadu", iso2: "TN" },
-  { name: "Telangana", iso2: "TG" },
-  { name: "Tripura", iso2: "TR" },
-  { name: "Uttar Pradesh", iso2: "UP" },
-  { name: "Uttarakhand", iso2: "UT" },
-  { name: "West Bengal", iso2: "WB" },
-];
+// Using country-state-city library for state and city data
 
 const emptyAddress = (): StructuredAddress => ({
   line1: "",
@@ -201,41 +162,40 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
 
-  /* Fetch Indian states for address */
+  /* Fetch Indian states using country-state-city library */
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setAddressLoading((p) => ({ ...p, states: true }));
-      try {
-        const res = await fetch(`${ADDRESS_API}/states`, {
-          headers: { "X-CSCAPI-KEY": ADDRESS_API_KEY },
-        });
-        const data = await res.json().catch(() => null);
-        const list = Array.isArray(data) && data.length ? data : null;
-        if (!cancelled) {
-          setStateList(
-            (list || INDIAN_STATES_FALLBACK).sort((a: any, b: any) =>
-              (a.name || "").localeCompare(b.name || "")
-            )
-          );
-        }
-      } catch (_) {}
-      if (!cancelled) setAddressLoading((p) => ({ ...p, states: false }));
-    })();
-    return () => { cancelled = true; };
+    setAddressLoading((p) => ({ ...p, states: true }));
+    try {
+      // Get all states of India (country code: IN)
+      const indianStates = State.getStatesOfCountry("IN");
+      const formattedStates = indianStates.map((state) => ({
+        name: state.name,
+        iso2: state.isoCode,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      setStateList(formattedStates);
+    } catch (error) {
+      console.error("Error loading states:", error);
+    } finally {
+      setAddressLoading((p) => ({ ...p, states: false }));
+    }
   }, []);
 
-  const fetchCities = async (stateCode: string) => {
+  const fetchCities = (stateCode: string) => {
     if (!stateCode) return;
     setAddressLoading((p) => ({ ...p, cities: true }));
     try {
-      const res = await fetch(`${ADDRESS_API}/states/${stateCode}/cities`, {
-        headers: { "X-CSCAPI-KEY": ADDRESS_API_KEY },
-      });
-      const data = await res.json();
-      setCityList((data || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
-    } catch (_) {}
-    setAddressLoading((p) => ({ ...p, cities: false }));
+      // Get all cities of the selected state in India
+      const cities = City.getCitiesOfState("IN", stateCode);
+      const formattedCities = cities.map((city) => ({
+        name: city.name,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      setCityList(formattedCities);
+    } catch (error) {
+      console.error("Error loading cities:", error);
+      setCityList([]);
+    } finally {
+      setAddressLoading((p) => ({ ...p, cities: false }));
+    }
   };
 
   useEffect(() => {
@@ -874,7 +834,27 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
       });
 
       if (!result.canceled && result.assets[0]) {
-        setProfileImage(result.assets[0].uri);
+        const imageUri = result.assets[0].uri;
+        
+        // Convert to base64 immediately
+        try {
+          const response = await fetch(imageUri);
+          const blob = await response.blob();
+          const reader = new FileReader();
+          
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            console.log('[CompleteProfileScreen] Image converted to base64');
+            console.log('[CompleteProfileScreen] Base64 length:', base64data.length);
+            console.log('[CompleteProfileScreen] Base64 preview:', base64data.substring(0, 50));
+            setProfileImage(base64data);
+          };
+          
+          reader.readAsDataURL(blob);
+        } catch (conversionError) {
+          console.error("Error converting image to base64:", conversionError);
+          Alert.alert("Error", "Failed to process image. Please try again.");
+        }
       }
     } catch (error) {
       console.error("Error picking image:", error);

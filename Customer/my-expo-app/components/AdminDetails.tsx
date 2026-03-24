@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
 import MapFallback from "./MapFallback";
 import ScrollableDatePicker from "./ScrollableDatePicker";
+import { Keyboard } from "react-native";
 
 type Admin = {
   id: string;
@@ -181,7 +182,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
   const today = new Date(new Date().setHours(0, 0, 0, 0));
   const isPastCheckIn = !!checkIn && checkIn < today;
   const isFutureCheckIn = !!checkIn && checkIn > today;
-
+  const headerHeight = Platform.OS === 'ios' ? 10 : 0;
   const formatDate = (date: Date) =>
     date.toLocaleDateString("en-IN", {
       day: "2-digit",
@@ -265,14 +266,16 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={{ flex: 1 }}
-      >
+  behavior={Platform.OS === "ios" ? "padding" : "padding"} // Use "height" for Android
+  style={{ flex: 1 }}
+  keyboardVerticalOffset={headerHeight} // Offset for your custom header
+>
         <ScrollView
-          className="px-5 pt-4"
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 140 }}
-        >
+  className="px-5 pt-4"
+  keyboardShouldPersistTaps="handled"
+  // Increase bottom padding even more to ensure space for the Reserve button
+  contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 120 : 120 }} 
+>
           {/* PROPERTY + ADMIN INFO CARD */}
           <View className="bg-white rounded-2xl p-5 mb-4 shadow-sm">
             {/* HEADER: PROPERTY NAME + RENT */}

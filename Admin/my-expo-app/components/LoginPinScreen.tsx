@@ -34,6 +34,14 @@ export default function LoginPinScreen({ navigation }: any) {
           const user = JSON.parse(userData);
           const fullName = `${user.firstName ?? ''} ${(user.lastName ?? '').trim()}`.trim() || 'User';
           setFirstName(fullName);
+          return;
+        }
+        // Fallback for older sessions that only stored userProfile
+        const userProfile = await AsyncStorage.getItem("userProfile");
+        if (userProfile) {
+          const profile = JSON.parse(userProfile);
+          const fullName = `${profile.first ?? ''} ${(profile.last ?? '').trim()}`.trim() || 'User';
+          setFirstName(fullName);
         }
       } catch (error) {
         console.error("Error fetching user name:", error);
@@ -54,13 +62,13 @@ export default function LoginPinScreen({ navigation }: any) {
       end={{ x: 1, y: 1 }}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         <ScrollView 
           contentContainerStyle={{ flexGrow: 1 }}
           bounces={false}
-          scrollEnabled={false} 
+          scrollEnabled={false}
           keyboardShouldPersistTaps="handled"
         >
           <SafeAreaView style={{ flex: 1 }} className="pt-4">

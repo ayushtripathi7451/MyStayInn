@@ -111,11 +111,20 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
       await AsyncStorage.setItem("authToken", data.token);
       await AsyncStorage.setItem("userData", JSON.stringify(data.user));
 
-      // 5. Navigate to MPIN login screen
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "LoginPin" }],
-      });
+      // 5. Skip PIN screen — go directly to the app
+      try {
+        const { propertyApi } = await import("../utils/api");
+        const propertiesResponse = await propertyApi.get('/api/properties');
+        if (propertiesResponse.data.success && propertiesResponse.data.properties.length > 0) {
+          const firstProperty = propertiesResponse.data.properties[0];
+          await AsyncStorage.setItem('currentProperty', JSON.stringify(firstProperty));
+          navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+        } else {
+          navigation.reset({ index: 0, routes: [{ name: "ProfileSetup" }] });
+        }
+      } catch {
+        navigation.reset({ index: 0, routes: [{ name: "ProfileSetup" }] });
+      }
     } catch (error: any) {
       console.error("Login Error:", error);
       
