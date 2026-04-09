@@ -13,6 +13,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
 import * as Location from "expo-location";
 import { userApi, propertyApi } from "../utils/api";
+import {
+  formatOccupancySharingFromRooms,
+  extractPropertyAudience,
+} from "../utils/roomSharing";
 
 /* ---------------- TYPES ---------------- */
 
@@ -30,6 +34,8 @@ type Property = {
   roomType: string;
   occupancy: string;
   rent: string;
+  /** Boys / Girls / Colive when known from description or rules */
+  audience?: string;
 };
 
 type EnrollmentStatus =
@@ -159,7 +165,11 @@ export default function SearchAdminScreen({ navigation }: any) {
         const roomType = room.roomType || p.propertyType || "—";
         const price = room.pricePerMonth ?? p.rooms?.[0]?.pricePerMonth ?? 0;
         const locationStr =
-          [p.address, p.city, p.state].filter(Boolean).join(", ") || "—";
+          [ p.city, p.state].filter(Boolean).join(", ") || "—";
+        const occ = formatOccupancySharingFromRooms(
+          Array.isArray(p.rooms) ? p.rooms : [room]
+        );
+        const audience = extractPropertyAudience(p) || undefined;
         return {
           admin: {
             id: p.ownerId || p.uniqueId || p.id,
@@ -170,16 +180,17 @@ export default function SearchAdminScreen({ navigation }: any) {
             name: p.name || "Property",
             location: locationStr,
             roomType: String(roomType),
-            occupancy: room.capacity ? `${room.capacity} sharing` : "—",
+            occupancy: occ,
             rent: price
               ? `₹${Number(price).toLocaleString()} / month`
               : "—",
+            audience,
           },
           fullProperty: {
             ...p,
             location: locationStr,
             roomType: String(roomType),
-            occupancy: room.capacity ? `${room.capacity} sharing` : "—",
+            occupancy: occ,
             rent: price
               ? `₹${Number(price).toLocaleString()} / month`
               : "—",
@@ -251,9 +262,13 @@ if (normalizedQuery.startsWith("myp")) {
     const roomType = room.roomType || property.propertyType || "—";
     const price = room.pricePerMonth ?? 0;
     const locationStr =
-      [property.address, property.city, property.state]
+      [ property.city, property.state]
         .filter(Boolean)
         .join(", ") || "—";
+    const occ = formatOccupancySharingFromRooms(
+      Array.isArray(property.rooms) ? property.rooms : [room]
+    );
+    const audience = extractPropertyAudience(property) || undefined;
 
     setResults([
       {
@@ -266,9 +281,8 @@ if (normalizedQuery.startsWith("myp")) {
           name: property.name,
           location: locationStr,
           roomType,
-          occupancy: room.capacity
-            ? `${room.capacity} sharing`
-            : "—",
+          occupancy: occ,
+          audience,
           rent: price
             ? `₹${Number(price).toLocaleString()} / month`
             : "—",
@@ -337,7 +351,11 @@ if (normalizedQuery.startsWith("myp")) {
           const price =
             room.pricePerMonth ?? p.rooms?.[0]?.pricePerMonth ?? 0;
           const locationStr =
-            [p.address, p.city, p.state].filter(Boolean).join(", ") || "—";
+            [ p.city, p.state].filter(Boolean).join(", ") || "—";
+          const occ = formatOccupancySharingFromRooms(
+            Array.isArray(p.rooms) ? p.rooms : [room]
+          );
+          const audience = extractPropertyAudience(p) || undefined;
           items.push({
             admin,
             property: {
@@ -345,9 +363,8 @@ if (normalizedQuery.startsWith("myp")) {
               name: p.name || "Property",
               location: locationStr,
               roomType: String(roomType),
-              occupancy: room.capacity
-                ? `${room.capacity} sharing`
-                : "—",
+              occupancy: occ,
+              audience,
               rent: price
                 ? `₹${Number(price).toLocaleString()} / month`
                 : "—",
@@ -356,9 +373,7 @@ if (normalizedQuery.startsWith("myp")) {
               ...p,
               location: locationStr,
               roomType: String(roomType),
-              occupancy: room.capacity
-                ? `${room.capacity} sharing`
-                : "—",
+              occupancy: occ,
               rent: price
                 ? `₹${Number(price).toLocaleString()} / month`
                 : "—",
@@ -500,23 +515,15 @@ if (normalizedQuery.startsWith("myp")) {
 
       <View className="flex-row justify-between">
         <View>
-          <Text className="text-gray-400 text-[13px]">Room</Text>
-          <Text className="font-medium">{item.property.roomType}</Text>
-        </View>
-
-        <View>
           <Text className="text-gray-400 text-[13px]">Occupancy</Text>
           <Text className="font-medium">{item.property.occupancy}</Text>
         </View>
-
         <View>
-          <Text className="text-gray-400 text-[13px]">Rent</Text>
-          <Text className="font-semibold">{item.property.rent}</Text>
+          <Text className="text-gray-400 text-[13px]">Property for</Text>
+          <Text className="font-medium">{item.property.audience || "—"}</Text>
         </View>
       </View>
 
-      
-      
       {/* Display Property ID if available */}
       {item.property.id && (
         <Text className="text-gray-400 text-[12px] mt-1">

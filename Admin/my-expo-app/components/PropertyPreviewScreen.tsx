@@ -239,6 +239,7 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
           noticePeriod: floorsData?.noticePeriod || 30,
           securityDeposit: floorsData?.securityDeposit || 10000,
           pricingMode: floorsData?.pricingMode || "month",
+          propertyFor: propertyData?.propertyFor || undefined,
         },
         rooms: rooms,
       };

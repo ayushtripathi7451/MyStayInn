@@ -24,6 +24,11 @@ import MapFallback from "./MapFallback";
 import ScrollableDatePicker from "./ScrollableDatePicker";
 import { Keyboard } from "react-native";
 import { propertyApi } from "../utils/api";
+import {
+  formatOccupancySharing,
+  formatOccupancySharingFromRooms,
+  extractPropertyAudience,
+} from "../utils/roomSharing";
 
 type Admin = {
   id: string;
@@ -95,27 +100,33 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
   const roomFacilitiesList = fp?.rooms?.length
     ? toList((fp.rooms[0] as any)?.amenities)
     : [];
-  const roomTypesWithPrice =
-    fp?.rooms?.length && Array.isArray(fp.rooms)
-      ? (fp.rooms as any[]).reduce(
-          (acc: { type: string; price: string; capacity?: number }[], r: any) => {
-            const rawType = (r.roomType || "Room").toString();
-            const typeLabel =
-              rawType.charAt(0).toUpperCase() + rawType.slice(1).toLowerCase();
-            const label = `${typeLabel} (${r.capacity ?? "—"} sharing)`;
-            const price = r.pricePerMonth
-              ? `₹${Number(r.pricePerMonth).toLocaleString()}/month`
-              : "—";
-            if (!acc.some((x) => x.type === label))
-              acc.push({ type: label, price, capacity: r.capacity });
-            return acc;
-          },
-          []
-        )
-      : [];
+  type RoomPriceRow = {
+    optionLabel: string;
+    sharingLine: string;
+    price: string;
+  };
+  const roomTypesWithPrice: RoomPriceRow[] = useMemo(() => {
+    if (!fp?.rooms?.length || !Array.isArray(fp.rooms)) return [];
+    return (fp.rooms as any[]).reduce((acc: RoomPriceRow[], r: any) => {
+      const rawType = (r.roomType || "Room").toString();
+      const typeLabel =
+        rawType.charAt(0).toUpperCase() + rawType.slice(1).toLowerCase();
+      const sharingLine = formatOccupancySharing({
+        roomType: r.roomType,
+        capacity: r.capacity,
+      });
+      const optionLabel = `${typeLabel} (${sharingLine})`;
+      const price = r.pricePerMonth
+        ? `₹${Number(r.pricePerMonth).toLocaleString()}/month`
+        : "—";
+      if (!acc.some((x) => x.optionLabel === optionLabel))
+        acc.push({ optionLabel, sharingLine, price });
+      return acc;
+    }, []);
+  }, [fp?.rooms]);
   const roomPreferenceOptions = useMemo(() => {
     if (roomTypesWithPrice.length > 0) {
-      return roomTypesWithPrice.map((row) => `${row.type} • ${row.price}`);
+      return roomTypesWithPrice.map((row) => `${row.optionLabel} • ${row.price}`);
     }
     if (property?.roomType) {
       return [String(property.roomType)];
@@ -152,18 +163,26 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
     }
     return extractSecurityDepositFromRules(initFp?.rules);
   });
-  // Boys / Girls / Colive from description (e.g. "PG for Boys") or rules.propertyFor if added later
-  const propertyFor =
-    hasFullData && fp?.rules && typeof fp.rules === "object" && (fp.rules as any).propertyFor
-      ? String((fp.rules as any).propertyFor)
-      : (() => {
-          const desc = (fp?.description ?? "").toString();
-          const match = desc.match(/\bfor\s+(Boys|Girls|Colive|Students|Men|Women)\b/i);
-          return match ? match[1] : null;
-        })();
-  const propertyForLabel = propertyFor
-    ? propertyFor.charAt(0).toUpperCase() + propertyFor.slice(1).toLowerCase()
-    : null;
+  const propertyForLabel = hasFullData && fp ? extractPropertyAudience(fp) : null;
+  const rulesItems = useMemo(() => {
+    if (!hasFullData || !fp?.rules || typeof fp.rules !== "object") return [];
+    const items = (fp.rules as any).items;
+    return Array.isArray(items) ? (items as string[]).filter((x) => String(x).trim()) : [];
+  }, [hasFullData, fp?.rules]);
+  const foodMenuDays = useMemo(() => {
+    if (!hasFullData || !fp?.rules || typeof fp.rules !== "object") return null;
+    const days = (fp.rules as any).foodMenu?.days;
+    return days && typeof days === "object"
+      ? (days as Record<string, Record<string, { enabled?: boolean; menu?: string; startTime?: string; endTime?: string }>>)
+      : null;
+  }, [hasFullData, fp?.rules]);
+  const hasFoodMenu = useMemo(() => {
+    if (!foodMenuDays) return false;
+    const sections = ["breakfast", "lunch", "snack", "dinner"];
+    return Object.keys(foodMenuDays).some((d) =>
+      sections.some((s) => foodMenuDays[d]?.[s]?.enabled && String(foodMenuDays[d]?.[s]?.menu || "").trim())
+    );
+  }, [foodMenuDays]);
 
   const propertyLat = fp?.latitude ?? fp?.coordinates?.latitude;
   const propertyLng = fp?.longitude ?? fp?.coordinates?.longitude;
@@ -221,6 +240,24 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
   const [checkOut, setCheckOut] = useState<Date | null>(null);
   const [roomPreference, setRoomPreference] = useState("");
   const [comments, setComments] = useState("");
+
+  const occupancyChipLabel = useMemo(() => {
+    const fromAllRooms = formatOccupancySharingFromRooms(
+      Array.isArray(fp?.rooms) ? (fp?.rooms as { roomType?: string; capacity?: number }[]) : []
+    );
+    if (fromAllRooms !== "—") return fromAllRooms;
+    if (roomPreference && roomTypesWithPrice.length > 0) {
+      const row = roomTypesWithPrice.find(
+        (r) =>
+          roomPreference === `${r.optionLabel} • ${r.price}` ||
+          roomPreference.startsWith(r.optionLabel)
+      );
+      if (row?.sharingLine) return row.sharingLine;
+    }
+    return formatOccupancySharing(
+      fp?.rooms?.[0] as { roomType?: string; capacity?: number }
+    );
+  }, [roomPreference, roomTypesWithPrice, fp?.rooms]);
   // Re-sync deposit when search payload updates (e.g. list vs detail shape)
   useEffect(() => {
     if (!fullProperty) return;
@@ -506,7 +543,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
               </View>
               <View className="px-3 py-1 rounded-full bg-gray-100">
                 <Text className="text-[13px] text-gray-700">
-                  {fp?.occupancy ?? property?.occupancy ?? "—"}
+                  {occupancyChipLabel}
                 </Text>
               </View>
               {totalRooms != null && (
@@ -530,6 +567,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
                 </View>
               )}
             </View>
+            
             
             {/* DIVIDER */}
             <View className="h-[1px] bg-gray-200 my-5" />
@@ -668,7 +706,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
                   >
                     <View>
                       <Text className="font-semibold text-gray-900">
-                        {row.type}
+                        {row.optionLabel}
                       </Text>
                       <Text className="text-gray-600 text-sm">Per Month</Text>
                     </View>
@@ -684,64 +722,50 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
             </View>
           )}
 
-          {/* PROPERTY RULES (saved by admin) */}
-          {hasFullData && fp?.rules && typeof fp.rules === "object" && Array.isArray((fp.rules as any).items) && (fp.rules as any).items.length > 0 && (
+          {(rulesItems.length > 0 || hasFoodMenu) && (
             <View className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
               <Text className="text-[18px] font-semibold text-black mb-3">
-                Property Rules
+                Property Information
               </Text>
-              <View className="gap-2">
-                {((fp.rules as any).items as string[]).map((item, index) => (
-                  <View key={index} className="flex-row items-start">
-                    <Text className="text-slate-500 mr-2" style={{ minWidth: 20 }}>{index + 1}.</Text>
-                    <Text className="flex-1 text-gray-700 text-sm">{item}</Text>
-                  </View>
-                ))}
+              <View className="flex-row gap-3">
+                <TouchableOpacity
+                  onPress={() =>
+                    navigation.navigate("PropertyRulesViewScreen", {
+                      propertyName: displayName,
+                      rules: rulesItems,
+                    })
+                  }
+                  className="flex-1 py-3 rounded-xl border border-slate-200 bg-slate-50"
+                  disabled={rulesItems.length === 0}
+                >
+                  <Text
+                    className={`text-center font-semibold ${
+                      rulesItems.length > 0 ? "text-slate-800" : "text-slate-400"
+                    }`}
+                  >
+                    Rules
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() =>
+                    navigation.navigate("PropertyFoodMenuViewScreen", {
+                      propertyName: displayName,
+                      foodMenuDays: foodMenuDays || {},
+                    })
+                  }
+                  className="flex-1 py-3 rounded-xl border border-slate-200 bg-slate-50"
+                  disabled={!hasFoodMenu}
+                >
+                  <Text
+                    className={`text-center font-semibold ${
+                      hasFoodMenu ? "text-slate-800" : "text-slate-400"
+                    }`}
+                  >
+                    Food Menu
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
-          )}
-
-          {/* FOOD MENU (saved by admin) */}
-          {hasFullData && fp?.rules && typeof fp.rules === "object" && (fp.rules as any).foodMenu?.days && typeof (fp.rules as any).foodMenu.days === "object" && (
-            (() => {
-              const days = (fp.rules as any).foodMenu.days as Record<string, Record<string, { enabled?: boolean; menu?: string; startTime?: string; endTime?: string }>>;
-              const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-              const sections = [{ key: "breakfast", label: "Breakfast" }, { key: "lunch", label: "Lunch" }, { key: "snack", label: "Snack" }, { key: "dinner", label: "Dinner" }];
-              const hasAnyMenu = Object.keys(days).some((d) => sections.some((s) => days[d]?.[s.key]?.enabled && (days[d][s.key]?.menu || "").trim()));
-              if (!hasAnyMenu) return null;
-              return (
-                <View className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
-                  <Text className="text-[18px] font-semibold text-black mb-3">
-                    Food Menu & Timings
-                  </Text>
-                  <View className="gap-4">
-                    {dayNames.map((dayName, dayIndex) => {
-                      const d = days[String(dayIndex)];
-                      if (!d) return null;
-                      const daySections = sections.filter((s) => d[s.key]?.enabled && (d[s.key]?.menu || "").trim());
-                      if (daySections.length === 0) return null;
-                      return (
-                        <View key={dayIndex} className="p-3 bg-gray-50 rounded-xl">
-                          <Text className="font-semibold text-gray-800 mb-2">{dayName}</Text>
-                          {daySections.map((s) => {
-                            const sec = d[s.key];
-                            const start = sec?.startTime ? new Date(sec.startTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
-                            const end = sec?.endTime ? new Date(sec.endTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
-                            const timeStr = start && end ? ` (${start} – ${end})` : "";
-                            return (
-                              <View key={s.key} className="mb-1">
-                                <Text className="text-gray-600 text-xs font-medium">{s.label}{timeStr}</Text>
-                                <Text className="text-gray-800 text-sm">{sec?.menu || "—"}</Text>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-              );
-            })()
           )}
 
           {/* FORM */}
@@ -762,17 +786,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
               placeholder="Select move in date"
               containerStyle="mb-4"
             />
-            {checkIn && (
-              <TouchableOpacity
-                onPress={() => {
-                  setCheckIn(null);
-                  setCheckOut(null);
-                }}
-                className="self-start mb-4 -mt-2"
-              >
-                <Text className="text-sm font-semibold text-red-500">Clear move-in date</Text>
-              </TouchableOpacity>
-            )}
+            
 
             {/* CHECK-OUT */}
             <Text className="text-gray-700 mb-1">

@@ -466,9 +466,9 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
             hasDue ? "bg-gray-300" : "bg-red-500"
           }`}
           activeOpacity={hasDue ? 1 : 0.85}
-          disabled={!hasDue}
+          disabled={hasDue}
           onPress={() => {
-            if (hasDue) {
+            if (!hasDue) {
               navigation.navigate("MoveOutRequestScreen", { property });
             }
           }}

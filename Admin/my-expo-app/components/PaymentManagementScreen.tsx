@@ -77,6 +77,8 @@ interface DueItem {
   monthLabel?: string;
   isMovedOut?: boolean;
   paymentDate?: string; // For daily payments
+  /** DB row id for `dailyPayment` when marking cash paid (booking-service `mark-rent-cash-paid`) */
+  dailyPaymentId?: string;
   isOverdue?: boolean;
   overdueDays?: number;
 }
@@ -384,6 +386,7 @@ export default function PaymentManagementScreen({ route }: any) {
           monthLabel: dateLabel,
           isMovedOut: b.status === "completed",
           paymentDate: paymentStr,
+          dailyPaymentId: payment.id,
           isOverdue: isOverdueResolved,
           overdueDays: overdueDaysResolved,
         });
@@ -1051,7 +1054,8 @@ export default function PaymentManagementScreen({ route }: any) {
   const handleMarkDailyRentPaid = async (
   bookingId: string,
   paymentDate?: string,
-  type?: "online" | "cash"
+  type?: "online" | "cash",
+  dailyPaymentId?: string
 ) => {
   try {
     setMarkingPaidBookingId(bookingId);
@@ -1062,9 +1066,14 @@ export default function PaymentManagementScreen({ route }: any) {
       return;
     }
 
-    await bookingApi.patch(`/api/bookings/${bookingId}/mark-daily-rent-paid`, {
-      date: paymentDate,
-      type,
+    // booking-service exposes PATCH .../mark-rent-cash-paid (daily + monthly); there is no mark-daily-rent-paid route.
+    const pd =
+      typeof paymentDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(paymentDate.trim())
+        ? paymentDate.trim().slice(0, 10)
+        : undefined;
+    await bookingApi.patch(`/api/bookings/${bookingId}/mark-rent-cash-paid`, {
+      ...(pd ? { paymentDate: pd } : {}),
+      ...(dailyPaymentId ? { dailyPaymentId } : {}),
     });
     await fetchBookings();
     Alert.alert("Success", "Daily rent marked as paid");
@@ -1229,7 +1238,8 @@ export default function PaymentManagementScreen({ route }: any) {
                   handleMarkDailyRentPaid(
                     item.bookingId,
                     item.paymentDate,
-                    "cash"
+                    "cash",
+                    item.dailyPaymentId
                   );
                 } else if (isRentCash) {
                   handleMarkRentCashPaid(item.bookingId, item.monthLabel);

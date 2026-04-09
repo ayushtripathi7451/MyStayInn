@@ -55,6 +55,8 @@ import CompleteProfileDocsScreen from './components/CompleteProfileDocsScreen';
 import TicketDetailsScreen from './components/TicketDetailsScreen';
 import SearchAdminScreen from './components/SearchAdminScreen';
 import AdminDetailsScreen from './components/AdminDetails';
+import PropertyRulesViewScreen from './components/PropertyRulesViewScreen';
+import PropertyFoodMenuViewScreen from './components/PropertyFoodMenuViewScreen';
 import LocationResultsScreen from 'components/LocationResultsScreen';
 import SearchResultDetailsScreen from 'components/SearchResultDetailsScreen';
 import TicketsScreen from 'components/TicketsScreen';
@@ -264,6 +266,8 @@ export default function App() {
               <Stack.Screen name="CompleteProfileDocs" component={CompleteProfileDocsScreen} />
               <Stack.Screen name="SearchAdmin" component={SearchAdminScreen} />
               <Stack.Screen name="AdminDetails" component={AdminDetailsScreen} />
+              <Stack.Screen name="PropertyRulesViewScreen" component={PropertyRulesViewScreen} />
+              <Stack.Screen name="PropertyFoodMenuViewScreen" component={PropertyFoodMenuViewScreen} />
               <Stack.Screen name="LocationResults" component={LocationResultsScreen} />
               <Stack.Screen name="SearchResultDetails" component={SearchResultDetailsScreen} />
               <Stack.Screen name="TicketsScreen" component={TicketsScreen} />

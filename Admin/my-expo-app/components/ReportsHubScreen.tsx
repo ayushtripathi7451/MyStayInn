@@ -3546,10 +3546,7 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
                         <Text className="text-emerald-900 text-xl font-black">₹{totalIn.toLocaleString()}</Text>
                       </View>
                       <ProgressBar value={totalIn} max={90000} color="bg-emerald-500" />
-                      <Text className="text-emerald-600 text-xs mt-1">
-                        Rent ₹{rentCol.toLocaleString()} · Security ₹{secCol.toLocaleString()} ·{" "}
-                        {((totalIn / 90000) * 100).toFixed(0)}% of target
-                      </Text>
+                      
                     </View>
 
                     {/* Expense */}
@@ -3559,9 +3556,7 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
                         <Text className="text-rose-900 text-xl font-black">₹{currentData.expense.toLocaleString()}</Text>
                       </View>
                       <ProgressBar value={currentData.expense} max={50000} color="bg-rose-500" />
-                      <Text className="text-rose-600 text-xs mt-1">
-                        {((currentData.expense / 50000) * 100).toFixed(0)}% of budget
-                      </Text>
+                      
                     </View>
 
                     {/* Pending Dues */}
@@ -3571,22 +3566,17 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
                         <Text className="text-amber-900 text-xl font-black">₹{currentData.pendingDues.toLocaleString()}</Text>
                       </View>
                       <ProgressBar value={currentData.pendingDues} max={35000} color="bg-amber-500" />
-                      <Text className="text-amber-600 text-xs mt-1">
-                        {((currentData.pendingDues / 35000) * 100).toFixed(0)}% of limit
-                      </Text>
+                      
                     </View>
 
                     {/* Profit/Loss */}
                     <View className=" rounded-2xl p-4">
-                      <Text className="text-slate-500 text-[10px] mb-1">Rent − expense (security deposits excluded)</Text>
                       <View className="flex-row justify-between items-center mb-2">
                         <Text className="text-blue-700 font-bold">Profit / Loss</Text>
                         <Text className="text-blue-900 text-xl font-black">₹{currentProfit.toLocaleString()}</Text>
                       </View>
                       <ProgressBar value={currentProfit} max={45000} color="bg-blue-500" />
-                      <Text className="text-blue-600 text-xs mt-1">
-                        {((currentProfit / 45000) * 100).toFixed(0)}% of target
-                      </Text>
+                      
                     </View>
 
                     {/* MoveOut P/L */}
