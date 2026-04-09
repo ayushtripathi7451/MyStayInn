@@ -7,6 +7,7 @@ import type { RootState } from './src/store/redux';
 import { refreshCurrentStay } from './src/store/actions';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer, useFocusEffect } from '@react-navigation/native';
+import { navigationRef } from './utils/navigationRef';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTheme, ThemeProvider } from './context/ThemeContext';
 import { store } from './src/store';
@@ -79,6 +80,7 @@ function HomeScreen({ navigation }: any) {
   const { theme } = useTheme();
   const dispatch = useDispatch();
   const currentStay = useSelector((state: RootState) => state.currentStay.data);
+  const currentStays = useSelector((state: RootState) => state.currentStay.stays);
   const currentStayLoading = useSelector((state: RootState) => state.currentStay.loading);
   const [refreshing, setRefreshing] = useState(false);
   const lastAutoSignedBookingRef = useRef<string>("");
@@ -111,7 +113,6 @@ function HomeScreen({ navigation }: any) {
   // Single trigger when Home is focused (including first open)
   useFocusEffect(
     useCallback(() => {
-      // Send as object (force defaults to false in saga, will use cache if fresh)
       dispatch(refreshCurrentStay({ force: false }));
     }, [dispatch])
   );
@@ -190,7 +191,7 @@ function HomeScreen({ navigation }: any) {
   const bgColor = theme === 'female' ? 'bg-[#FFF5FF]' : 'bg-[#F6F8FF]';
 
   // Prevent blank UI: show loading only on initial load when we have no cached data
-  if (currentStayLoading && !currentStay) {
+  if (currentStayLoading && currentStays.length === 0) {
     return (
       <SafeAreaView className={`flex-1 ${bgColor} justify-center items-center`}>
         <ActivityIndicator size="large" color={theme === 'female' ? '#EC4899' : '#1E33FF'} />
@@ -229,7 +230,7 @@ export default function App() {
     <Provider store={store}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <NavigationContainer>
+          <NavigationContainer ref={navigationRef}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
               <Stack.Screen name="Splash" component={SplashScreen} />
               <Stack.Screen name="Welcome" component={WelcomeScreen} />

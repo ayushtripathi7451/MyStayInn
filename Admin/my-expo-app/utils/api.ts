@@ -2,15 +2,48 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Base URLs for different services
-const AUTH_SERVICE_URL = "http://192.168.1.7:3001";
-const PROPERTY_SERVICE_URL = "http://192.168.1.7:3004";
-export const USER_SERVICE_URL = "http://192.168.1.7:3002";
-const BOOKING_SERVICE_URL = "http://192.168.1.7:3012";
-const NOTIFICATION_SERVICE_URL = "http://192.168.1.7:3005";
-const TICKET_SERVICE_URL = "http://192.168.1.7:3007";
-const MOVE_OUT_SERVICE_URL = "http://192.168.1.7:3010";
-const EXPENSE_SERVICE_URL = "http://192.168.1.7:3011";
-const ANALYTICS_SERVICE_URL = "http://192.168.1.7:3012";
+const AUTH_SERVICE_URL = "https://api.mystayinn.co.in/auth";
+const PROPERTY_SERVICE_URL = "https://api.mystayinn.co.in/properties";
+const USER_SERVICE_URL = "https://api.mystayinn.co.in/users";
+const BOOKING_SERVICE_URL = "https://api.mystayinn.co.in/bookings";
+const NOTIFICATION_SERVICE_URL = "https://api.mystayinn.co.in/notifications";
+const TICKET_SERVICE_URL = "https://api.mystayinn.co.in/tickets";
+const MOVE_OUT_SERVICE_URL = "https://api.mystayinn.co.in/moveouts";
+const EXPENSE_SERVICE_URL = "https://api.mystayinn.co.in/expenses";
+const ANALYTICS_SERVICE_URL = "https://api.mystayinn.co.in/analytics";
+const TRANSACTION_SERVICE_URL = "https://api.mystayinn.co.in/transactions";
+
+/** AsyncStorage may hold literal "null" / "undefined" strings — do not send as Bearer (401). */
+function isUsableJwtStorageValue(t: string | null | undefined): t is string {
+  if (t == null || typeof t !== "string") return false;
+  const s = t.trim();
+  if (!s) return false;
+  if (s === "null" || s === "undefined") return false;
+  return true;
+}
+
+/**
+ * JWT for API calls: USER_TOKEN first, then authToken (legacy / CreateMPINScreen).
+ */
+export async function getAuthBearerToken(): Promise<string | null> {
+  const primary = await AsyncStorage.getItem("USER_TOKEN");
+  if (isUsableJwtStorageValue(primary)) return primary.trim();
+  const fallback = await AsyncStorage.getItem("authToken");
+  if (isUsableJwtStorageValue(fallback)) return fallback.trim();
+  return null;
+}
+
+const attachAuthToken = async (config: any) => {
+  try {
+    const token = await getAuthBearerToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (error) {
+    console.error("Error getting token:", error);
+  }
+  return config;
+};
 
 export const api = axios.create({
   baseURL: AUTH_SERVICE_URL,
@@ -35,6 +68,13 @@ export const userApi = axios.create({
 
 export const bookingApi = axios.create({
   baseURL: BOOKING_SERVICE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+export const transactionApi = axios.create({
+  baseURL: TRANSACTION_SERVICE_URL,
   headers: {
     "Content-Type": "application/json",
   },
@@ -76,164 +116,17 @@ export const analyticsApi = axios.create({
   },
 });
 
-// Request interceptor to attach JWT token for auth service
-api.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for property service
-propertyApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for user service
-userApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for booking service
-bookingApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for notification service
-notifyApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for ticket service
-ticketApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for move-out service
-moveOutApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for expense service
-expenseApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for analytics service
-analyticsApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
+[
+  api,
+  propertyApi,
+  userApi,
+  bookingApi,
+  transactionApi,
+  notifyApi,
+  ticketApi,
+  moveOutApi,
+  expenseApi,
+  analyticsApi,
+].forEach((instance) => {
+  instance.interceptors.request.use(attachAuthToken, (error) => Promise.reject(error));
+});

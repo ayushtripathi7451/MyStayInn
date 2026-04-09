@@ -1,6 +1,6 @@
 // PaymentManagementScreen.tsx - Updated with proper daily rent tracking
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -49,10 +49,19 @@ interface BookingWithDetails {
     isOverdue?: boolean;
     overdueDays?: number;
   }[];
-  status?: "active" | "completed" | "cancelled";
+  status?: string;
 }
 
-type DueKind = "security_deposit" | "rent_online" | "rent_cash" | "daily_rent_online" | "daily_rent_cash";
+type DueKind =
+  | "security_deposit"
+  | "rent_online"
+  | "rent_cash"
+  | "daily_rent_online"
+  | "daily_rent_cash"
+  | "enrollment_security_deposit"
+  /** Monthly rent from enrollment `pendingAllocation` (pay_pending / requested with allocation) */
+  | "enrollment_rent_online"
+  | "enrollment_rent_cash";
 
 interface DueItem {
   id: string;
@@ -100,6 +109,8 @@ export default function PaymentManagementScreen({ route }: any) {
   const [activeTab, setActiveTab] = useState<"transactions" | "dues">(initialTab);
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
   const [bookings, setBookings] = useState<BookingWithDetails[]>([]);
+  const [enrollmentRequestsRaw, setEnrollmentRequestsRaw] = useState<any[]>([]);
+  const [enrollmentDueTotal, setEnrollmentDueTotal] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,10 +121,20 @@ export default function PaymentManagementScreen({ route }: any) {
       setError(null);
       const params: Record<string, string> = { includeCompleted: "true" };
       if (propertyId) params.propertyId = propertyId;
-      const res = await bookingApi.get("/api/bookings/list/active-with-details", {
-        params,
-        timeout: 15000,
-      });
+      const [res, enrollRes, enrollSumRes] = await Promise.all([
+        bookingApi.get("/api/bookings/list/active-with-details", {
+          params,
+          timeout: 15000,
+        }),
+        bookingApi.get("/api/enrollment-requests", {
+          params: propertyId ? { propertyId } : {},
+          timeout: 10000,
+        }).catch(() => null),
+        bookingApi.get("/api/enrollment-requests/unpaid-deposit-sum", {
+          params: propertyId ? { propertyId } : {},
+          timeout: 10000,
+        }).catch(() => null),
+      ]);
       if (res.data?.success && Array.isArray(res.data.bookings)) {
         const toBool = (v: any) => v === true || v === "true" || v === 1;
         setBookings(
@@ -132,15 +153,15 @@ export default function PaymentManagementScreen({ route }: any) {
             rentCashPaidYearMonth: b.rentCashPaidYearMonth || null,
             dailyPayments: Array.isArray(b.dailyPayments)
               ? b.dailyPayments.map((dp: any) => ({
-                  id: dp.id.toString(),
+                  id: dp.id != null ? String(dp.id) : "",
                   paymentDate: dp.paymentDate,
-                  amount: Number(dp.amount),
+                  amount: Number(dp.amount ?? 0),
                   paidOnline: toBool(dp.paidOnline),
                   paidCash: toBool(dp.paidCash),
-                  onlineAmount: Number(dp.onlineAmount || 0),
-                  cashAmount: Number(dp.cashAmount || 0),
+                  onlineAmount: Number(dp.onlineAmount ?? 0),
+                  cashAmount: Number(dp.cashAmount ?? 0),
                   isOverdue: toBool(dp.isOverdue),
-                  overdueDays: Number(dp.overdueDays || 0),
+                  overdueDays: Number(dp.overdueDays ?? 0),
                 }))
               : [],
             moveInDate:
@@ -161,14 +182,36 @@ export default function PaymentManagementScreen({ route }: any) {
       } else {
         setBookings([]);
       }
+      const enrollRequests: any[] =
+        enrollRes?.data?.success && Array.isArray(enrollRes.data.requests)
+          ? enrollRes.data.requests
+          : [];
+      setEnrollmentRequestsRaw(
+        enrollRequests.filter((r: any) => {
+          const st = String(r.status || "").trim().toLowerCase();
+          return st === "requested" || st === "pay_pending";
+        })
+      );
+      const totalFromApi =
+        enrollSumRes?.data?.success && enrollSumRes?.data?.totalAmount != null
+          ? Number(enrollSumRes.data.totalAmount || 0)
+          : 0;
+      setEnrollmentDueTotal(totalFromApi);
+      console.log("[PaymentManagement] Enrollment dues sync", {
+        propertyId,
+        enrollmentRequests: enrollRequests.length,
+        enrollmentDueTotal: totalFromApi,
+      });
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || "Failed to load payments");
       setBookings([]);
+      setEnrollmentRequestsRaw([]);
+      setEnrollmentDueTotal(0);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propertyId]);
+  }, [propertyId, currentProperty?.name]);
 
   useEffect(() => {
     fetchBookings();
@@ -217,10 +260,18 @@ export default function PaymentManagementScreen({ route }: any) {
     // Get daily payments for this booking
     const dailyPayments = b.dailyPayments || [];
 
+    // Align with customer DueAmount: scheduled split first, else full rentAmount for online
+    const defaultOnlinePerDay = () => {
+      const s = Number(b.scheduledOnlineRent || 0);
+      if (s > 0) return s;
+      return Number(b.rentAmount || 0);
+    };
+    const defaultCashPerDay = () => Number(b.scheduledCashRent || 0);
+
     // If no daily payments, create one for today (this should be handled by cron)
     if (dailyPayments.length === 0) {
-      const onlineAmount = b.scheduledOnlineRent || 0;
-      const cashAmount = b.scheduledCashRent || 0;
+      const onlineAmount = defaultOnlinePerDay();
+      const cashAmount = defaultCashPerDay();
 
       if (onlineAmount > 0) {
         items.push({
@@ -268,6 +319,14 @@ export default function PaymentManagementScreen({ route }: any) {
     for (const payment of dailyPayments) {
       const paymentDate = new Date(payment.paymentDate);
       paymentDate.setHours(0, 0, 0, 0);
+      const daysDiff = Math.floor(
+        (today.getTime() - paymentDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      // Hide clutter: very old rows that are fully paid (still show any unpaid day)
+      if (daysDiff > 7 && payment.paidOnline && payment.paidCash) {
+        continue;
+      }
+
       const paymentStr = paymentDate.toISOString().split("T")[0];
       const dateLabel = paymentDate.toLocaleDateString("en-GB", {
         day: "2-digit",
@@ -275,8 +334,21 @@ export default function PaymentManagementScreen({ route }: any) {
         year: "numeric",
       });
 
+      const rowOnline = Number(payment.onlineAmount || 0);
+      const rowCash = Number(payment.cashAmount || 0);
+      const effectiveOnline = rowOnline > 0 ? rowOnline : defaultOnlinePerDay();
+      const effectiveCash = rowCash > 0 ? rowCash : defaultCashPerDay();
+
+      const overdueDaysResolved =
+        payment.overdueDays && payment.overdueDays > 0
+          ? payment.overdueDays
+          : daysDiff > 0
+            ? daysDiff
+            : 0;
+      const isOverdueResolved = Boolean(payment.isOverdue) || daysDiff > 0;
+
       // Check online portion
-      if (!payment.paidOnline && payment.onlineAmount > 0) {
+      if (!payment.paidOnline && effectiveOnline > 0) {
         items.push({
           id: `${b.id}-daily-online-${payment.id}`,
           bookingId: b.id,
@@ -284,20 +356,20 @@ export default function PaymentManagementScreen({ route }: any) {
           name: customerName(b),
           roomNumber: roomNumber(b),
           propertyName: propertyName(b),
-          amount: payment.onlineAmount,
+          amount: effectiveOnline,
           dueType: "Daily Rent (Online)",
           dueKind: "daily_rent_online",
           date: b.moveInDate,
           monthLabel: dateLabel,
           isMovedOut: b.status === "completed",
           paymentDate: paymentStr,
-          isOverdue: payment.isOverdue || false,
-          overdueDays: payment.overdueDays || 0,
+          isOverdue: isOverdueResolved,
+          overdueDays: overdueDaysResolved,
         });
       }
 
       // Check cash portion
-      if (!payment.paidCash && payment.cashAmount > 0) {
+      if (!payment.paidCash && effectiveCash > 0) {
         items.push({
           id: `${b.id}-daily-cash-${payment.id}`,
           bookingId: b.id,
@@ -305,15 +377,15 @@ export default function PaymentManagementScreen({ route }: any) {
           name: customerName(b),
           roomNumber: roomNumber(b),
           propertyName: propertyName(b),
-          amount: payment.cashAmount,
+          amount: effectiveCash,
           dueType: "Daily Rent (Cash)",
           dueKind: "daily_rent_cash",
           date: b.moveInDate,
           monthLabel: dateLabel,
           isMovedOut: b.status === "completed",
           paymentDate: paymentStr,
-          isOverdue: payment.isOverdue || false,
-          overdueDays: payment.overdueDays || 0,
+          isOverdue: isOverdueResolved,
+          overdueDays: overdueDaysResolved,
         });
       }
     }
@@ -489,6 +561,285 @@ export default function PaymentManagementScreen({ route }: any) {
     return items;
   };
 
+  function parsePendingAllocation(r: any): Record<string, unknown> | null {
+    const pa = r?.pendingAllocation;
+    if (pa == null) return null;
+    if (typeof pa === "object" && !Array.isArray(pa)) return pa as Record<string, unknown>;
+    try {
+      return JSON.parse(String(pa)) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * When enrollment has pending allocation (room + rent), show monthly online/cash rent rows
+   * in Dues — same month rules as active bookings (aligned with booking-service virtual enrollment rows).
+   */
+  function buildEnrollmentMonthlyRentDueItems(
+    r: any,
+    displayPropertyName: string,
+    tenantName: string
+  ): DueItem[] {
+    const st = String(r.status || "").trim().toLowerCase();
+    if (st !== "requested" && st !== "pay_pending") return [];
+
+    const pa = parsePendingAllocation(r);
+    if (!pa) return [];
+
+    const rp = String(pa.rentPeriod || "month").toLowerCase();
+    if (rp === "day") return [];
+
+    const rentAmtNum = Number(pa.rentAmount ?? 0);
+    const onlineRecv = Number(pa.onlinePaymentRecv ?? 0);
+    const cashRecv = Number(pa.cashPaymentRecv ?? 0);
+
+    const schedOn =
+      pa.scheduledOnlineRent != null && String(pa.scheduledOnlineRent).trim() !== ""
+        ? Number(pa.scheduledOnlineRent)
+        : onlineRecv > 0
+          ? onlineRecv
+          : cashRecv > 0
+            ? 0
+            : rentAmtNum;
+
+    const schedCash =
+      pa.scheduledCashRent != null && String(pa.scheduledCashRent).trim() !== ""
+        ? Number(pa.scheduledCashRent)
+        : cashRecv;
+
+    const moveInRaw = (pa.moveInDate as unknown) ?? r.moveInDate;
+    if (!moveInRaw) return [];
+
+    const moveInDate =
+      typeof moveInRaw === "string"
+        ? moveInRaw
+        : new Date(moveInRaw as Date).toISOString?.() ?? String(moveInRaw);
+
+    const roomLabel =
+      pa.roomNumber != null
+        ? String(pa.roomNumber)
+        : Array.isArray(pa.bedNumbers) && (pa.bedNumbers as unknown[]).length
+          ? `Bed ${String((pa.bedNumbers as unknown[])[0])}`
+          : "Pending";
+
+    const enrId = String(r.id);
+    const bookingIdKey = `enrollment:${enrId}`;
+    const customerId = String(r.customerId || "");
+
+    const paidOnlineYm = String((r as any).rentOnlinePaidYearMonth || "").trim();
+    const paidCashYm = String((r as any).rentCashPaidYearMonth || "").trim();
+
+    const synthetic: BookingWithDetails = {
+      id: bookingIdKey,
+      uniqueId: enrId,
+      customerId,
+      customer: null,
+      room: { roomNumber: roomLabel, propertyName: displayPropertyName },
+      moveInDate,
+      moveOutDate: null,
+      securityDeposit: 0,
+      isSecurityPaid: true,
+      rentAmount: String(schedOn || schedCash || rentAmtNum || 0),
+      scheduledOnlineRent: schedOn,
+      scheduledCashRent: schedCash,
+      rentOnlinePaidYearMonth: paidOnlineYm || null,
+      rentCashPaidYearMonth: paidCashYm || null,
+      rentPeriod: "month",
+      status: "active",
+    };
+
+    const out: DueItem[] = [];
+
+    if (schedOn > 0) {
+      out.push(
+        ...generateUnpaidMonths(synthetic).map((it) => ({
+          ...it,
+          name: tenantName,
+          bookingId: bookingIdKey,
+          propertyName: displayPropertyName,
+          roomNumber: roomLabel,
+          dueType: "Rent (online) — enrollment",
+          dueKind: "enrollment_rent_online" as DueKind,
+        }))
+      );
+    }
+
+    if (schedCash > 0) {
+      out.push(
+        ...generateUnpaidCashMonths(synthetic).map((it) => ({
+          ...it,
+          name: tenantName,
+          bookingId: bookingIdKey,
+          propertyName: displayPropertyName,
+          roomNumber: roomLabel,
+          dueType: "Rent (cash) — enrollment",
+          dueKind: "enrollment_rent_cash" as DueKind,
+        }))
+      );
+    }
+
+    return out;
+  }
+
+  /**
+   * Day-rent enrollments (pay_pending / requested): no `Booking` row yet, so `active-with-details`
+   * cannot list them. Mirror customer DueAmount — virtual "today" daily online/cash from `pendingAllocation`.
+   */
+  function buildEnrollmentDailyRentDueItems(
+    r: any,
+    displayPropertyName: string,
+    tenantName: string
+  ): DueItem[] {
+    const st = String(r.status || "").trim().toLowerCase();
+    if (st !== "requested" && st !== "pay_pending") return [];
+
+    const pa = parsePendingAllocation(r);
+    if (!pa) return [];
+
+    const rp = String(pa.rentPeriod || "month").toLowerCase();
+    if (rp !== "day") return [];
+
+    const rentAmtNum = Number(pa.rentAmount ?? 0);
+    const onlineRecv = Number(pa.onlinePaymentRecv ?? 0);
+    const cashRecv = Number(pa.cashPaymentRecv ?? 0);
+
+    const schedOn =
+      pa.scheduledOnlineRent != null && String(pa.scheduledOnlineRent).trim() !== ""
+        ? Number(pa.scheduledOnlineRent)
+        : onlineRecv > 0
+          ? onlineRecv
+          : cashRecv > 0
+            ? 0
+            : rentAmtNum;
+
+    const schedCash =
+      pa.scheduledCashRent != null && String(pa.scheduledCashRent).trim() !== ""
+        ? Number(pa.scheduledCashRent)
+        : cashRecv;
+
+    const moveInRaw = (pa.moveInDate as unknown) ?? r.moveInDate;
+    const moveInDate =
+      typeof moveInRaw === "string"
+        ? moveInRaw
+        : moveInRaw
+          ? new Date(moveInRaw as Date).toISOString?.() ?? String(moveInRaw)
+          : new Date().toISOString();
+
+    const roomLabel =
+      pa.roomNumber != null
+        ? String(pa.roomNumber)
+        : Array.isArray(pa.bedNumbers) && (pa.bedNumbers as unknown[]).length
+          ? `Bed ${String((pa.bedNumbers as unknown[])[0])}`
+          : "Pending";
+
+    const enrId = String(r.id);
+    const bookingIdKey = `enrollment:${enrId}`;
+    const customerId = String(r.customerId || "");
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split("T")[0];
+    const dateLabel = today.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+
+    const items: DueItem[] = [];
+
+    if (schedOn > 0) {
+      items.push({
+        id: `${enrId}-enrollment-daily-online-${todayStr}`,
+        bookingId: bookingIdKey,
+        customerId,
+        name: tenantName,
+        roomNumber: roomLabel,
+        propertyName: displayPropertyName,
+        amount: schedOn,
+        dueType: "Daily Rent (Online) — enrollment",
+        dueKind: "daily_rent_online",
+        date: moveInDate,
+        monthLabel: dateLabel,
+        isMovedOut: false,
+        paymentDate: todayStr,
+        isOverdue: false,
+        overdueDays: 0,
+      });
+    }
+
+    if (schedCash > 0) {
+      items.push({
+        id: `${enrId}-enrollment-daily-cash-${todayStr}`,
+        bookingId: bookingIdKey,
+        customerId,
+        name: tenantName,
+        roomNumber: roomLabel,
+        propertyName: displayPropertyName,
+        amount: schedCash,
+        dueType: "Daily Rent (Cash) — enrollment",
+        dueKind: "daily_rent_cash",
+        date: moveInDate,
+        monthLabel: dateLabel,
+        isMovedOut: false,
+        paymentDate: todayStr,
+        isOverdue: false,
+        overdueDays: 0,
+      });
+    }
+
+    return items;
+  }
+
+  /**
+   * Align with booking-service customer virtual rows: security may live on `pendingAllocation`
+   * when pay_pending, while top-level `securityDeposit` is still 0.
+   */
+  const effectiveEnrollmentSecurity = (r: any): number => {
+    const top = Number(r?.securityDeposit ?? 0);
+    const pa = r?.pendingAllocation;
+    const fromPa =
+      pa && typeof pa === "object" && (pa as { securityDeposit?: unknown }).securityDeposit != null
+        ? Number((pa as { securityDeposit?: unknown }).securityDeposit)
+        : 0;
+    const n = (v: number) => (Number.isFinite(v) && v > 0 ? v : 0);
+    return Math.max(n(top), n(fromPa));
+  };
+
+  const enrollmentDues = useMemo(() => {
+    if (!enrollmentRequestsRaw.length) return [];
+    const propName = currentProperty?.name || "Property";
+    return enrollmentRequestsRaw
+      .flatMap((r: any) => {
+        const tenantName = r.name || "Customer";
+        const items: DueItem[] = [];
+        const sec = effectiveEnrollmentSecurity(r);
+        if (sec > 0) {
+          items.push({
+            id: String(r.id),
+            bookingId: `enrollment:${String(r.id)}`,
+            customerId: String(r.customerId || ""),
+            name: tenantName,
+            roomNumber: "Pending",
+            propertyName: propName,
+            amount: sec,
+            dueType: "Security deposit",
+            dueKind: "enrollment_security_deposit",
+            date: r.moveInDate || r.createdAt || new Date().toISOString(),
+            monthLabel: r.moveInDate
+              ? formatDate(r.moveInDate)
+              : formatDate(r.createdAt || new Date().toISOString()),
+            isMovedOut: false,
+          });
+        }
+        items.push(...buildEnrollmentMonthlyRentDueItems(r, propName, tenantName));
+        items.push(...buildEnrollmentDailyRentDueItems(r, propName, tenantName));
+        return items;
+      })
+      .filter((x: DueItem) => x.amount > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- helpers tied to same render as enrollment fetch
+  }, [enrollmentRequestsRaw, currentProperty?.name]);
+
   // Generate due items (unpaid) - only up to move-out date
   const dueCustomers: DueItem[] = [];
   bookings.forEach((b) => {
@@ -525,12 +876,32 @@ export default function PaymentManagementScreen({ route }: any) {
       dueCustomers.push(...unpaidCashMonths);
     }
   });
+  // Add security deposit dues from open enrollment requests (requested/pay_pending)
+  dueCustomers.push(...enrollmentDues);
+  // Fallback: if list is empty but backend reports unpaid enrollment deposits, show aggregate due row
+  if (enrollmentDues.length === 0 && enrollmentDueTotal > 0) {
+    dueCustomers.push({
+      id: `enrollment-security-total-${propertyId || "all"}`,
+      bookingId: `enrollment-total:${propertyId || "all"}`,
+      customerId: "",
+      name: "Open enrollments",
+      roomNumber: "Pending",
+      propertyName: currentProperty?.name || "Property",
+      amount: enrollmentDueTotal,
+      dueType: "Security deposit (enrollment)",
+      dueKind: "enrollment_security_deposit",
+      date: new Date().toISOString(),
+      monthLabel: "Open requests",
+      isMovedOut: false,
+    });
+  }
 
   // Generate transaction items (paid) - only up to move-out date
   const transactions: TransactionItem[] = [];
   bookings.forEach((b) => {
-    // Paid security deposit
-    if (b.isSecurityPaid && (b.securityDeposit ?? 0) > 0) {
+    // Paid security deposit (amount may live on pendingAllocation before allocation)
+    const paidSec = effectiveEnrollmentSecurity(b);
+    if (b.isSecurityPaid && paidSec > 0) {
       transactions.push({
         id: `${b.id}-security`,
         bookingId: b.id,
@@ -538,7 +909,7 @@ export default function PaymentManagementScreen({ route }: any) {
         name: customerName(b),
         roomNumber: roomNumber(b),
         propertyName: propertyName(b),
-        amount: b.securityDeposit ?? 0,
+        amount: paidSec,
         type: "Security deposit",
         date: b.moveInDate,
         monthLabel: formatDate(b.moveInDate),
@@ -786,23 +1157,27 @@ export default function PaymentManagementScreen({ route }: any) {
   const isDailyRentOnline = item.dueKind === "daily_rent_online";
   const isDailyRentCash = item.dueKind === "daily_rent_cash";
   const isRentCash = item.dueKind === "rent_cash";
+  const isEnrollmentRentCash = item.dueKind === "enrollment_rent_cash";
+  const isEnrollmentRentOnline = item.dueKind === "enrollment_rent_online";
+  const canOpenTenant = Boolean(item.customerId);
   const isMarking = markingPaidBookingId === item.bookingId;
 
   return (
     <TouchableOpacity
       key={item.id}
       className="bg-white p-4 rounded-2xl mb-3 border border-gray-100 opacity-100"
-      onPress={() =>
+      onPress={() => {
+        if (!canOpenTenant) return;
         navigation.navigate("TenantDetailScreen", {
           tenantId: item.customerId,
           initialTab: "payments",
-        })
-      }
+        });
+      }}
       activeOpacity={0.7}
     >
       <View className="flex-row items-start">
         {/* Only show checkbox for non-cash items (security deposit, monthly online, daily online) */}
-        {!isRentCash && !isDailyRentCash && (
+        {!isRentCash && !isDailyRentCash && !isEnrollmentRentCash && (
           <TouchableOpacity
             onPress={(e) => {
               e.stopPropagation();
@@ -818,7 +1193,7 @@ export default function PaymentManagementScreen({ route }: any) {
           </TouchableOpacity>
         )}
         {/* Cash items get empty space to maintain alignment */}
-        {(isRentCash || isDailyRentCash) && <View className="w-5 mr-3" />}
+        {(isRentCash || isDailyRentCash || isEnrollmentRentCash) && <View className="w-5 mr-3" />}
 
         <View className="flex-1">
           <View className="flex-row items-center gap-2 flex-wrap">
@@ -832,7 +1207,7 @@ export default function PaymentManagementScreen({ route }: any) {
               <View className="bg-red-100 px-2 py-0.5 rounded">
                 <Text className="text-red-600 text-xs font-medium">Overdue {item.overdueDays}d</Text>
               </View>
-            )}
+            )}            
           </View>
           <Text className="text-sm text-gray-500 mt-1">
             Room {item.roomNumber} • {item.propertyName}

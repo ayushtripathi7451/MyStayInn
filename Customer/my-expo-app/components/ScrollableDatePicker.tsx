@@ -178,7 +178,7 @@ export default function ScrollableDatePicker({
       {/* KEY FIX: height matches SCROLL_VIEW_HEIGHT (150px = 3 items × 50px) */}
       <View
         style={{ height: SCROLL_VIEW_HEIGHT }}
-        className="border border-gray-200 rounded-xl bg-gray-50 overflow-hidden"
+        className="border border-gray-200 rounded-xl bg-white overflow-hidden"
       >
         <ScrollView
           ref={scrollRef}

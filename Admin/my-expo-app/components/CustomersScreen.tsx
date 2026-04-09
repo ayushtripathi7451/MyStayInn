@@ -94,22 +94,29 @@ export default function CustomersScreen() {
         const res = await bookingApi.get("/api/enrollment-requests", { params });
         if (cancelled) return;
         if (res.data?.success && Array.isArray(res.data.requests)) {
-          const list = res.data.requests.map((r: any) => ({
-            mystayId: r.mystayId || r.uniqueId || r.id,
-            name: r.name || "Customer",
-            phone: r.phone || "—",
-            photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
-            kycStatus: "Requested",
-            roomPreference: r.roomPreference || "—",
-            moveInDate: r.moveInDate,
-            moveOutDate: r.moveOutDate,
-            securityDeposit: r.securityDeposit,
-            comments: r.comments || "",
-            status: r.status === "requested" ? "Requested" : r.status,
-            uniqueId: r.uniqueId,
-            enrollmentRequestId: r.id,
-            customerId: r.customerId,
-          }));
+          const list = res.data.requests.map((r: any) => {
+            const st = String(r.status || "");
+            const statusLabel =
+              st === "pay_pending" ? "Pay pending" : st === "requested" ? "Requested" : st;
+            return {
+              mystayId: r.mystayId || r.uniqueId || r.id,
+              name: r.name || "Customer",
+              phone: r.phone || "—",
+              photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
+              kycStatus: "Requested",
+              roomPreference: r.roomPreference || "—",
+              moveInDate: r.moveInDate,
+              moveOutDate: r.moveOutDate,
+              securityDeposit: r.securityDeposit,
+              comments: r.comments || "",
+              status: statusLabel,
+              statusRaw: st,
+              uniqueId: r.uniqueId,
+              enrollmentRequestId: r.id,
+              customerId: r.customerId,
+              pendingAllocation: r.pendingAllocation ?? null,
+            };
+          });
           setEnrollmentList(list);
           setEnrollmentResults(list);
         } else {
@@ -136,22 +143,29 @@ export default function CustomersScreen() {
       const params = propertyId ? { propertyId } : {};
       const res = await bookingApi.get("/api/enrollment-requests", { params });
       if (res.data?.success && Array.isArray(res.data.requests)) {
-        const list = res.data.requests.map((r: any) => ({
-          mystayId: r.mystayId || r.uniqueId || r.id,
-          name: r.name || "Customer",
-          phone: r.phone || "—",
-          photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
-          kycStatus: "Requested",
-          roomPreference: r.roomPreference || "—",
-          moveInDate: r.moveInDate,
-          moveOutDate: r.moveOutDate,
-          securityDeposit: r.securityDeposit,
-          comments: r.comments || "",
-          status: r.status === "requested" ? "Requested" : r.status,
-          uniqueId: r.uniqueId,
-          enrollmentRequestId: r.id,
-          customerId: r.customerId,
-        }));
+        const list = res.data.requests.map((r: any) => {
+          const st = String(r.status || "");
+          const statusLabel =
+            st === "pay_pending" ? "Pay pending" : st === "requested" ? "Requested" : st;
+          return {
+            mystayId: r.mystayId || r.uniqueId || r.id,
+            name: r.name || "Customer",
+            phone: r.phone || "—",
+            photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
+            kycStatus: "Requested",
+            roomPreference: r.roomPreference || "—",
+            moveInDate: r.moveInDate,
+            moveOutDate: r.moveOutDate,
+            securityDeposit: r.securityDeposit,
+            comments: r.comments || "",
+            status: statusLabel,
+            statusRaw: st,
+            uniqueId: r.uniqueId,
+            enrollmentRequestId: r.id,
+            customerId: r.customerId,
+            pendingAllocation: r.pendingAllocation ?? null,
+          };
+        });
         setEnrollmentList(list);
         setEnrollmentResults(list);
       } else {
@@ -282,23 +296,41 @@ export default function CustomersScreen() {
     }
   };
 
-  // Send WhatsApp invite
+  // Send WhatsApp invite (Twilio via booking-service → notification-service; fallback: wa.me)
   const sendWhatsAppInvite = async () => {
     const cleanPhone = searchQuery.replace(/\D/g, "").slice(-10);
     const phoneWithCode = "+91" + cleanPhone;
-    
-    const message = encodeURIComponent(
-      `Hi! I'd like to invite you to use the MyStay Customer App. Download it to manage your PG bookings and payments easily. 📱`
-    );
-    const url = `https://wa.me/${phoneWithCode}?text=${message}`;
-    
+
     try {
-      await Linking.openURL(url);
-      setSearchQuery("");
-      setSearchResults([]);
-      setHasSearched(false);
-    } catch (error) {
-      Alert.alert("Error", "Unable to open WhatsApp");
+      const res = await bookingApi.post("/api/bookings/admin/whatsapp-invite", {
+        phone: phoneWithCode,
+      });
+      if (res.data?.success) {
+        Alert.alert("Sent", "WhatsApp invitation was sent to this number.");
+        setSearchQuery("");
+        setSearchResults([]);
+        setHasSearched(false);
+        return;
+      }
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const msg = String(e?.response?.data?.message || e?.message || "");
+      if (status === 503 || /not configured/i.test(msg)) {
+        const message = encodeURIComponent(
+          `Hi! I'd like to invite you to use the MyStay Customer App. Download it to manage your PG bookings and payments easily.`
+        );
+        const url = `https://wa.me/${cleanPhone}?text=${message}`;
+        try {
+          await Linking.openURL(url);
+          setSearchQuery("");
+          setSearchResults([]);
+          setHasSearched(false);
+        } catch {
+          Alert.alert("Error", "Unable to open WhatsApp");
+        }
+        return;
+      }
+      Alert.alert("Error", msg || "Failed to send WhatsApp invite");
     }
   };
 
@@ -499,7 +531,42 @@ export default function CustomersScreen() {
                   enrollmentResults.map((e) => (
                     <TouchableOpacity
                       key={e.uniqueId || e.mystayId}
-                      onPress={() =>
+                      onPress={() => {
+                        if (e.statusRaw === "pay_pending") {
+                          const pa = e.pendingAllocation && typeof e.pendingAllocation === "object" ? e.pendingAllocation : null;
+                          const paBeds = Array.isArray((pa as any)?.bedNumbers)
+                            ? (pa as any).bedNumbers.map((x: any) => String(x)).join(",")
+                            : typeof (pa as any)?.bedNumbers === "string"
+                            ? String((pa as any).bedNumbers)
+                            : null;
+                          navigation.navigate("TenantDetailScreen", {
+                            tenantId: e.customerId,
+                            uniqueId: e.mystayId || undefined,
+                            customer: {
+                              id: e.customerId,
+                              uniqueId: e.mystayId,
+                              firstName: String(e.name || "").split(" ")[0] || "Customer",
+                              lastName: String(e.name || "").split(" ").slice(1).join(" "),
+                              phone: e.phone,
+                              status: "active",
+                            },
+                            booking: {
+                              id: `enrollment:${e.enrollmentRequestId}`,
+                              roomId: (pa as any)?.roomId ?? null,
+                              roomNumber: (pa as any)?.roomNumber || "Pending",
+                              floor: (pa as any)?.floor ?? null,
+                              propertyName: (pa as any)?.propertyName || "Property",
+                              moveInDate: e.moveInDate,
+                              moveOutDate: e.moveOutDate,
+                              rentAmount: (pa as any)?.rentAmount || 0,
+                              securityDeposit: e.securityDeposit,
+                              isSecurityPaid: false,
+                              status: "pay_pending",
+                              bedNumbers: paBeds,
+                            },
+                          });
+                          return;
+                        }
                         navigation.navigate("AdminCustomerDetailScreen", {
                           customer: {
                             id: e.mystayId || e.uniqueId,
@@ -513,10 +580,12 @@ export default function CustomersScreen() {
                             securityDeposit: e.securityDeposit,
                             enrollmentRequestId: e.enrollmentRequestId,
                             customerId: e.customerId,
+                            pendingAllocation: e.pendingAllocation,
+                            statusRaw: e.statusRaw,
                           },
                           fromEnrollment: true,
-                        })
-                      }
+                        });
+                      }}
                       className="bg-white p-4 rounded-2xl mb-3 shadow-sm"
                     >
                       <View className="flex-row items-center">
@@ -538,6 +607,8 @@ export default function CustomersScreen() {
                               ? "text-green-700"
                               : e.status === "Rejected"
                               ? "text-red-700"
+                              : e.status === "Pay pending"
+                              ? "text-amber-700"
                               : "text-orange-600"
                           }`}
                         >

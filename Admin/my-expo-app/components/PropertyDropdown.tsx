@@ -12,6 +12,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useProperty } from '../contexts/PropertyContext';
 import { useProperties } from '../src/hooks';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useDispatch } from 'react-redux';
+import { refreshDashboardStats } from '../src/store/actions';
 
 const { width } = Dimensions.get('window');
 
@@ -20,6 +22,7 @@ interface PropertyDropdownProps {
 }
 
 export default function PropertyDropdown({ navigation }: PropertyDropdownProps) {
+  const dispatch = useDispatch();
   const { properties, currentProperty, setCurrentProperty } = useProperty();
   const { list: apiList, loading, refresh } = useProperties();
   const [isDropdownVisible, setIsDropdownVisible] = useState(false);
@@ -44,6 +47,7 @@ export default function PropertyDropdown({ navigation }: PropertyDropdownProps) 
   const handlePropertySelect = async (property: any) => {
     setCurrentProperty(property);
     await AsyncStorage.setItem('currentProperty', JSON.stringify(property));
+    dispatch(refreshDashboardStats(property.id));
     setIsDropdownVisible(false);
   };
 

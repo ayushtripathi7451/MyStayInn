@@ -24,7 +24,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
         <Text className="text-gray-700 mt-5 mb-1">Property name</Text>
         <TextInput
           placeholder="e.g , MyOnboard Residency"
-          className="border border-gray-200 rounded-lg px-4 py-3 bg-gray-50"
+          className="border border-gray-200 rounded-lg px-4 py-3 bg-white"
         />
 
         {/* Property type */}
@@ -109,7 +109,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
         <Text className="text-gray-700 mt-5 mb-1">Postal address</Text>
         <TextInput
           placeholder="Street, City, State, ZIP"
-          className="border border-gray-200 rounded-lg px-4 py-3 bg-gray-50"
+          className="border border-gray-200 rounded-lg px-4 py-3 bg-white"
         />
         <Text className="text-gray-400 text-xs mt-1">
           Precise location coordinates can be captured later from the map.
@@ -117,8 +117,8 @@ export default function ProfileSetupScreen({ navigation }: any) {
 
         {/* Buttons */}
         <View className="flex-row justify-between mt-8 mb-8">
-          <TouchableOpacity className="px-6 py-3 rounded-lg bg-gray-100">
-            <Text className="text-gray-500">‹ Back</Text>
+          <TouchableOpacity className="px-6 py-3 rounded-lg bg-white border border-gray-300">
+            <Text className="text-gray-700">‹ Back</Text>
           </TouchableOpacity>
 
           <TouchableOpacity

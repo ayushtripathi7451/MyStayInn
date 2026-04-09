@@ -58,7 +58,7 @@ export default function TopSwitchCard({ mode, setMode, navigation, firstName = "
       className="font-semibold text-blue-600"
       onPress={() => navigation.navigate("Reactivate")}
     >
-      Forgot PIN?
+      Forgot MPIN?
     </Text>
     
   </Text>
@@ -66,7 +66,7 @@ export default function TopSwitchCard({ mode, setMode, navigation, firstName = "
         Not {firstName}?{" "}
         <Text
           className="font-semibold text-blue-600"
-          onPress={() => navigation.navigate("Welcome")}
+          onPress={() => navigation.navigate("ReloginMobileScreen")}
         >
           Login
         </Text>

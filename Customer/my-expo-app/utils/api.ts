@@ -1,175 +1,108 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Set in .env as EXPO_PUBLIC_API_HOST (e.g. 10.0.2.2 for Android emulator, your PC IP for physical device on same WiFi, localhost for same machine).
-const API_HOST =  "192.168.1.7";
+const API_HOST = "api.mystayinn.co.in";
 
-// Auth service (port 3001) - handles authentication, KYC
+/**
+ * Helper function to attach JWT token
+ */
+const attachToken = async (config: any) => {
+  try {
+    const token = await AsyncStorage.getItem("USER_TOKEN");
+
+    if (token && token !== "null" && token !== "undefined") {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (error) {
+    console.error("Error getting token:", error);
+  }
+
+  return config;
+};
+
+/**
+ * Auth Service
+ */
 export const api = axios.create({
-  baseURL: `http://${API_HOST}:3001`,
+  baseURL: `https://${API_HOST}/auth`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// User service (port 3002) - profile, push-token, announcements. Must be reachable from device for push registration.
+/**
+ * User Service
+ */
 export const userApi = axios.create({
-  baseURL: `http://${API_HOST}:3002`,
+  baseURL: `https://${API_HOST}/users`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Ticket service (port 3007) - support tickets
+/**
+ * Ticket Service
+ */
 export const ticketApi = axios.create({
-  baseURL: `http://${API_HOST}:3007`,
+  baseURL: `https://${API_HOST}/tickets`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Move-out service (port 3009) - move-out requests and status
+/**
+ * Move-out Service
+ */
 export const moveOutApi = axios.create({
-  baseURL: `http://${API_HOST}:3010`,
+  baseURL: `https://${API_HOST}/moveouts`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Property service (port 3004) - search admin's PGs/hostels by owner
+/**
+ * Property Service
+ */
 export const propertyApi = axios.create({
-  baseURL: `http://${API_HOST}:3004`,
+  baseURL: `https://${API_HOST}/properties`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Booking service (port 3008) - enrollment requests, bookings
+/**
+ * Booking Service
+ */
 export const bookingApi = axios.create({
-  baseURL: `http://${API_HOST}:3012`,
+  baseURL: `https://${API_HOST}/bookings`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Transaction service (configured via backend .env; here it's running on 3003) - payments, Cashfree payment links
+/**
+ * Transaction Service
+ */
 export const transactionApi = axios.create({
-  baseURL: `http://${API_HOST}:3003`,
+  baseURL: `https://${API_HOST}/transactions`,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Request interceptor to attach JWT token for auth service
-api.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for user service
-userApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      console.log("📤 [userApi Interceptor] Token from AsyncStorage:", !!token);
-      if (token) {
-        console.log("📤 [userApi Interceptor] Adding Bearer token to request");
-        config.headers.Authorization = `Bearer ${token}`;
-      } else {
-        console.log("⚠️ [userApi Interceptor] No token found in AsyncStorage");
-      }
-      console.log("📤 [userApi Interceptor] Request details:");
-      console.log("   - URL:", config.url);
-      console.log("   - Full URL:", `${config.baseURL}${config.url}`);
-      console.log("   - Authorization header:", config.headers.Authorization ? "✓ Present" : "✗ Missing");
-    } catch (error) {
-      console.error("Error getting token from AsyncStorage:", error);
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Request interceptor to attach JWT token for ticket service
-ticketApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Request interceptor to attach JWT token for move-out service
-moveOutApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Request interceptor to attach JWT token for property service
-propertyApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Request interceptor to attach JWT token for booking service
-bookingApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Request interceptor to attach JWT token for transaction service
-transactionApi.interceptors.request.use(
-  async (config) => {
-    try {
-      const token = await AsyncStorage.getItem("USER_TOKEN");
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch (error) {
-      console.error("Error getting token:", error);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+/**
+ * Attach interceptor to all APIs
+ */
+[
+  api,
+  userApi,
+  ticketApi,
+  moveOutApi,
+  propertyApi,
+  bookingApi,
+  transactionApi,
+].forEach((instance) => {
+  instance.interceptors.request.use(attachToken, (error) =>
+    Promise.reject(error)
+  );
+});

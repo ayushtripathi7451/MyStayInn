@@ -2,7 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { userApi } from "./api";
 
 export const INBOX_PREVIEW_MAX_CHARS = 100;
-const PUSH_INBOX_KEY = "customer_push_inbox_v1";
+/** Exported so session reset can clear inbox when switching accounts */
+export const CUSTOMER_PUSH_INBOX_KEY = "customer_push_inbox_v1";
+const PUSH_INBOX_KEY = CUSTOMER_PUSH_INBOX_KEY;
 const MAX_PUSH_ITEMS = 40;
 
 export function truncateInboxPreview(text: string, max = INBOX_PREVIEW_MAX_CHARS): string {

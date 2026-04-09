@@ -515,10 +515,7 @@ if (normalizedQuery.startsWith("myp")) {
         </View>
       </View>
 
-      <Text className="text-gray-400 text-[12px] mt-3">
-        Admin ID: {item.admin.id}
-        {item.admin.phone ? `  |  Phone: ${item.admin.phone}` : ""}
-      </Text>
+      
       
       {/* Display Property ID if available */}
       {item.property.id && (
@@ -584,7 +581,7 @@ if (normalizedQuery.startsWith("myp")) {
             <TextInput
               placeholder={
                 tab === "id"
-                  ? "Phone, Admin ID (MYS...) or Property ID (myp...)"
+                  ? "Phone or Property ID (myp...)"
                   : "Search by area, sector, city"
               }
               value={query}

@@ -171,6 +171,36 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
     }
   };
 
+  // Pre-fill from enrollment pay_pending snapshot (admin confirmed allocation without marking deposit paid).
+  useEffect(() => {
+    const pa = customer?.pendingAllocation;
+    if (!pa || typeof pa !== "object" || availableRooms.length === 0) return;
+    const roomId = pa.roomId != null ? String(pa.roomId) : "";
+    const match = availableRooms.find((r) => r.id === roomId);
+    if (!match) return;
+    const mi = pa.moveInDate ? new Date(String(pa.moveInDate)) : null;
+    const mo = pa.moveOutDate ? new Date(String(pa.moveOutDate)) : null;
+    let beds: string[] = [];
+    if (Array.isArray(pa.bedNumbers)) beds = pa.bedNumbers.map((x: unknown) => String(x));
+    else if (typeof pa.bedNumbers === "string" && pa.bedNumbers)
+      beds = pa.bedNumbers.split(",").map((s) => s.trim()).filter(Boolean);
+    setAllocationData((prev) => ({
+      ...prev,
+      selectedRoom: match,
+      moveIn: mi && !Number.isNaN(mi.getTime()) ? mi : prev.moveIn,
+      moveOut: mo && !Number.isNaN(mo.getTime()) ? mo : prev.moveOut,
+      securityDeposit:
+        pa.securityDeposit != null ? String(pa.securityDeposit) : prev.securityDeposit,
+      onlinePayment:
+        pa.onlinePaymentRecv != null ? String(pa.onlinePaymentRecv) : prev.onlinePayment,
+      cashPayment:
+        pa.cashPaymentRecv != null ? String(pa.cashPaymentRecv) : prev.cashPayment,
+    }));
+    if (beds.length) setSelectedBeds(beds);
+    if (pa.rentPeriod === "day" || pa.rentPeriod === "month") setRentPeriod(pa.rentPeriod);
+    setIsSecurityPaid(true);
+  }, [customer?.pendingAllocation, availableRooms]);
+
   // Convert backend room type to display label
   const getRoomTypeLabel = (roomType: string): string => {
     const typeMap: { [key: string]: string } = {

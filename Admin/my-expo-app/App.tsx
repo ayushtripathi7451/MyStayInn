@@ -1,5 +1,5 @@
 import "./global.css";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   View,
   ScrollView,
@@ -55,6 +55,7 @@ import PropertySuccess from "./components/PropertySucceess";
 
 /* DASHBOARD / ADMIN */
 import PaymentDueScreen from "./components/PaymentDueScreen";
+import DepositCheckoutScreen from "./components/DepositCheckoutScreen";
 import PaymentManagementScreen from "./components/PaymentManagementScreen";
 import ExpenseScreen from "./components/ExpenseScreen";
 import ExpenseAddForm from "./components/ExpenseAddForm";
@@ -134,7 +135,17 @@ function HomeScreen({ navigation }: any) {
   const { currentProperty, setCurrentProperty } = useProperty();
   const { list: propertiesList, firstProperty: firstFromApi, loading: propertiesLoading } = useProperties();
   const { emptyBeds, occupancyRate, enrollmentCount, refresh: refreshDashboard } = useDashboardStats(currentProperty?.id);
-  const propertyUniqueId = propertiesList?.find((p: any) => p.uniqueId === currentProperty?.id || String(p.id) === currentProperty?.id || p.name === currentProperty?.name)?.uniqueId ?? propertiesList?.[0]?.uniqueId ?? currentProperty?.id;
+  const matchedListProperty = useMemo(
+    () =>
+      propertiesList?.find(
+        (p: any) =>
+          p.uniqueId === currentProperty?.id ||
+          String(p.id) === currentProperty?.id ||
+          (currentProperty?.name && p.name === currentProperty?.name)
+      ),
+    [propertiesList, currentProperty?.id, currentProperty?.name]
+  );
+  const propertyUniqueId = matchedListProperty?.uniqueId ?? currentProperty?.id;
   const { moveOutCount, openTicketCount, refresh: refreshPropertyStats } = usePropertyHomeStats(currentProperty?.id, currentProperty?.name, propertyUniqueId);
   const { collected, pendingDues, expense, profit, online, cash, moveOutPL, loading: financialLoading, refresh: refreshFinancial } = useHomeFinancialStats(currentProperty?.id);
   const currentMonth = new Date().toLocaleString("default", { month: "long" });
@@ -192,26 +203,71 @@ function HomeScreen({ navigation }: any) {
     }, [])
   );
 
-  // Sync first property from Redux to context + AsyncStorage when list loads
+  const propertiesListSignature = useMemo(
+    () =>
+      propertiesList
+        ?.map(
+          (p: any) =>
+            `${p.uniqueId ?? p.id}:${p.monthlyRevenue ?? ""}:${p.pendingDues ?? ""}:${p.totalRooms ?? ""}`
+        )
+        .join("|") ?? "",
+    [propertiesList]
+  );
+
+  const lastMergedPropertySigRef = useRef<string>("");
+
+  // Merge live stats from Redux property list into the *selected* property (not always list[0]).
   useEffect(() => {
-    if (!firstFromApi || !propertiesList?.length) return;
+    if (!propertiesList?.length) return;
+
+    const match = currentProperty
+      ? propertiesList.find(
+          (p: any) =>
+            p.uniqueId === currentProperty.id ||
+            String(p.id) === currentProperty.id ||
+            (currentProperty.name && p.name === currentProperty.name)
+        )
+      : null;
+
+    if (currentProperty && !match) {
+      return;
+    }
+
+    const source = match ?? (!currentProperty ? firstFromApi : null);
+    if (!source) return;
+
+    const newId = source.uniqueId || (source.id != null ? String(source.id) : currentProperty?.id ?? "");
     const updatedProperty = {
-      ...currentProperty,
-      id: firstFromApi.uniqueId || (firstFromApi.id ? String(firstFromApi.id) : currentProperty.id),
-      name: firstFromApi.name || currentProperty.name,
-      address: `${firstFromApi.city || ""}, ${firstFromApi.state || ""}`,
-      totalRooms: firstFromApi.totalRooms ?? currentProperty.totalRooms,
-      occupiedRooms: firstFromApi.occupiedRooms ?? currentProperty.occupiedRooms,
-      monthlyRevenue: firstFromApi.monthlyRevenue ?? currentProperty.monthlyRevenue,
-      monthlyExpenses: firstFromApi.monthlyExpenses ?? currentProperty.monthlyExpenses,
-      pendingDues: firstFromApi.pendingDues ?? currentProperty.pendingDues,
-      bookingRequests: firstFromApi.bookingRequests ?? currentProperty.bookingRequests,
-      moveOutRequests: firstFromApi.moveOutRequests ?? currentProperty.moveOutRequests,
-      openTickets: firstFromApi.openTickets ?? currentProperty.openTickets,
+      ...(currentProperty || {}),
+      id: newId,
+      uniqueId: source.uniqueId ?? (currentProperty as { uniqueId?: string })?.uniqueId,
+      name: source.name || currentProperty?.name || "",
+      address:
+        [source.address, source.city, source.state].filter(Boolean).join(", ") ||
+        `${source.city || ""}, ${source.state || ""}`.trim() ||
+        currentProperty?.address ||
+        "",
+      totalRooms: source.totalRooms ?? currentProperty?.totalRooms,
+      occupiedRooms: source.occupiedRooms ?? currentProperty?.occupiedRooms,
+      monthlyRevenue: source.monthlyRevenue ?? currentProperty?.monthlyRevenue,
+      monthlyExpenses: source.monthlyExpenses ?? currentProperty?.monthlyExpenses,
+      pendingDues: source.pendingDues ?? currentProperty?.pendingDues,
+      bookingRequests: source.bookingRequests ?? currentProperty?.bookingRequests,
+      moveOutRequests: source.moveOutRequests ?? currentProperty?.moveOutRequests,
+      openTickets: source.openTickets ?? currentProperty?.openTickets,
     };
+    const sig = `${updatedProperty.id}|${updatedProperty.monthlyRevenue ?? ""}|${updatedProperty.pendingDues ?? ""}|${propertiesListSignature}`;
+    if (lastMergedPropertySigRef.current === sig) return;
+    lastMergedPropertySigRef.current = sig;
     setCurrentProperty(updatedProperty);
     AsyncStorage.setItem("currentProperty", JSON.stringify(updatedProperty));
-  }, [firstFromApi?.uniqueId ?? firstFromApi?.id, propertiesList?.length]);
+  }, [
+    currentProperty?.id,
+    currentProperty?.name,
+    firstFromApi?.uniqueId,
+    firstFromApi?.id,
+    propertiesListSignature,
+  ]);
 
   const statCollected = !financialLoading && currentProperty?.id ? collected : (currentProperty?.monthlyRevenue ?? 0);
   const statDues = !financialLoading && currentProperty?.id ? pendingDues : (currentProperty?.pendingDues ?? 0);
@@ -378,7 +434,10 @@ function HomeScreen({ navigation }: any) {
                 {!setupStatus.rulesFilled && (
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={() => navigation.navigate("RulesScreen", { propertyId: currentProperty.id })}
+                    onPress={() =>
+                      currentProperty?.id &&
+                      navigation.navigate("RulesScreen", { propertyId: currentProperty.id })
+                    }
                     className="flex-row p-4 items-center border-b border-slate-50"
                   >
                     <Ionicons name="document-text-outline" size={20} color="#64748b" />
@@ -392,7 +451,10 @@ function HomeScreen({ navigation }: any) {
                 {!setupStatus.foodFilled && (
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={() => navigation.navigate("FoodScreen", { propertyId: currentProperty.id })}
+                    onPress={() =>
+                      currentProperty?.id &&
+                      navigation.navigate("FoodScreen", { propertyId: currentProperty.id })
+                    }
                     className="flex-row p-4 items-center"
                   >
                     <MaterialCommunityIcons name="food-apple-outline" size={20} color="#64748b" />
@@ -422,7 +484,9 @@ function HomeScreen({ navigation }: any) {
                 Booking Requests
               </Text>
             </View>
-            <Text className="text-lg font-black text-amber-700">{enrollmentCount ?? currentProperty.bookingRequests ?? 0}</Text>
+            <Text className="text-lg font-black text-amber-700">
+              {enrollmentCount ?? currentProperty?.bookingRequests ?? 0}
+            </Text>
           </TouchableOpacity>
 
            <TouchableOpacity
@@ -598,6 +662,7 @@ export default function App() {
             <Stack.Screen name="PropertySuccess" component={PropertySuccess} />
 
             <Stack.Screen name="PaymentDueScreen" component={PaymentDueScreen} />
+            <Stack.Screen name="DepositCheckoutScreen" component={DepositCheckoutScreen} options={{ headerShown: false }} />
             <Stack.Screen name="PaymentManagementScreen" component={PaymentManagementScreen} />
             <Stack.Screen name="ExpenseScreen" component={ExpenseScreen} />
             <Stack.Screen name="ExpenseAddForm" component={ExpenseAddForm} />

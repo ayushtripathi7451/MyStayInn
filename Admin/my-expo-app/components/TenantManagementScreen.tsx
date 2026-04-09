@@ -15,6 +15,7 @@ import { bookingApi, moveOutApi } from "../utils/api";
 import { useProperty } from "../contexts/PropertyContext";
 import { useProperties } from "../src/hooks";
 import { getInactiveTenants, InactiveTenantSnapshot } from "../utils/inactiveTenantsStore";
+import { adminDisplayDueAmount } from "./DueAmount";
 
 interface BookingWithDetails {
   id: string;
@@ -28,6 +29,22 @@ interface BookingWithDetails {
   isSecurityPaid: boolean;
   rentAmount: string;
   status: string;
+  /** From booking-service: security + unpaid rent (customerTotalDue / effective-dues) */
+  currentDue?: number | string;
+  rentPeriod?: string;
+  scheduledOnlineRent?: number;
+  scheduledCashRent?: number;
+  rentOnlinePaidYearMonth?: string | null;
+  rentCashPaidYearMonth?: string | null;
+}
+
+function isEnrollmentBookingStatus(status: string | undefined): boolean {
+  const s = String(status || "").toLowerCase();
+  return (
+    s === "enrollment_pending" ||
+    s === "enrollment_pay_pending" ||
+    s === "enrollment_requested"
+  );
 }
 
 /** Same property matching as other screens: by id, uniqueId, or name so only tenants of the selected property are shown. */
@@ -62,6 +79,15 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
   const propertyMatchValues = useMemo(
     () => [currentProperty?.name, propertyUniqueId, propertyId].filter(Boolean) as string[],
     [currentProperty?.name, propertyUniqueId, propertyId]
+  );
+
+  const selectedPropertyForDue = useMemo(
+    () => ({
+      propertyId: propertyId != null ? String(propertyId) : undefined,
+      propertyUniqueId: propertyUniqueId != null ? String(propertyUniqueId) : undefined,
+      propertyName: currentProperty?.name,
+    }),
+    [propertyId, propertyUniqueId, currentProperty?.name]
   );
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -159,7 +185,8 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
     if (f == null) return "—";
     return typeof f === "number" ? `Floor ${f}` : String(f);
   };
-  const dueAmount = (b: BookingWithDetails) => (!b.isSecurityPaid && b.securityDeposit > 0 ? b.securityDeposit : 0);
+  const dueAmount = (b: BookingWithDetails) =>
+    adminDisplayDueAmount(b as Record<string, any>, selectedPropertyForDue);
   const hasMoveOutRequested = (b: BookingWithDetails) => moveOutCustomerIds.has(String(b.customerId));
   const openInactiveDetail = (tenant: InactiveTenantSnapshot) => {
     navigation.navigate("TenantDetailScreen", {
@@ -231,6 +258,14 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
         rentAmount: b.rentAmount,
         securityDeposit: b.securityDeposit,
         isSecurityPaid: b.isSecurityPaid,
+        status: b.status,
+        currentDue: b.currentDue,
+        rentPeriod: b.rentPeriod,
+        scheduledOnlineRent: b.scheduledOnlineRent,
+        scheduledCashRent: b.scheduledCashRent,
+        rentOnlinePaidYearMonth: b.rentOnlinePaidYearMonth,
+        rentCashPaidYearMonth: b.rentCashPaidYearMonth,
+        room: b.room,
       },
     });
   };
@@ -433,6 +468,11 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
                       <Text className="text-lg font-black text-slate-900">{nameFor(b)}</Text>
                       <Text className="text-slate-500 text-sm">Room {roomNumber(b)} • {b.room?.propertyName ?? "—"}</Text>
                       <Text className="text-xs text-blue-600 font-bold mt-1">{b.customer?.uniqueId ?? b.customerId}</Text>
+                      {isEnrollmentBookingStatus(b.status) && (
+                        <View className="self-start mt-1.5 bg-amber-100 px-2 py-0.5 rounded-full">
+                          <Text className="text-amber-900 text-[10px] font-bold uppercase">Enrollment</Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                   <View className="items-end">

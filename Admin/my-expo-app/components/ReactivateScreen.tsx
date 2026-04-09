@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api } from "../utils/api";
+import { api, propertyApi, getAuthBearerToken } from "../utils/api";
 
 export default function ChangeMPINScreen({ navigation }: any) {
   const [mobile, setMobile] = useState("");
@@ -121,8 +121,30 @@ export default function ChangeMPINScreen({ navigation }: any) {
         newPin,
       });
       if (response.data?.success) {
-        Alert.alert("Success", "MPIN changed successfully");
-        navigation.replace("LoginPin");
+        const token = await getAuthBearerToken();
+        if (!token) {
+          Alert.alert("Success", "MPIN changed successfully. Please log in with your new MPIN.");
+          navigation.replace("LoginPin");
+          return;
+        }
+        try {
+          const propertiesResponse = await propertyApi.get("/api/properties");
+          if (
+            propertiesResponse.data.success &&
+            propertiesResponse.data.properties?.length > 0
+          ) {
+            const firstProperty = propertiesResponse.data.properties[0];
+            await AsyncStorage.setItem(
+              "currentProperty",
+              JSON.stringify(firstProperty)
+            );
+            navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+          } else {
+            navigation.reset({ index: 0, routes: [{ name: "ProfileSetup" }] });
+          }
+        } catch {
+          navigation.reset({ index: 0, routes: [{ name: "ProfileSetup" }] });
+        }
       } else {
         Alert.alert("Error", response.data?.message || "Failed to change MPIN");
       }

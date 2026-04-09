@@ -1,18 +1,26 @@
-import { call, put, select } from 'redux-saga/effects';
+import { call, put } from 'redux-saga/effects';
 import { bookingApi } from '../../../utils/api';
-import { setDashboardStats, setDashboardLoading, setDashboardError } from '../redux/slices/dashboardSlice';
-import type { RootState } from '../redux';
+import {
+  setDashboardStats,
+  setDashboardLoading,
+  setDashboardError,
+} from '../redux/slices/dashboardSlice';
 
 /**
  * SWR: Show cached dashboard stats first; background refresh updates if changed.
  * Action payload.propertyId: optional – when set, stats are scoped to that property (uniqueId or id).
  */
-export function* refreshDashboardStats(action: { type: string; payload?: { propertyId?: string } }): Generator<unknown, void, RootState> {
+export function* refreshDashboardStats(action: { type: string; payload?: { propertyId?: string } }): Generator {
   const propertyId = action?.payload?.propertyId;
-  const existing = (yield select((s: RootState) => s.dashboard.emptyBeds)) as number | null;
-  if (existing === null) {
-    yield put(setDashboardLoading(true));
-  }
+  // Clear stale numbers immediately when switching property or refetching (avoids showing previous property's stats).
+  yield put(setDashboardLoading(true));
+  yield put(
+    setDashboardStats({
+      emptyBeds: null,
+      occupancyRate: null,
+      enrollmentCount: null,
+    })
+  );
   try {
     const params = propertyId ? { params: { propertyId } } : {};
     const [statsRes, countRes] = yield call(() =>

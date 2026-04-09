@@ -6,17 +6,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useProperty } from "../contexts/PropertyContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearTokens } from "../utils/tokenDebug";
+import { useDispatch } from "react-redux";
+import { refreshDashboardStats } from "../src/store/actions";
 
 const { width } = Dimensions.get("window");
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavigationProp<any>>();
+  const dispatch = useDispatch();
   const { properties, currentProperty, setCurrentProperty, loading: propertiesLoading, refresh } = useProperty();
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [pushNotifications, setPushNotifications] = useState(true);
 
   const handlePropertySelect = (property: any) => {
     setCurrentProperty(property);
+    dispatch(refreshDashboardStats(property.id));
     setShowPropertyModal(false);
   };
 

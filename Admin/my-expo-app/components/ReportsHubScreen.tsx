@@ -25,6 +25,7 @@ import { useProperties } from "../src/hooks";
 import { analyticsApi, bookingApi, expenseApi, moveOutApi, propertyApi, userApi } from "../utils/api";
 import { resolveFinalKycVerified } from "../utils/kyc";
 import { aggregateMoveOutPL, isBookingMovedOut } from "../utils/financialCalculations";
+import { getLocalTodayMonthKey, sumEnrollmentRentDueForMonthKey } from "../utils/enrollmentDues";
 
 /* -------------------- CONSTANTS -------------------- */
 // const { EncodingType } = FileSystem;
@@ -140,6 +141,41 @@ function toMonthKeyFromDate(d: any): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Align with Payments screen: security may live on `pendingAllocation` while top-level is 0. */
+function effectiveBookingSecurityDeposit(b: any): number {
+  const top = Number(b?.securityDeposit ?? 0);
+  const pa = b?.pendingAllocation;
+  const fromPa =
+    pa && typeof pa === "object" && (pa as { securityDeposit?: unknown }).securityDeposit != null
+      ? Number((pa as { securityDeposit: unknown }).securityDeposit)
+      : 0;
+  const n = (v: number) => (Number.isFinite(v) && v > 0 ? v : 0);
+  return Math.max(n(top), n(fromPa));
+}
+
+/** Rent + collected security deposits (total cash inflow; P/L still uses rent-only collections). */
+function totalInflowCollections(data: { collections?: number; securityDeposits?: number } | undefined): number {
+  return (data?.collections ?? 0) + (data?.securityDeposits ?? 0);
+}
+
+/** Match DueAmount / PaymentManagement: scheduled split, else rentAmount for online per day */
+function defaultDailyOnlinePerBooking(b: any): number {
+  const s = Number(b?.scheduledOnlineRent ?? 0);
+  if (s > 0) return s;
+  return Number(b?.rentAmount ?? 0);
+}
+function defaultDailyCashPerBooking(b: any): number {
+  return Number(b?.scheduledCashRent ?? 0);
+}
+function effectiveDailyOnlineAmount(dp: any, b: any): number {
+  const row = Number(dp?.onlineAmount ?? 0);
+  return row > 0 ? row : defaultDailyOnlinePerBooking(b);
+}
+function effectiveDailyCashAmount(dp: any, b: any): number {
+  const row = Number(dp?.cashAmount ?? 0);
+  return row > 0 ? row : defaultDailyCashPerBooking(b);
+}
+
 function getFYStartYearFromRef(ref: Date): number {
   return ref.getMonth() >= 3 ? ref.getFullYear() : ref.getFullYear() - 1;
 }
@@ -220,7 +256,7 @@ function collectionsForMonthKeyFromBookings(bookings: any[], monthKey: string): 
     // Security deposit - counted in move-in month
     const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
     if (moveInMonthKey === monthKey) {
-      const sec = Number(b.securityDeposit) || 0;
+      const sec = effectiveBookingSecurityDeposit(b);
       if (toBool(b.isSecurityPaid) && sec > 0) {
         total += sec;
         securityTotal += sec;
@@ -230,29 +266,27 @@ function collectionsForMonthKeyFromBookings(bookings: any[], monthKey: string): 
     // Daily rent - iterate through dailyPayments array for paid amounts
     if (rp === 'day') {
       const dailyPayments = Array.isArray(b.dailyPayments) ? b.dailyPayments : [];
-      
+
       dailyPayments.forEach((dp: any) => {
         const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
         if (dpMonthKey === monthKey) {
-          const onlineAmount = Number(dp.onlineAmount ?? 0);
-          const cashAmount = Number(dp.cashAmount ?? 0);
           const paidOnline = toBool(dp.paidOnline);
           const paidCash = toBool(dp.paidCash);
-          
-          // Add paid online amount
-          if (paidOnline && onlineAmount > 0) {
-            total += onlineAmount;
-            onlineTotal += onlineAmount;
+          const effOn = effectiveDailyOnlineAmount(dp, b);
+          const effCash = effectiveDailyCashAmount(dp, b);
+
+          if (paidOnline && effOn > 0) {
+            total += effOn;
+            onlineTotal += effOn;
           }
-          
-          // Add paid cash amount
-          if (paidCash && cashAmount > 0) {
-            total += cashAmount;
-            cashTotal += cashAmount;
+
+          if (paidCash && effCash > 0) {
+            total += effCash;
+            cashTotal += effCash;
           }
         }
       });
-      
+
       return; // Skip monthly logic for day-based bookings
     }
     
@@ -455,7 +489,14 @@ function buildExpenseSlices(
 type ReportMetaState = {
   financialData: Record<
     string,
-    { collections: number; expense: number; pendingDues: number; profitLoss: number }
+    {
+      collections: number;
+      securityDeposits: number;
+      expense: number;
+      pendingDues: number;
+      profitLoss: number;
+      moveOutPL?: number;
+    }
   >;
   occupancyData: Record<string, { emptyBeds: number; occupied: number; moveOuts: number }>;
   transactionsByMonth: Record<string, { online: number; cash: number; total: number }>;
@@ -479,7 +520,7 @@ const isMovedOutBooking = (b: any): boolean => {
 };
 
 const getTotalDueFromBooking = (b: any): number => {
-  const security = Number(b.securityDeposit) || 0;
+  const security = effectiveBookingSecurityDeposit(b);
   const isSecurityPaid = toBool(b.isSecurityPaid);
   
   // Helper to get year-month string
@@ -519,27 +560,36 @@ const getTotalDueFromBooking = (b: any): number => {
   
   // Day-based rent - inspect dailyPayments array for actual unpaid status
   if (rp === 'day') {
-    // Check dailyPayments array for unpaid amounts
     const dailyPayments = Array.isArray(b.dailyPayments) ? b.dailyPayments : [];
-    
-    // Sum up all unpaid daily amounts
+
+    if (dailyPayments.length === 0) {
+      if (!toBool(b.isRentOnlinePaid)) {
+        const s = num(b.scheduledOnlineRent);
+        const onlineAmt = s > 0 ? s : num(b.rentAmount);
+        if (onlineAmt > 0) due += onlineAmt;
+      }
+      if (!toBool(b.isRentCashPaid)) {
+        const cashAmt = num(b.scheduledCashRent);
+        if (cashAmt > 0) due += cashAmt;
+      }
+      return due;
+    }
+
     dailyPayments.forEach((dp: any) => {
-      const onlineAmount = num(dp.onlineAmount);
-      const cashAmount = num(dp.cashAmount);
       const paidOnline = toBool(dp.paidOnline);
       const paidCash = toBool(dp.paidCash);
-      
-      // Add unpaid online amount
-      if (!paidOnline && onlineAmount > 0) {
-        due += onlineAmount;
+      const effOn = effectiveDailyOnlineAmount(dp, b);
+      const effCash = effectiveDailyCashAmount(dp, b);
+
+      if (!paidOnline && effOn > 0) {
+        due += effOn;
       }
-      
-      // Add unpaid cash amount
-      if (!paidCash && cashAmount > 0) {
-        due += cashAmount;
+
+      if (!paidCash && effCash > 0) {
+        due += effCash;
       }
     });
-    
+
     return due;
   }
   
@@ -936,7 +986,7 @@ useEffect(() => {
       const params: Record<string, string> = { includeCompleted: "true" };
       if (propertyId) params.propertyId = propertyId;
       /* Fast path: no per-tenant user-service calls; analytics P/L loads after first paint */
-      const [bookingsRes, expensesRes, monthlyRes, statsRes, moveOutRes] = await Promise.all([
+      const [bookingsRes, expensesRes, monthlyRes, statsRes, moveOutRes, enrollListRes] = await Promise.all([
         bookingApi.get("/api/bookings/list/active-for-reports", { params, timeout: 20000 }),
         expenseApi.get(`/${propertyId}`, { timeout: 8000 }).catch(() => ({ data: {} })),
         expenseApi.get(`/monthly/${propertyId}`, { timeout: 8000 }).catch(() => ({ data: {} })),
@@ -946,6 +996,9 @@ useEffect(() => {
         moveOutApi
           .get("/api/move-out/requests", { params: { status: "moved_out", propertyId }, timeout: 10000 })
           .catch(() => ({ data: { success: false, data: { requests: [] } } })),
+        bookingApi
+          .get("/api/enrollment-requests", { params: { propertyId }, timeout: 8000 })
+          .catch(() => null),
       ]);
 
       const rawBookings = (bookingsRes.data?.success && Array.isArray(bookingsRes.data?.bookings)) ? bookingsRes.data.bookings : [];
@@ -972,6 +1025,7 @@ useEffect(() => {
             }))
           : [],
         moveInDate: b.moveInDate != null ? (typeof b.moveInDate === "string" ? b.moveInDate : new Date(b.moveInDate).toISOString?.() ?? String(b.moveInDate)) : "",
+        updatedAt: b.updatedAt != null ? (typeof b.updatedAt === "string" ? b.updatedAt : new Date(b.updatedAt).toISOString?.() ?? String(b.updatedAt)) : "",
       }));
 
       /* Financial + expenses + occupancy first so charts (pie, bars) populate immediately */
@@ -1051,13 +1105,15 @@ useEffect(() => {
               .filter((dp: any) => {
                 const dpDate = new Date(dp.paymentDate);
                 const dpMonthKey = toMonthKeyFromDate(dpDate);
-                return dpMonthKey === monthKey && !toBool(dp.paidOnline) && Number(dp.onlineAmount ?? 0) > 0;
+                const eff = effectiveDailyOnlineAmount(dp, booking);
+                return dpMonthKey === monthKey && !toBool(dp.paidOnline) && eff > 0;
               })
-              .reduce((sum: number, dp: any) => sum + Number(dp.onlineAmount ?? 0), 0);
+              .reduce((sum: number, dp: any) => sum + effectiveDailyOnlineAmount(dp, booking), 0);
             return dailyOnlineDue;
           }
-          // Fallback to legacy flag if no dailyPayments
+          // Virtual "today" row (same as PaymentManagementScreen when dailyPayments is empty)
           if (toBool(booking?.isRentOnlinePaid)) return 0;
+          if (monthKey !== getLocalTodayMonthKey()) return 0;
           const ra = num(booking?.rentAmount);
           return ra > 0 ? ra : legacyOn;
         }
@@ -1087,13 +1143,14 @@ useEffect(() => {
               .filter((dp: any) => {
                 const dpDate = new Date(dp.paymentDate);
                 const dpMonthKey = toMonthKeyFromDate(dpDate);
-                return dpMonthKey === monthKey && !toBool(dp.paidCash) && Number(dp.cashAmount ?? 0) > 0;
+                const eff = effectiveDailyCashAmount(dp, booking);
+                return dpMonthKey === monthKey && !toBool(dp.paidCash) && eff > 0;
               })
-              .reduce((sum: number, dp: any) => sum + Number(dp.cashAmount ?? 0), 0);
+              .reduce((sum: number, dp: any) => sum + effectiveDailyCashAmount(dp, booking), 0);
             return dailyCashDue;
           }
-          // Fallback to legacy flag if no dailyPayments
           if (toBool(booking?.isRentCashPaid)) return 0;
+          if (monthKey !== getLocalTodayMonthKey()) return 0;
           return legacyCash;
         }
 
@@ -1109,7 +1166,7 @@ useEffect(() => {
 
       bookings.forEach((b: any) => {
         const monthKey = toMonthKey(b.moveInDate);
-        const sec = Number(b.securityDeposit ?? 0);
+        const sec = effectiveBookingSecurityDeposit(b);
         const online = Number(b.onlinePaymentRecv ?? 0);
         const cash = Number(b.cashPaymentRecv ?? 0);
 
@@ -1118,9 +1175,10 @@ useEffect(() => {
 
         // Pending dues must be month-specific.
         [m0, m1, m2].forEach((mk) => {
-          // Security deposit due shown in move-in month only.
+          // Outstanding security deposit: attribute to current month (m0) so it always appears
+          // in "this month" stats when still unpaid (move-in month alone missed cross-month cases).
           // Exclude moved-out/completed bookings from due totals.
-          if (mk === moveInYm && !toBool(b?.isSecurityPaid) && sec > 0 && !isMovedOutBooking(b)) {
+          if (mk === m0 && !toBool(b?.isSecurityPaid) && sec > 0 && !isMovedOutBooking(b)) {
             pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + sec;
           }
 
@@ -1147,13 +1205,21 @@ useEffect(() => {
           if (cashDue > 0) pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + cashDue;
         });
 
-        if (b.isSecurityPaid && sec > 0) {
+        if (toBool(b.isSecurityPaid) && sec > 0) {
           transactionItems.push({ amount: sec, type: "Security deposit (online)" });
-          if (monthKey) {
-            if (securityDepositsByMonth[monthKey] === undefined) securityDepositsByMonth[monthKey] = 0;
-            securityDepositsByMonth[monthKey] += sec;
+          const moveInMk = monthKey;
+          const updatedMk = toMonthKey(b.updatedAt);
+          const inWindow = (k: string | null) => Boolean(k && [m0, m1, m2].includes(k));
+          const inWinKeys = [updatedMk, moveInMk].filter((k): k is string => inWindow(k));
+          const secMonth =
+            inWinKeys.length > 0 ? inWinKeys.sort().pop()! : null;
+          if (secMonth) {
+            if (securityDepositsByMonth[secMonth] === undefined) securityDepositsByMonth[secMonth] = 0;
+            securityDepositsByMonth[secMonth] += sec;
+            if (!transactionsByMonthMap[secMonth]) transactionsByMonthMap[secMonth] = { online: 0, cash: 0 };
+            transactionsByMonthMap[secMonth].online += sec;
           }
-          // note: do not add security to collections (revenue) to avoid profit inflation
+          // note: do not add security to collections (rent revenue) — shown separately + in total inflow
         }
         
         if (rentPeriod !== "day") {
@@ -1223,14 +1289,13 @@ useEffect(() => {
             const dpMonthKey = toMonthKeyFromDate(dpDate);
             if (!dpMonthKey) return;
             
-            const dpAmount = Number(dp.amount ?? 0);
-            const dpOnlineAmount = Number(dp.onlineAmount ?? 0);
-            const dpCashAmount = Number(dp.cashAmount ?? 0);
+            const dpOnlineAmount = effectiveDailyOnlineAmount(dp, b);
+            const dpCashAmount = effectiveDailyCashAmount(dp, b);
             const isPaidOnline = toBool(dp.paidOnline);
             const isPaidCash = toBool(dp.paidCash);
-            
-            console.log(`[ReportsHub] Daily payment: date=${dp.paymentDate}, monthKey=${dpMonthKey}, online=${dpOnlineAmount}, cash=${dpCashAmount}, paidOnline=${isPaidOnline}, paidCash=${isPaidCash}`);
-            
+
+            console.log(`[ReportsHub] Daily payment: date=${dp.paymentDate}, monthKey=${dpMonthKey}, effOnline=${dpOnlineAmount}, effCash=${dpCashAmount}, paidOnline=${isPaidOnline}, paidCash=${isPaidCash}`);
+
             // Add paid online amounts to collections
             if (isPaidOnline && dpOnlineAmount > 0) {
               transactionItems.push({ amount: dpOnlineAmount, type: "Rent (online)" });
@@ -1240,7 +1305,7 @@ useEffect(() => {
               transactionsByMonthMap[dpMonthKey].online += dpOnlineAmount;
               console.log(`[ReportsHub] Added daily online payment: month=${dpMonthKey}, amount=${dpOnlineAmount}`);
             }
-            
+
             // Add paid cash amounts to collections
             if (isPaidCash && dpCashAmount > 0) {
               transactionItems.push({ amount: dpCashAmount, type: "Rent (cash)" });
@@ -1250,7 +1315,7 @@ useEffect(() => {
               transactionsByMonthMap[dpMonthKey].cash += dpCashAmount;
               console.log(`[ReportsHub] Added daily cash payment: month=${dpMonthKey}, amount=${dpCashAmount}`);
             }
-            
+
             // Add unpaid amounts to pending dues
             if (!isPaidOnline && dpOnlineAmount > 0) {
               pendingDuesByMonth[dpMonthKey] = (pendingDuesByMonth[dpMonthKey] ?? 0) + dpOnlineAmount;
@@ -1263,6 +1328,34 @@ useEffect(() => {
           });
         }
       });
+
+      try {
+        const enrollDueRes = await bookingApi.get("/api/enrollment-requests/unpaid-deposit-sum", {
+          params: { propertyId },
+          timeout: 8000,
+        });
+        const enrollDue = Number(enrollDueRes?.data?.totalAmount ?? 0);
+        if (enrollDue > 0) {
+          pendingDuesByMonth[m0] = (pendingDuesByMonth[m0] ?? 0) + enrollDue;
+        }
+
+        const enrollRequestsFiltered =
+          enrollListRes?.data?.success && Array.isArray(enrollListRes.data.requests)
+            ? enrollListRes.data.requests.filter((r: any) => {
+                const st = String(r.status || "").trim().toLowerCase();
+                return st === "requested" || st === "pay_pending";
+              })
+            : [];
+        [m0, m1, m2].forEach((mk) => {
+          const er = sumEnrollmentRentDueForMonthKey(enrollRequestsFiltered, mk);
+          if (er > 0) {
+            pendingDuesByMonth[mk] = (pendingDuesByMonth[mk] ?? 0) + er;
+          }
+        });
+      } catch {
+        /* optional */
+      }
+
       const txByMonth: Record<string, { online: number; cash: number; total: number }> = {};
       [m0, m1, m2].forEach((mk) => {
         const t = transactionsByMonthMap[mk] || { online: 0, cash: 0 };
@@ -2019,7 +2112,7 @@ useEffect(() => {
 
   const combinedMonths = financialMonths.map(month => ({
     name: month.name,
-    collections: month.data?.collections ?? 0,
+    collections: totalInflowCollections(month.data),
     expense: month.data?.expense ?? 0
   }));
 
@@ -2068,9 +2161,10 @@ useEffect(() => {
     const propertyDisplay = propertyId ? `${propertyName} (ID: ${propertyId})` : propertyName;
     const fd = financialData[currentMonthName] ?? financialData[MONTHS[(currentMonthIdx - 1 + 12) % 12]];
     const pending = fd?.pendingDues ?? combinedPendingDues;
-    const collections = fd?.collections ?? 0;
+    const rentCollections = fd?.collections ?? 0;
+    const collections = totalInflowCollections(fd);
     const expense = fd?.expense ?? 0;
-    const profit = Math.round((fd?.collections ?? 0) - (fd?.expense ?? 0));
+    const profit = Math.round(rentCollections - expense);
     const {
       detailedActiveRows,
       detailedOldRows,
@@ -2199,10 +2293,10 @@ useEffect(() => {
           <h3 style="margin-top:24px">Financial Summary (${currentMonthName})</h3>
           <table style="width:auto;max-width:400px">
             <tbody>
-              ${rows("Collections", "₹" + (collections ?? 0).toLocaleString())}
+              ${rows("Collections (rent + security)", "₹" + (collections ?? 0).toLocaleString())}
               ${rows("Expense", "₹" + (expense ?? 0).toLocaleString())}
               ${rows("Pending Dues", "₹" + (pending ?? 0).toLocaleString())}
-              ${rows("Profit/Loss", "₹" + (profit ?? 0).toLocaleString())}
+              ${rows("Profit/Loss (rent − expense)", "₹" + (profit ?? 0).toLocaleString())}
             </tbody>
           </table>`;
         }
@@ -2440,14 +2534,14 @@ useEffect(() => {
                 v: collectionsForMonthKeyFromBookings(bk, k),
               }))
             : [
-                { m: currentMonthName, v: financialData[currentMonthName]?.collections ?? 0 },
+                { m: currentMonthName, v: totalInflowCollections(financialData[currentMonthName]) },
                 {
                   m: MONTHS[(currentMonthIdx - 1 + 12) % 12],
-                  v: financialData[MONTHS[(currentMonthIdx - 1 + 12) % 12]]?.collections ?? 0,
+                  v: totalInflowCollections(financialData[MONTHS[(currentMonthIdx - 1 + 12) % 12]]),
                 },
                 {
                   m: MONTHS[(currentMonthIdx - 2 + 12) % 12],
-                  v: financialData[MONTHS[(currentMonthIdx - 2 + 12) % 12]]?.collections ?? 0,
+                  v: totalInflowCollections(financialData[MONTHS[(currentMonthIdx - 2 + 12) % 12]]),
                 },
               ];
         const total = months.reduce((s, x) => s + (Number(x.v) || 0), 0);
@@ -2581,10 +2675,16 @@ useEffect(() => {
           const m1 = MONTHS[(currentMonthIdx - 1 + 12) % 12];
           const m2 = MONTHS[(currentMonthIdx - 2 + 12) % 12];
           rowsList = [m0, m1, m2].map((m, i) => {
-            const d = financialData[m] || { collections: 0, expense: 0, profitLoss: 0 };
-            const coll = Number(d.collections || 0);
+            const d = financialData[m] || {
+              collections: 0,
+              securityDeposits: 0,
+              expense: 0,
+              profitLoss: 0,
+            };
+            const coll = totalInflowCollections(d);
             const exp = Number(d.expense || 0);
-            const pl = Math.round(Number(d.collections || 0) - Number(d.expense || 0));
+            const rentOnly = Number(d.collections || 0);
+            const pl = Math.round(rentOnly - exp);
             totalColl += coll;
             totalExp += exp;
             totalPL += pl;
@@ -2610,7 +2710,7 @@ useEffect(() => {
         body = `<h3>Monthwise Financial Report</h3>
           <p>Compare month on month: collected, expenses, profit/loss.</p>
           <table><thead><tr><th>#</th><th>Month</th><th>Collected</th><th>Expense</th><th>Profit/Loss</th></tr></thead><tbody>${rowsList.join("")}${totalRow}</tbody></table>
-          <p style="margin-top:12px;font-size:11px;color:#64748b">Note: Profit/Loss = Collected - Expense. Green indicates profit, red indicates loss.</p>`;
+          <p style="margin-top:12px;font-size:11px;color:#64748b">Collected includes rent and security deposits. Profit/Loss = Rent collected − Expense (refundable deposits excluded from P/L).</p>`;
       }
         break;
       default:
@@ -2697,9 +2797,10 @@ useEffect(() => {
     const propertyName = currentProperty?.name || currentProperty?.id || "Property";
     const fd = financialData[currentMonthName] ?? financialData[MONTHS[(currentMonthIdx - 1 + 12) % 12]];
     const pending = fd?.pendingDues ?? combinedPendingDues;
-    const collections = fd?.collections ?? 0;
+    const rentCollections = fd?.collections ?? 0;
+    const collections = totalInflowCollections(fd);
     const expense = fd?.expense ?? 0;
-    const profit = Math.round((fd?.collections ?? 0) - (fd?.expense ?? 0));
+    const profit = Math.round(rentCollections - expense);
     const {
       detailedActiveRows,
       detailedOldRows,
@@ -2855,9 +2956,9 @@ useEffect(() => {
                 const m1 = MONTHS[(currentMonthIdx - 1 + 12) % 12];
                 const m2 = MONTHS[(currentMonthIdx - 2 + 12) % 12];
                 return [
-                  { month: m0, amount: financialData[m0]?.collections ?? 0 },
-                  { month: m1, amount: financialData[m1]?.collections ?? 0 },
-                  { month: m2, amount: financialData[m2]?.collections ?? 0 },
+                  { month: m0, amount: totalInflowCollections(financialData[m0]) },
+                  { month: m1, amount: totalInflowCollections(financialData[m1]) },
+                  { month: m2, amount: totalInflowCollections(financialData[m2]) },
                 ];
               })();
         body = ["Month | Amount", ...months.map((x) => `${x.month} | ₹${Number(x.amount).toLocaleString()}`)].join("\n");
@@ -2942,10 +3043,15 @@ useEffect(() => {
           const m1 = MONTHS[(currentMonthIdx - 1 + 12) % 12];
           const m2 = MONTHS[(currentMonthIdx - 2 + 12) % 12];
           months = [m0, m1, m2].map((m) => {
-            const d = financialData[m] || { collections: 0, expense: 0, profitLoss: 0 };
+            const d = financialData[m] || {
+              collections: 0,
+              securityDeposits: 0,
+              expense: 0,
+              profitLoss: 0,
+            };
             return {
               month: m,
-              collected: d.collections || 0,
+              collected: totalInflowCollections(d),
               expense: d.expense || 0,
               profit: Math.round(Number(d.collections || 0) - Number(d.expense || 0)),
             };
@@ -3344,16 +3450,20 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
               {/* Collections Bar Graph */}
               <View className="mb-6">
                 <Text className="text-slate-700 font-bold mb-3">Collections</Text>
+                <Text className="text-slate-500 text-[10px] mb-2">Rent + security deposits collected in each month</Text>
                 <View className="bg-slate-50 rounded-2xl p-4">
-                  {financialMonths.map((month, idx) => (
+                  {financialMonths.map((month, idx) => {
+                    const totalIn = totalInflowCollections(month.data);
+                    return (
                     <View key={idx} className="mb-3">
                       <View className="flex-row justify-between items-center mb-1">
                         <Text className="text-slate-600 text-sm font-medium">{month.name}</Text>
-                        <Text className="text-slate-900 font-bold">₹{(month.data?.collections ?? 0).toLocaleString()}</Text>
+                        <Text className="text-slate-900 font-bold">₹{totalIn.toLocaleString()}</Text>
                       </View>
-                      <ProgressBar value={month.data?.collections ?? 0} max={90000} color="bg-emerald-500" />
+                      <ProgressBar value={totalIn} max={90000} color="bg-emerald-500" />
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </View>
 
@@ -3391,16 +3501,20 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
               {/* Profit/Loss Bar Graph */}
               <View className="mb-4">
                 <Text className="text-slate-700 font-bold mb-3">Profit / Loss</Text>
+                <Text className="text-slate-500 text-[10px] mb-2">Rent collected − expense (security deposits excluded)</Text>
                 <View className="bg-slate-50 rounded-2xl p-4">
-                  {financialMonths.map((month, idx) => (
+                  {financialMonths.map((month, idx) => {
+                    const pl = Math.round((month.data?.collections ?? 0) - (month.data?.expense ?? 0));
+                    return (
                     <View key={idx} className="mb-3">
                       <View className="flex-row justify-between items-center mb-1">
                         <Text className="text-slate-600 text-sm font-medium">{month.name}</Text>
-                        <Text className="text-slate-900 font-bold">₹{Math.round((month.data?.collections ?? 0) - (month.data?.expense ?? 0)).toLocaleString()}</Text>
+                        <Text className="text-slate-900 font-bold">₹{pl.toLocaleString()}</Text>
                       </View>
-                      <ProgressBar value={Math.round((month.data?.collections ?? 0) - (month.data?.expense ?? 0))} max={45000} color="bg-blue-500" />
+                      <ProgressBar value={pl} max={45000} color="bg-blue-500" />
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </View>
             </View>
@@ -3412,19 +3526,29 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
               </Text>
               
               {(() => {
-                const currentData = financialData[financialView] || financialData[currentMonthName] || { collections: 0, expense: 0, pendingDues: 0, profitLoss: 0 };
-                const currentProfit = Math.round((currentData.collections ?? 0) - (currentData.expense ?? 0));
+                const currentData = financialData[financialView] || financialData[currentMonthName] || {
+                  collections: 0,
+                  securityDeposits: 0,
+                  expense: 0,
+                  pendingDues: 0,
+                  profitLoss: 0,
+                };
+                const rentCol = currentData.collections ?? 0;
+                const secCol = currentData.securityDeposits ?? 0;
+                const totalIn = totalInflowCollections(currentData);
+                const currentProfit = Math.round(rentCol - (currentData.expense ?? 0));
                 return (
                   <View className="space-y-4">
                     {/* Collections */}
                     <View className="rounded-2xl p-4 ">
                       <View className="flex-row justify-between items-center mb-2">
                         <Text className="text-emerald-700 font-bold">Collections</Text>
-                        <Text className="text-emerald-900 text-xl font-black">₹{currentData.collections.toLocaleString()}</Text>
+                        <Text className="text-emerald-900 text-xl font-black">₹{totalIn.toLocaleString()}</Text>
                       </View>
-                      <ProgressBar value={currentData.collections} max={90000} color="bg-emerald-500" />
+                      <ProgressBar value={totalIn} max={90000} color="bg-emerald-500" />
                       <Text className="text-emerald-600 text-xs mt-1">
-                        {((currentData.collections / 90000) * 100).toFixed(0)}% of target
+                        Rent ₹{rentCol.toLocaleString()} · Security ₹{secCol.toLocaleString()} ·{" "}
+                        {((totalIn / 90000) * 100).toFixed(0)}% of target
                       </Text>
                     </View>
 
@@ -3454,6 +3578,7 @@ const SimpleDonutChart = ({ data, size = 200 }) => {
 
                     {/* Profit/Loss */}
                     <View className=" rounded-2xl p-4">
+                      <Text className="text-slate-500 text-[10px] mb-1">Rent − expense (security deposits excluded)</Text>
                       <View className="flex-row justify-between items-center mb-2">
                         <Text className="text-blue-700 font-bold">Profit / Loss</Text>
                         <Text className="text-blue-900 text-xl font-black">₹{currentProfit.toLocaleString()}</Text>

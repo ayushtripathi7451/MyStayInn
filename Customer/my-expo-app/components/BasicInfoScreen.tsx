@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   Pressable,
-  Alert,
   KeyboardAvoidingView,
   ScrollView,
   Platform,
@@ -27,6 +26,9 @@ export default function BasicInfoScreen({ navigation }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [cleanupInProgress, setCleanupInProgress] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [sendError, setSendError] = useState("");
+  const [alreadyRegisteredField, setAlreadyRegisteredField] = useState<string | null>(null);
   
   // Store the current verification ID to cancel it
   const currentVerificationId = useRef(null);
@@ -101,25 +103,26 @@ export default function BasicInfoScreen({ navigation }) {
 
   const validate = () => {
     if (!first.trim()) {
-      Alert.alert("Error", "First name is required");
+      setFormError("First name is required.");
       return false;
     }
     if (!last.trim()) {
-      Alert.alert("Error", "Last name is required");
+      setFormError("Last name is required.");
       return false;
     }
     if (!gender.trim()) {
-      Alert.alert("Error", "Select gender");
+      setFormError("Please select gender.");
       return false;
     }
     if (!/^[0-9]{10}$/.test(mobile)) {
-      Alert.alert("Error", "Enter valid 10 digit mobile");
+      setFormError("Enter a valid 10-digit mobile number.");
       return false;
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      Alert.alert("Error", "Enter valid email");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setFormError("Enter a valid email address.");
       return false;
     }
+    setFormError("");
     return true;
   };
 
@@ -131,6 +134,8 @@ export default function BasicInfoScreen({ navigation }) {
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const sendOTP = async () => {
+    setSendError("");
+    setAlreadyRegisteredField(null);
     if (!validate()) return;
     
     // Prevent multiple rapid calls
@@ -149,13 +154,8 @@ export default function BasicInfoScreen({ navigation }) {
       });
 
       if (checkResponse.data.exists) {
-        Alert.alert(
-          "Already Registered",
-          `This ${checkResponse.data.field} is already registered. Please login instead.`,
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Go to Login", onPress: () => navigation.navigate("Login") }
-          ]
+        setAlreadyRegisteredField(
+          typeof checkResponse.data.field === "string" ? checkResponse.data.field : "phone or email"
         );
         setLoading(false);
         return;
@@ -186,7 +186,6 @@ export default function BasicInfoScreen({ navigation }) {
       setConfirmation(confirmation);
       
       console.log('OTP sent successfully');
-      Alert.alert("OTP Sent!", `OTP sent to ${fullPhoneNumber}`);
 
       // Navigate to verification screen
       navigation.navigate("VerifyEmailScreen", {
@@ -229,7 +228,7 @@ export default function BasicInfoScreen({ navigation }) {
         friendlyMessage = error.response.data.message;
       }
       
-      Alert.alert("Error", friendlyMessage);
+      setSendError(friendlyMessage);
       
       // If OTP sending fails, ensure cleanup
       await cancelCurrentVerification();
@@ -283,7 +282,12 @@ export default function BasicInfoScreen({ navigation }) {
                 placeholder="Enter your first name"
                 placeholderTextColor="#9CA3AF"
                 value={first}
-                onChangeText={setFirst}
+                onChangeText={(t) => {
+                  setFirst(t);
+                  setFormError("");
+                  setSendError("");
+                  setAlreadyRegisteredField(null);
+                }}
                 className="border border-gray-300 rounded-lg px-4 py-3"
                 style={{ color: '#000000' }}
               />
@@ -294,7 +298,12 @@ export default function BasicInfoScreen({ navigation }) {
                 placeholder="Enter your last name"
                 placeholderTextColor="#9CA3AF"
                 value={last}
-                onChangeText={setLast}
+                onChangeText={(t) => {
+                  setLast(t);
+                  setFormError("");
+                  setSendError("");
+                  setAlreadyRegisteredField(null);
+                }}
                 className="border border-gray-300 rounded-lg px-4 py-3"
                 style={{ color: '#000000' }}
               />
@@ -324,6 +333,9 @@ export default function BasicInfoScreen({ navigation }) {
                         onPress={() => {
                           setGender(item);
                           setShowDropdown(false);
+                          setFormError("");
+                          setSendError("");
+                          setAlreadyRegisteredField(null);
                         }}
                         className="px-4 py-3 border-b border-gray-100"
                       >
@@ -339,9 +351,12 @@ export default function BasicInfoScreen({ navigation }) {
               <View className="flex-row border border-gray-300 rounded-lg overflow-hidden">
                 <TextInput
                   value={countryCode}
-                  onChangeText={(t) =>
-                    setCountryCode(t.replace(/[^+0-9]/g, "").slice(0, 4))
-                  }
+                  onChangeText={(t) => {
+                    setCountryCode(t.replace(/[^+0-9]/g, "").slice(0, 4));
+                    setFormError("");
+                    setSendError("");
+                    setAlreadyRegisteredField(null);
+                  }}
                   keyboardType="phone-pad"
                   className="px-4 py-3 border-r border-gray-300 text-center"
                   style={{ minWidth: 70, color: '#000000' }}
@@ -350,9 +365,12 @@ export default function BasicInfoScreen({ navigation }) {
                   placeholder="Enter mobile number"
                   placeholderTextColor="#9CA3AF"
                   value={mobile}
-                  onChangeText={(t) =>
-                    setMobile(t.replace(/[^0-9]/g, "").slice(0, 10))
-                  }
+                  onChangeText={(t) => {
+                    setMobile(t.replace(/[^0-9]/g, "").slice(0, 10));
+                    setFormError("");
+                    setSendError("");
+                    setAlreadyRegisteredField(null);
+                  }}
                   keyboardType="numeric"
                   maxLength={10}
                   className="flex-1 px-4 py-3"
@@ -366,12 +384,36 @@ export default function BasicInfoScreen({ navigation }) {
                 placeholder="example@example.com"
                 placeholderTextColor="#9CA3AF"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  setFormError("");
+                  setSendError("");
+                  setAlreadyRegisteredField(null);
+                }}
                 className="border border-gray-300 rounded-lg px-4 py-3"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 style={{ color: '#000000' }}
               />
+
+              {(formError || sendError) ? (
+                <Text className="text-red-600 text-sm mt-4" accessibilityLiveRegion="polite">
+                  {formError || sendError}
+                </Text>
+              ) : null}
+              {alreadyRegisteredField ? (
+                <View className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200">
+                  <Text className="text-amber-900 text-sm mb-3">
+                    This {alreadyRegisteredField} is already registered. Use login instead.
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate("Login")}
+                    className="bg-purple-600 py-3 rounded-xl"
+                  >
+                    <Text className="text-center text-white font-semibold">Go to login</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
 
               {/* BUTTON */}
               <TouchableOpacity

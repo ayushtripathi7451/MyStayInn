@@ -107,6 +107,12 @@ export default function ProcessMoveOutScreen(props: any) {
       
       const ownerFilledReturned = Number(r.securityDepositReturned) ?? null;
       
+      const bedList = Array.isArray(booking?.bedNumbers)
+        ? booking.bedNumbers.map((x: unknown) => String(x).trim()).filter(Boolean)
+        : typeof booking?.bedNumbers === "string"
+          ? booking.bedNumbers.split(",").map((x: string) => x.trim()).filter(Boolean)
+          : [];
+
       setMoveOutData({
         processId: requestId,
         requestId,
@@ -115,6 +121,7 @@ export default function ProcessMoveOutScreen(props: any) {
         customerId: r.customerId,
         profile,
         booking,
+        bedNumbers: bedList,
         roomNumber: r.roomNumber || "—",
         propertyName: r.propertyName || "—",
         propertyId: r.propertyId,
@@ -153,11 +160,12 @@ export default function ProcessMoveOutScreen(props: any) {
       // Only auto-calculate if owner didn't pre-fill it
       if (!moveOutData.ownerFilledReturned || moveOutData.ownerFilledReturned === null) {
         const due = parseFloat(currentDue) || 0;
-        const returned = moveOutData.securityDeposit - due;
+        const ded = deductions.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0);
+        const returned = Number(moveOutData.securityDeposit) - due - ded;
         setSecurityDepositReturned(Math.max(0, returned).toString());
       }
     }
-  }, [currentDue, moveOutData]);
+  }, [currentDue, moveOutData, deductions]);
 
   const formatDate = (value: Date | string | null | undefined) => {
     if (value == null) return "—";
@@ -179,22 +187,74 @@ export default function ProcessMoveOutScreen(props: any) {
     return deductions.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0);
   };
 
+  /**
+   * Single source of truth for settlement lines:
+   * deposit = returned + deductions + (rent covered from deposit), with rent covered capped by current due.
+   * Changing "amount returned" reallocates what stays in the deposit pool for dues vs refund.
+   */
+  const getSettlementBreakdown = () => {
+    if (!moveOutData) return null;
+    const deposit = Number(moveOutData.securityDeposit) || 0;
+    const dueTotal = parseFloat(currentDue || "0") || 0;
+    const returned = parseFloat(securityDepositReturned || "0") || 0;
+    const ded = getTotalDeductions();
+
+    const poolAfterReturnAndDeductions = Math.max(0, deposit - returned - ded);
+    const dueCoveredFromDeposit = Math.min(dueTotal, poolAfterReturnAndDeductions);
+    const amountToCollectFromTenant = Math.max(0, dueTotal - dueCoveredFromDeposit);
+
+    return {
+      deposit,
+      dueTotal,
+      returned,
+      ded,
+      dueCoveredFromDeposit,
+      amountToCollectFromTenant,
+    };
+  };
+
   const getFinalRefundAmount = () => {
     const returned = parseFloat(securityDepositReturned || "0");
     return returned;
   };
 
   const isAmountToBeCollected = () => {
-    const due = parseFloat(currentDue || "0");
-    const deposit = moveOutData?.securityDeposit || 0;
-    return due > deposit;
+    const b = getSettlementBreakdown();
+    return (b?.amountToCollectFromTenant ?? 0) > 0;
   };
 
-  const getFinalAmount = () => {
-    const due = parseFloat(currentDue || "0");
-    const deposit = moveOutData?.securityDeposit || 0;
-    const deductions = getTotalDeductions();
-    return Math.abs(deposit - due - deductions);
+  /**
+   * MoveOut P/L (property profit/loss on move-out):
+   * - If current due > security deposit collected → P/L = 0; amount to collect uses settlement breakdown (respects return amount).
+   * - Else P/L = collected − returned − due (0 if due=0 and returned=collected; profit if positive; loss if negative).
+   */
+  const getMoveOutPLMetrics = () => {
+    if (!moveOutData) return null;
+    const collected = Number(moveOutData.securityDeposit) || 0;
+    const due = parseFloat(currentDue || "0") || 0;
+    const returned = parseFloat(securityDepositReturned || "0") || 0;
+    const settlement = getSettlementBreakdown();
+
+    if (due > collected) {
+      return {
+        moveOutPL: 0,
+        plKind: "neutral" as const,
+        dueExceedsDeposit: true,
+        amountToCollectFromTenant: settlement?.amountToCollectFromTenant ?? Math.max(0, due - collected),
+      };
+    }
+
+    const pl = collected - returned - due;
+    let plKind: "profit" | "loss" | "neutral" = "neutral";
+    if (pl > 0) plKind = "profit";
+    else if (pl < 0) plKind = "loss";
+
+    return {
+      moveOutPL: pl,
+      plKind,
+      dueExceedsDeposit: false,
+      amountToCollectFromTenant: null as number | null,
+    };
   };
 
   const addDeduction = () => {
@@ -382,8 +442,11 @@ export default function ProcessMoveOutScreen(props: any) {
             </View>
             <View className="flex-row justify-between">
               <Text className="text-slate-500 font-medium">Room</Text>
-              <Text className="font-bold text-slate-900">
-                {moveOutData.roomNumber} • {moveOutData.propertyName}
+              <Text className="font-bold text-slate-900 text-right flex-1 ml-2">
+                {moveOutData.propertyName} · Room {moveOutData.roomNumber}
+                {Array.isArray(moveOutData.bedNumbers) && moveOutData.bedNumbers.length > 0
+                  ? ` · Bed ${moveOutData.bedNumbers.join(", ")}`
+                  : ""}
               </Text>
             </View>
             <View className="flex-row justify-between">
@@ -435,13 +498,64 @@ export default function ProcessMoveOutScreen(props: any) {
             </View>
 
             <View className="flex-row justify-between">
-              <Text className="text-slate-500 font-medium">Security Deposit</Text>
+              <Text className="text-slate-500 font-medium">Security Deposit (Collected)</Text>
               <Text className="font-bold text-slate-900">₹{moveOutData.securityDeposit.toLocaleString()}</Text>
             </View>
           </View>
         </View>
 
-      
+        {/* MoveOut P/L — financial consideration */}
+        {/* {(() => {
+          const pl = getMoveOutPLMetrics();
+          if (!pl) return null;
+          const plColor =
+            pl.plKind === "profit"
+              ? "text-emerald-700"
+              : pl.plKind === "loss"
+                ? "text-red-700"
+                : "text-slate-700";
+          const plSuffix =
+            pl.plKind === "profit" ? " (profit)" : pl.plKind === "loss" ? " (loss)" : "";
+          return (
+            <View className="bg-white rounded-[24px] p-6 mt-4 shadow-sm border border-slate-100">
+              <Text className="text-lg font-black text-slate-900 mb-1">Financial consideration</Text>
+              <Text className="text-sm font-semibold text-slate-600 mb-1">
+                MoveOut P/L <Text className="text-slate-400 font-medium">(P/L — profit / loss)</Text>
+              </Text>
+              <Text className="text-xs text-slate-500 mb-4">
+                Uses security deposit collected, current due, and amount returned to tenant. When due exceeds deposit collected, P/L is 0 and the shortfall is shown as amount to collect.
+              </Text>
+
+              {pl.dueExceedsDeposit ? (
+                <View className="space-y-3">
+                  <View className="flex-row justify-between items-center">
+                    <Text className="text-slate-600 font-medium">MoveOut P/L</Text>
+                    <Text className="font-black text-slate-800 text-lg">₹0</Text>
+                  </View>
+                  <View className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                    <Text className="text-amber-900 text-sm font-semibold">
+                      Current due exceeds security deposit collected — settlement uses amount to collect instead of P/L on deposit.
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between items-center pt-1">
+                    <Text className="text-red-700 font-bold">Amount to be collected from tenant</Text>
+                    <Text className="font-black text-red-700 text-lg">
+                      ₹{(pl.amountToCollectFromTenant ?? 0).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View className="flex-row justify-between items-center">
+                  <Text className="text-slate-600 font-medium">MoveOut P/L</Text>
+                  <Text className={`font-black text-lg ${plColor}`}>
+                    {pl.moveOutPL < 0 ? "-" : ""}₹{Math.abs(pl.moveOutPL).toLocaleString()}
+                    {pl.moveOutPL !== 0 ? plSuffix : " (break-even)"}
+                  </Text>
+                </View>
+              )}
+            </View>
+          );
+        })()} */}
 
         {/* Security Deposit Settlement */}
         <View className="bg-white rounded-[24px] p-6 mt-4 shadow-sm border border-white">
@@ -449,7 +563,9 @@ export default function ProcessMoveOutScreen(props: any) {
 
           <View className="mb-4">
             <View className="flex-row justify-between items-center mb-2">
-              <Text className="text-slate-600 font-medium">Amount Returned to Customer</Text>
+              <Text className="text-slate-600 font-medium flex-1 pr-2" numberOfLines={2}>
+                Amount returned to {moveOutData.customerName}
+              </Text>
               {moveOutData?.ownerFilledReturned !== null && moveOutData?.ownerFilledReturned >= 0 && (
                 <Text className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">From Owner</Text>
               )}
@@ -471,16 +587,25 @@ export default function ProcessMoveOutScreen(props: any) {
             </Text>
           </View>
 
-          {securityDepositReturned && (
+          {securityDepositReturned && (() => {
+            const settle = getSettlementBreakdown();
+            if (!settle) return null;
+            const { dueCoveredFromDeposit, amountToCollectFromTenant } = settle;
+            return (
             <View className="bg-green-50 rounded-xl p-4">
               <View className="flex-row justify-between mb-2">
                 <Text className="text-green-800 font-medium">Security Deposit</Text>
                 <Text className="text-green-900 font-bold">₹{moveOutData.securityDeposit.toLocaleString()}</Text>
               </View>
-              {parseFloat(currentDue || "0") > 0 && (
-                <View className="flex-row justify-between mb-2">
-                  <Text className="text-red-800 font-medium">Due Deducted</Text>
-                  <Text className="text-red-900 font-bold">-₹{parseFloat(currentDue || "0").toLocaleString()}</Text>
+              {settle.dueTotal > 0 && (
+                <View className="mb-2">
+                  <View className="flex-row justify-between">
+                    <Text className="text-red-800 font-medium">Due covered from deposit</Text>
+                    <Text className="text-red-900 font-bold">-₹{dueCoveredFromDeposit.toLocaleString()}</Text>
+                  </View>
+                  <Text className="text-slate-500 text-xs mt-1">
+                    Capped by deposit minus amount returned and deductions (unpaid due ₹{settle.dueTotal.toLocaleString()}).
+                  </Text>
                 </View>
               )}
               {deductions.length > 0 && (
@@ -504,11 +629,16 @@ export default function ProcessMoveOutScreen(props: any) {
                   {isAmountToBeCollected() ? 'Amount to be Collected' : 'Final Amount Returned'}
                 </Text>
                 <Text className={`font-black text-lg ${isAmountToBeCollected() ? 'text-red-600' : 'text-green-900'}`}>
-                  ₹{getFinalAmount().toLocaleString()}
+                  ₹
+                  {(isAmountToBeCollected()
+                    ? amountToCollectFromTenant
+                    : getFinalRefundAmount()
+                  ).toLocaleString()}
                 </Text>
               </View>
             </View>
-          )}
+            );
+          })()}
         </View>
 
         {/* Confirm Button */}
@@ -628,7 +758,7 @@ export default function ProcessMoveOutScreen(props: any) {
                 </Text>
               )}
               <Text className="text-green-600 font-bold mt-2">
-                • Amount Returned: ₹{getFinalRefundAmount().toLocaleString()}
+                • Amount returned to {moveOutData.customerName}: ₹{getFinalRefundAmount().toLocaleString()}
               </Text>
             </View>
 

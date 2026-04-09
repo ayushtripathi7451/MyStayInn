@@ -2,6 +2,7 @@ import {
   REFRESH_PROPERTIES,
   REFRESH_TICKET_COUNTS,
   REFRESH_DASHBOARD_STATS,
+  REFRESH_CURRENT_STAY,
 } from './sagas';
 
 /** Dispatch these for SWR: show cache first, then background refresh */
@@ -10,4 +11,9 @@ export const refreshTicketCounts = () => ({ type: REFRESH_TICKET_COUNTS as typeo
 export const refreshDashboardStats = (propertyId?: string) => ({
   type: REFRESH_DASHBOARD_STATS as typeof REFRESH_DASHBOARD_STATS,
   payload: { propertyId },
+});
+
+export const refreshCurrentStay = (options?: { force?: boolean }) => ({
+  type: REFRESH_CURRENT_STAY as typeof REFRESH_CURRENT_STAY,
+  payload: options?.force ? { force: true } : undefined,
 });

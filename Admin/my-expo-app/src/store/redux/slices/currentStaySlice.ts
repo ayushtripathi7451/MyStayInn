@@ -13,8 +13,6 @@ export interface CurrentStayProperty {
   roomId?: string;
   propertyId?: string;
   moveOutDate?: string;
-  /** Move-out workflow status for this booking (requested/accepted). */
-  moveOutStatus?: 'requested' | 'accepted';
   bgColor?: string;
   propertyType?: string;
   roomType?: string;
@@ -27,10 +25,6 @@ export interface CurrentStayProperty {
   securityDeposit?: number;
   /** Property rules & food menu (saved by admin), for Property Details screen */
   rules?: Record<string, unknown> | null;
-  /** Property owner / admin phone (from current-stay API) for dialer */
-  adminPhone?: string;
-  /** Same as booking.propertyAdminPhone when merged onto card payload */
-  propertyAdminPhone?: string;
 }
 
 /** Used by saga to decide whether to skip API (cache TTL = 5 min) */

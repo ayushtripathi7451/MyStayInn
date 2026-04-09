@@ -12,7 +12,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch } from "react-redux";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
-import { useTheme } from "../context/ThemeContext";
 import { userApi, transactionApi } from "../utils/api";
 import { refreshCurrentStay } from "../src/store/actions";
 
@@ -53,7 +52,6 @@ async function openPaymentLink(url: string): Promise<boolean> {
 }
 
 export default function DepositCheckoutScreen({ navigation, route }: Props) {
-  const { theme } = useTheme();
   const dispatch = useDispatch();
 
   const paymentType: PaymentType =
@@ -67,21 +65,15 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
   const monthKey = route?.params?.monthKey; // e.g., "2026-04"
   const yearMonth = route?.params?.yearMonth; // e.g., "2026-04" (consistent naming)
   const paymentId = route?.params?.paymentId; // daily payment record id
-  const paymentDateParam = route?.params?.paymentDate as string | undefined;
   const bookingIdParam = route?.params?.bookingId as string | undefined;
   const propertyIdParam = route?.params?.propertyId as string | undefined;
   const finalYearMonth = yearMonth || monthKey; // Support both param names
-  const defaultYearMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-  /** Rent links must always include YYYY-MM so the webhook can mark the correct month */
-  const effectiveYearMonth =
-    paymentType === "rent_online" ? finalYearMonth || defaultYearMonth : finalYearMonth;
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [details, setDetails] = useState<any>(null);
 
-  const isFemale = theme === "female";
-  const accent = isFemale ? "#EC4899" : "#1E33FF";
+  const accent = "#1E33FF";
 
   const fetchCurrentStay = useCallback(async () => {
     try {
@@ -116,32 +108,10 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
       }
 
       const isRent = paymentType === "rent_online";
-      const rentPeriod = String(currentStay.booking.rentPeriod || "").toLowerCase();
-      const isDayRent = rentPeriod === "day";
-      let rentAmount = 0;
-      if (isRent) {
-        if (paramAmount != null && !Number.isNaN(Number(paramAmount)) && Number(paramAmount) > 0) {
-          rentAmount = Number(paramAmount);
-        } else if (isDayRent && paymentId) {
-          const dps = Array.isArray(currentStay.booking.dailyPayments)
-            ? currentStay.booking.dailyPayments
-            : [];
-          const row = dps.find((x: { id?: string }) => String(x?.id) === String(paymentId));
-          rentAmount = row ? Number((row as { onlineAmount?: number }).onlineAmount || 0) : 0;
-          if (rentAmount <= 0) {
-            rentAmount = Number(currentStay.booking.onlinePaymentRecv || 0);
-          }
-        } else {
-          const b = currentStay.booking;
-          const schedOn = Number(b.scheduledOnlineRent ?? 0);
-          const schedCash = Number(b.scheduledCashRent ?? 0);
-          const rentAmt = Number(b.rentAmount ?? 0);
-          if (schedOn > 0) rentAmount = schedOn;
-          else if (schedCash > 0) rentAmount = 0;
-          else rentAmount = rentAmt;
-        }
-      }
-      const amount = isRent ? rentAmount : Number(currentStay.booking.securityDeposit || 0);
+      const amount = isRent
+        ? paramAmount ??
+          Number(currentStay.booking.onlinePaymentRecv || 0)
+        : Number(currentStay.booking.securityDeposit || 0);
 
       if (amount <= 0) {
         setDetails(null);
@@ -165,7 +135,7 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         paymentType,
         propertyId: currentStay.property.id,
         ownerId: currentStay.property.ownerId,
-        yearMonth: effectiveYearMonth,
+        yearMonth: finalYearMonth, // Use consistent yearMonth
         paymentId,
       });
     } catch {
@@ -173,11 +143,11 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [paymentType, paramAmount, paymentId, paymentDateParam, effectiveYearMonth, bookingIdParam, propertyIdParam]);
+  }, [paymentType, paramAmount, paymentId, finalYearMonth, bookingIdParam, propertyIdParam]);
 
   useEffect(() => {
     fetchCurrentStay();
-  }, [fetchCurrentStay, paymentType, paramAmount, paymentId, paymentDateParam]);
+  }, [fetchCurrentStay, paymentType, paramAmount]);
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return "—";
@@ -217,20 +187,17 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         customerPhone,
         propertyId: details.propertyId,
         ownerId: details.ownerId,
-        // transaction-service / Cashfree link type (not "first month only" — means online rent payment)
         type:
           details.paymentType === "rent_online"
             ? "first_rent"
             : "security_deposit",
-        ...(details.paymentType === "rent_online" && {
+        // Pass the target month for rent payments
+        ...(details.paymentType === "rent_online" && details.yearMonth && {
           yearMonth: details.yearMonth,
         }),
         ...(details.paymentType === "rent_online" && details.paymentId && {
           dailyPaymentId: details.paymentId,
-          paymentDate:
-            paymentDateParam && /^\d{4}-\d{2}-\d{2}$/.test(String(paymentDateParam))
-              ? String(paymentDateParam).slice(0, 10)
-              : new Date().toISOString().split("T")[0],
+          paymentDate: new Date().toISOString().split("T")[0],
         }),
       });
       

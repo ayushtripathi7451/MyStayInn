@@ -13,6 +13,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { moveOutApi } from "../utils/api";
+import { useDispatch } from "react-redux";
+import { refreshCurrentStay } from "../src/store/actions";
 
 interface MoveOutRequestScreenProps {
   navigation: any;
@@ -31,7 +33,10 @@ interface BookingDetails {
 }
 
 export default function MoveOutRequestScreen({ navigation, route }: MoveOutRequestScreenProps) {
+  const dispatch = useDispatch();
   const [bookingDetails, setBookingDetails] = useState<BookingDetails | null>(null);
+  /** Multiple active properties — user picks which booking to move out from. */
+  const [stayChoices, setStayChoices] = useState<BookingDetails[]>([]);
   const [moveOutDate, setMoveOutDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [comments, setComments] = useState("");
@@ -61,8 +66,25 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
         return;
       }
       const d = res.data.data;
+      const fromList = Array.isArray(d.stays) && d.stays.length > 0 ? d.stays : [];
+      if (fromList.length > 1) {
+        setStayChoices(
+          fromList.map((s: any) => ({
+            bookingId: String(s.bookingId),
+            propertyName: s.propertyName,
+            roomNumber: s.roomNumber,
+            checkInDate: s.checkInDate,
+            monthlyRent: Number(s.monthlyRent) || 0,
+            securityDeposit: Number(s.securityDeposit) || 0,
+            noticePeriodDays: s.noticePeriodDays ?? 30,
+            currentDue: s.currentDue != null ? Number(s.currentDue) : undefined,
+          }))
+        );
+      } else {
+        setStayChoices([]);
+      }
       const details: BookingDetails = {
-        bookingId: d.bookingId,
+        bookingId: String(d.bookingId),
         propertyName: d.propertyName,
         roomNumber: d.roomNumber,
         checkInDate: d.checkInDate,
@@ -152,11 +174,13 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
         [
           {
             text: "OK",
-            onPress: () =>
+            onPress: () => {
+              dispatch(refreshCurrentStay({ force: true }));
               navigation.navigate("MoveOutStatusScreen", {
                 requestId,
                 property: bookingDetails,
-              }),
+              });
+            },
           },
         ]
       );
@@ -245,6 +269,33 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
+        {stayChoices.length > 1 ? (
+          <View className="mt-4">
+            <Text className="text-sm font-semibold text-slate-600 mb-2">Select property</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
+              {stayChoices.map((s) => {
+                const active = bookingDetails?.bookingId === s.bookingId;
+                return (
+                  <TouchableOpacity
+                    key={s.bookingId}
+                    onPress={() => setBookingDetails(s)}
+                    className={`mr-2 px-4 py-2 rounded-full border ${
+                      active ? "bg-[#1E33FF] border-[#1E33FF]" : "bg-white border-slate-200"
+                    }`}
+                  >
+                    <Text
+                      className={`text-sm font-semibold ${active ? "text-white" : "text-slate-800"}`}
+                      numberOfLines={1}
+                    >
+                      {s.propertyName} · {s.roomNumber}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
+
         {/* Current Booking Info */}
         <View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
           <Text className="text-lg font-black text-slate-900 mb-4">

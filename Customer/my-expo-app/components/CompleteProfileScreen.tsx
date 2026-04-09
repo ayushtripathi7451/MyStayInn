@@ -23,7 +23,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
 import { State, City } from "country-state-city";
 import { api, userApi } from "../utils/api";
-import type { StructuredAddress } from "../utils/address";
+import {
+  type StructuredAddress,
+  emptyStructuredAddress,
+  cashfreeAddressToStructured,
+} from "../utils/address";
 import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
 import ScrollableDatePicker from "./ScrollableDatePicker";
 
@@ -42,88 +46,7 @@ const formatExpiryDate = (expiresAt?: string | null) => {
 
 // Using country-state-city library for state and city data
 
-const emptyAddress = (): StructuredAddress => ({
-  line1: "",
-  line2: "",
-  state: "",
-  stateCode: "",
-  city: "",
-  pincode: "",
-});
-
-/** Map Cashfree Aadhaar address (string or addressObject) to StructuredAddress. Used only for "Address as per Aadhaar". */
-function cashfreeAddressToStructured(details: any): StructuredAddress {
-  const base = emptyAddress();
-  if (!details) return base;
-  const raw = details.addressObject ?? details.address;
-
-  // Case 1: address is a single string – try to smart-split into line1, city, state, pincode
-  if (typeof raw === "string" && raw.trim()) {
-    const addr = raw.trim();
-
-    // Try to extract 6-digit pincode from the end
-    const pinMatch = addr.match(/(\d{6})\s*$/);
-    const pincode = pinMatch ? pinMatch[1] : "";
-    const withoutPin = pinMatch ? addr.slice(0, pinMatch.index).trim().replace(/[, ]+$/, "") : addr;
-
-    // Split remaining by commas to guess city/state/country
-    const parts = withoutPin.split(",").map((p) => p.trim()).filter(Boolean);
-
-    if (parts.length >= 3) {
-      // Pattern: ... , city, state, country  (DigiLocker / Aadhaar style)
-      const countryPart = parts[parts.length - 1]; // currently unused
-      const statePart = parts[parts.length - 2];
-      const cityPart = parts[parts.length - 3];
-      const line1Raw = parts.slice(0, -3).join(", ");
-
-      // Further split line1: keep up to 3 comma-separated chunks in line1, rest in line2
-      const line1Chunks = line1Raw.split(",").map((p) => p.trim()).filter(Boolean);
-      const line1Head = line1Chunks.slice(0, 3).join(", ");
-      const line1Tail = line1Chunks.slice(3).join(", ");
-
-      base.line1 = line1Head || `${cityPart}, ${statePart}`.trim();
-      base.line2 = line1Tail || base.line2;
-      base.city = cityPart;
-      base.state = statePart;
-      base.pincode = pincode;
-    } else if (parts.length === 2) {
-      // Fallback: ... , city, state
-      const statePart = parts[1];
-      const cityPart = parts[0];
-      base.line1 = cityPart;
-      base.city = cityPart;
-      base.state = statePart;
-      base.pincode = pincode;
-    } else {
-      // No clear city/state separation; try to split long line:
-      // keep up to 3 comma-separated chunks in line1, rest in line2
-      const chunks = withoutPin.split(",").map((p) => p.trim()).filter(Boolean);
-      if (chunks.length > 0) {
-        const head = chunks.slice(0, 3).join(", ");
-        const tail = chunks.slice(3).join(", ");
-        base.line1 = head;
-        base.line2 = tail;
-      } else {
-        base.line1 = addr;
-      }
-      base.pincode = pincode;
-    }
-    return base;
-  }
-
-  // Case 2: structured object from Cashfree
-  const addr = raw;
-  if (addr && typeof addr === "object") {
-    const line1Parts = [addr.house, addr.street].filter(Boolean).map(String);
-    const line2Parts = [addr.landmark, addr.locality].filter(Boolean).map(String);
-    base.line1 = line1Parts.join(", ").trim() || "";
-    base.line2 = line2Parts.join(", ").trim() || "";
-    base.city = String(addr.city || "").trim();
-    base.state = String(addr.state || "").trim();
-    base.pincode = String(addr.pincode || "").trim().slice(0, 6);
-  }
-  return base;
-}
+const emptyAddress = emptyStructuredAddress;
 
 export default function CompleteProfileScreen({ navigation, route }: any) {
   /* ----------- STATES ----------- */
@@ -285,26 +208,6 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
         if (apiError.response?.status === 404) {
           console.log("⚠️ User not found in user-service; will treat as new user and skip prefill");
 
-          // attempt to fetch minimal info from auth-service so we can at least
-          // pre-populate full name / gender if available
-          try {
-            const authResp = await api.get("/api/auth/me");
-            const authUser = authResp.data.user;
-            console.log("🔁 Fetched user from auth-service:", authUser);
-            if (authUser) {
-              const combined = [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim();
-              if (combined) {
-                setFullName(combined);
-              }
-              if (authUser.sex) {
-                const genderDisplay = authUser.sex.charAt(0).toUpperCase() + authUser.sex.slice(1).toLowerCase();
-                setGender(genderDisplay);
-              }
-            }
-          } catch (authError) {
-            console.error("❌ Failed to fetch from auth-service:", authError);
-          }
-
           setLoadingProfile(false);
           return;
         }
@@ -327,43 +230,8 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           return;
         }
 
-        // If some basic fields are missing, try to fetch from auth-service as a fallback
-        if (!user.firstName || !user.lastName || !user.sex) {
-          try {
-            const authResp2 = await api.get("/api/auth/me");
-            const authUser2 = authResp2.data.user;
-            console.log("🔁 Fallback auth-service data:", authUser2);
-            if (authUser2) {
-              if ((!user.firstName || !user.lastName) && (authUser2.firstName || authUser2.lastName)) {
-                const combined = [authUser2.firstName, authUser2.lastName].filter(Boolean).join(" ").trim();
-                if (combined) {
-                  setFullName(combined);
-                  console.log("Fallback fullName from auth-service:", combined);
-                }
-              }
-              if (!user.sex && authUser2.sex) {
-                const genderDisplay = authUser2.sex.charAt(0).toUpperCase() + authUser2.sex.slice(1).toLowerCase();
-                setGender(genderDisplay);
-                console.log("Fallback gender from auth-service:", genderDisplay);
-              }
-            }
-          } catch (authErr) {
-            console.error("❌ Error fetching fallback auth user:", authErr);
-          }
-        }
-
-        // Auto-populate full name from registration data (firstName, lastName, sex from User table)
-        const combined = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-        if (combined) {
-          setFullName(combined);
-          console.log("Auto-populated fullName:", combined);
-        }
-        if (user.sex) {
-          // Capitalize first letter for display
-          const genderDisplay = user.sex.charAt(0).toUpperCase() + user.sex.slice(1).toLowerCase();
-          setGender(genderDisplay);
-          console.log("Auto-populated gender:", genderDisplay);
-        }
+        // Intentionally do not auto-populate full name or gender from registration/auth profile.
+        // User must enter these explicitly on this screen.
         
         // Prefill from profileExtras if available (DOB, addresses, Aadhaar last-4, etc.)
         if (extras.aadhaarLast4) {
@@ -943,7 +811,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
 
             {/* PHOTO */}
             <View className="flex-row items-center gap-5 mb-8">
-            <View className="w-20 h-20 rounded-full bg-gray-200 items-center justify-center overflow-hidden">
+            <View className="w-20 h-20 rounded-full border-2 border-gray-200 bg-white items-center justify-center overflow-hidden">
               {profileImage ? (
                 <Image
                   source={{ uri: profileImage }}
@@ -976,7 +844,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
             <TextInput
               placeholder="Enter full name"
               placeholderTextColor="#9CA3AF"
-              className="border border-gray-300 rounded-xl px-4 py-3 mb-1 bg-gray-50"
+              className="border border-gray-300 rounded-xl px-4 py-3 mb-1 bg-white"
               value={fullName}
               onChangeText={setFullName}
             />
@@ -989,7 +857,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
             {/* Last 4 digits of Aadhaar - 3 blocks: XXXX XXXX [input] */}
             <Text className="text-gray-700 font-semibold mb-2 mt-3">Last 4 digits of Aadhaar</Text>
             <View className="flex-row items-center gap-2 mb-1">
-              <View className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-gray-100 items-center justify-center">
+              <View className="flex-1 border bg-gray-100 border-gray-300 rounded-xl px-4 py-3 items-center justify-center">
                 <Text className="text-gray-500 font-mono text-lg">XXXX</Text>
               </View>
               <View className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-gray-100 items-center justify-center">
@@ -1000,7 +868,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 placeholderTextColor="#9CA3AF"
                 keyboardType="number-pad"
                 maxLength={4}
-                className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 text-center font-mono text-lg"
+                className="flex-1 border border-gray-300 rounded-xl px-4 py-3 bg-white text-center font-mono text-lg"
                 value={aadhaarLast4}
                 onChangeText={(t) => setAadhaarLast4(t.replace(/\D/g, "").slice(0, 4))}
               />
@@ -1039,7 +907,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 </View>
                 <Pressable
                   onPress={() => setShowGenderDropdown(!showGenderDropdown)}
-                  className="border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-gray-50"
+                  className="border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-white"
                 >
                   <Text className={gender ? "text-black" : "text-gray-400"}>
                     {gender || "Select"}
@@ -1121,7 +989,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 placeholderTextColor="#9CA3AF"
                 value={addressAsPerAadhaar.line1}
                 onChangeText={(t) => setAddressAsPerAadhaar((a) => ({ ...a, line1: t }))}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50"
+                className="border border-gray-300 rounded-xl px-4 py-3 bg-white"
                 style={{ color: "#000000" }}
               />
             </View>
@@ -1132,7 +1000,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 placeholderTextColor="#9CA3AF"
                 value={addressAsPerAadhaar.line2 || ""}
                 onChangeText={(t) => setAddressAsPerAadhaar((a) => ({ ...a, line2: t }))}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50"
+                className="border border-gray-300 rounded-xl px-4 py-3 bg-white"
                 style={{ color: "#000000" }}
               />
             </View>
@@ -1141,7 +1009,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 <Text className="text-gray-500 text-xs mb-1">State</Text>
                 <TouchableOpacity
                   onPress={() => { setEditingAddressKey("aadhaar"); setStateModalVisible(true); }}
-                  className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 flex-row justify-between items-center"
+                  className="border border-gray-300 rounded-xl px-4 py-3 bg-white flex-row justify-between items-center"
                 >
                   <Text numberOfLines={1} className={addressAsPerAadhaar.state ? "text-black" : "text-gray-400"}>
                     {addressAsPerAadhaar.state || "Select"}
@@ -1153,7 +1021,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 <Text className="text-gray-500 text-xs mb-1">City</Text>
                 <TouchableOpacity
                   onPress={() => { setEditingAddressKey("aadhaar"); setCityModalVisible(true); }}
-                  className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50 flex-row justify-between items-center"
+                  className="border border-gray-300 rounded-xl px-4 py-3 bg-white flex-row justify-between items-center"
                 >
                   <Text numberOfLines={1} className={addressAsPerAadhaar.city ? "text-black" : "text-gray-400"}>
                     {addressAsPerAadhaar.city || "Select"}
@@ -1171,7 +1039,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 maxLength={6}
                 value={addressAsPerAadhaar.pincode}
                 onChangeText={(t) => setAddressAsPerAadhaar((a) => ({ ...a, pincode: t.replace(/\D/g, "").slice(0, 6) }))}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50"
+                className="border border-gray-300 rounded-xl px-4 py-3 bg-white"
                 style={{ color: "#000000" }}
               />
             </View>
@@ -1208,7 +1076,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 editable={!sameAsAadhar}
                 value={currentAddress.line1}
                 onChangeText={(t) => setCurrentAddress((a) => ({ ...a, line1: t }))}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50"
+                className="border border-gray-300 rounded-xl px-4 py-3 bg-white"
               />
             </View>
             <View className="mb-2">
@@ -1219,7 +1087,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 editable={!sameAsAadhar}
                 value={currentAddress.line2 || ""}
                 onChangeText={(t) => setCurrentAddress((a) => ({ ...a, line2: t }))}
-                className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50"
+                className="border border-gray-300 rounded-xl px-4 py-3 bg-white"
               />
             </View>
             <View className="flex-row gap-3 mb-2">
@@ -1228,7 +1096,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 <TouchableOpacity
                   onPress={() => { if (!sameAsAadhar) { setEditingAddressKey("current"); setStateModalVisible(true); } }}
                   disabled={sameAsAadhar}
-                  className={`border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center ${sameAsAadhar ? "bg-gray-100" : "bg-gray-50"}`}
+                  className={`border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-white ${sameAsAadhar ? "border-dashed opacity-80" : ""}`}
                 >
                   <Text numberOfLines={1} className={currentAddress.state ? "text-black" : "text-gray-400"}>
                     {currentAddress.state || "Select"}
@@ -1241,7 +1109,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 <TouchableOpacity
                   onPress={() => { if (!sameAsAadhar) { setEditingAddressKey("current"); setCityModalVisible(true); } }}
                   disabled={sameAsAadhar}
-                  className={`border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center ${sameAsAadhar ? "bg-gray-100" : "bg-gray-50"}`}
+                  className={`border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-white ${sameAsAadhar ? "border-dashed opacity-80" : ""}`}
                 >
                   <Text numberOfLines={1} className={currentAddress.city ? "text-black" : "text-gray-400"}>
                     {currentAddress.city || "Select"}
@@ -1265,7 +1133,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                     scrollRef.current?.scrollToEnd({ });
                   }, 300);
                 }}
-                className={`border border-gray-300 rounded-xl px-4 py-3 ${sameAsAadhar ? "bg-gray-100" : "bg-gray-50"}`}
+                className={`border border-gray-300 rounded-xl px-4 py-3 bg-white ${sameAsAadhar ? "border-dashed opacity-80" : ""}`}
               />
             </View>
           </View>
@@ -1361,9 +1229,9 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           <View className="flex-row justify-between mt-8">
             <TouchableOpacity
               onPress={() => navigation.goBack()}
-              className="flex-1 py-4 rounded-2xl mr-3 bg-gray-100 border border-gray-200"
+              className="flex-1 py-4 rounded-2xl mr-3 bg-white border border-gray-300"
             >
-              <Text className="text-center text-gray-600 font-bold text-base">
+              <Text className="text-center text-gray-700 font-bold text-base">
                 Back
               </Text>
             </TouchableOpacity>

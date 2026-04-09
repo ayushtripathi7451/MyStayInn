@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   ScrollView,
   Platform,
@@ -21,14 +20,15 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   // Get user data from route params (confirmation comes from helper)
   const { mobile, first, last, gender, email } = route.params || {};
   
-  // Get confirmation from helper
-  const confirmation = getConfirmation();
-
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(30);
   const [canResend, setCanResend] = useState(false);
   const [cleaningUp, setCleaningUp] = useState(false);
+  const [missingSession, setMissingSession] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const [resendMessage, setResendMessage] = useState("");
+  const [resendError, setResendError] = useState("");
 
   // Refs for focusing next/previous input
   const inputs = [
@@ -42,12 +42,14 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
 
   // Handle individual digit change
   const handleChange = (text: string, index: number) => {
+    setOtpError("");
+    setResendMessage("");
     const newOtp = [...otp];
-    newOtp[index] = text;
+    newOtp[index] = text.replace(/[^0-9]/g, "").slice(0, 1);
     setOtp(newOtp);
 
     // Auto focus next input
-    if (text && index < 5) {
+    if (newOtp[index] && index < 5) {
       inputs[index + 1].current?.focus();
     }
   };
@@ -81,22 +83,8 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
 
   // Check if confirmation exists on mount
   useEffect(() => {
-    if (!confirmation) {
-      Alert.alert(
-        "Session Expired",
-        "Please go back and request OTP again.",
-        [
-          { 
-            text: "OK", 
-            onPress: () => {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: "Signup" }],
-              });
-            }
-          }
-        ]
-      );
+    if (!getConfirmation()) {
+      setMissingSession(true);
     }
   }, []);
 
@@ -110,16 +98,16 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   }, []);
 
   const verifyOTP = async () => {
+    setOtpError("");
+    setResendMessage("");
     if (!isValid) {
-      return Alert.alert("Wait", "Please enter the full 6-digit code.");
+      setOtpError("Please enter the full 6-digit code.");
+      return;
     }
 
-    if (!confirmation) {
-      Alert.alert("Error", "Session expired. Please request OTP again.");
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Signup" }],
-      });
+    const liveConfirmation = getConfirmation();
+    if (!liveConfirmation) {
+      setOtpError("Session expired. Go back and request a new OTP.");
       return;
     }
 
@@ -128,7 +116,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       const otpString = otp.join("");
 
       // 1. Confirm OTP with Firebase
-      const userCredential = await confirmation.confirm(otpString);
+      const userCredential = await liveConfirmation.confirm(otpString);
 
       // 2. Get the secure ID Token
       const firebaseIdToken = await userCredential.user.getIdToken();
@@ -157,39 +145,34 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       // Clear confirmation after successful verification
       clearConfirmation();
 
-      Alert.alert("Success", "Welcome to My-Stay! 🎉");
-
       navigation.reset({
         index: 0,
         routes: [{ name: "CreateMPINScreen" }],
       });
     } catch (error: any) {
       console.error("Verification Error:", error);
-      
+
       let errorMessage = "Invalid OTP or registration failed.";
-      
-      if (error.code === 'auth/invalid-verification-code') {
-        errorMessage = "Invalid OTP. Please check and try again.";
-      } else if (error.code === 'auth/session-expired') {
-        errorMessage = "OTP session expired. Please request a new code.";
+
+      if (error.code === "auth/invalid-verification-code") {
+        errorMessage = "Invalid OTP. Check the code and try again.";
+      } else if (error.code === "auth/session-expired") {
+        errorMessage = "OTP session expired. Request a new code from the previous screen.";
         clearConfirmation();
-        setTimeout(() => {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: "Signup" }],
-          });
-        }, 1500);
       } else {
-        errorMessage = error.response?.data?.message || error.message || "Invalid OTP or registration failed.";
+        errorMessage =
+          error.response?.data?.message || error.message || "Invalid OTP or registration failed.";
       }
-      
-      Alert.alert("Error", errorMessage);
+
+      setOtpError(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
   const resendOTP = async () => {
+    setResendError("");
+    setResendMessage("");
     try {
       setLoading(true);
       
@@ -217,8 +200,8 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       setCanResend(false);
       setOtp(["", "", "", "", "", ""]);
       inputs[0].current?.focus();
-      
-      Alert.alert("OTP Resent", "A new OTP has been sent to your phone");
+
+      setResendMessage("A new OTP has been sent to your phone.");
     } catch (error: any) {
       console.error("Resend OTP Error:", error);
       
@@ -232,7 +215,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
         friendlyMessage = "SMS quota exceeded. Please try again later.";
       }
       
-      Alert.alert("Error", friendlyMessage);
+      setResendError(friendlyMessage);
     } finally {
       setLoading(false);
     }
@@ -257,6 +240,27 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       routes: [{ name: "Signup" }],
     });
   };
+
+  if (missingSession) {
+    return (
+      <SafeAreaView className="flex-1 bg-white px-6 justify-center">
+        <Text className="text-lg font-semibold text-gray-900 text-center mb-2">
+          Session expired
+        </Text>
+        <Text className="text-gray-600 text-center mb-6">
+          Request OTP again from the sign-up screen.
+        </Text>
+        <TouchableOpacity
+          onPress={() =>
+            navigation.reset({ index: 0, routes: [{ name: "Signup" }] })
+          }
+          className="bg-purple-600 py-4 rounded-xl"
+        >
+          <Text className="text-center text-white font-semibold">Back to sign up</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -293,7 +297,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
 
             {/* INFO TEXT */}
             <Text className="text-gray-700 mt-8 mb-4">
-              We have sent a 6-digit code to{" "}
+              Enter 6-digit code sent to{" "}
               <Text className="font-semibold">{mobile}</Text>, enter it below:
             </Text>
 
@@ -312,6 +316,18 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
                 />
               ))}
             </View>
+
+            {otpError ? (
+              <Text className="text-red-600 text-sm mb-3" accessibilityLiveRegion="polite">
+                {otpError}
+              </Text>
+            ) : null}
+            {resendMessage ? (
+              <Text className="text-emerald-700 text-sm mb-3">{resendMessage}</Text>
+            ) : null}
+            {resendError ? (
+              <Text className="text-red-600 text-sm mb-3">{resendError}</Text>
+            ) : null}
 
             {/* TIMER */}
             <View className="items-center mb-6">

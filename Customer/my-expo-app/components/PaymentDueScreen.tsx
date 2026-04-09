@@ -11,235 +11,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "./BottomNav";
 import { useCurrentStay, usePaymentHistory, useUser } from "../src/hooks";
-
-const toBool = (v: any) => v === true || v === "true" || v === 1;
-
-// Helper function for year-month formatting
-function yearMonth(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-type DueItem = {
-  id: string;
-  label: string;
-  monthLabel: string;
-  amount: number;
-  type: "security_deposit" | "rent_online" | "rent_cash";
-  paymentId?: string;
-};
-
-/** 
- * Derives all unpaid dues from the server response.
- * Shows each unpaid month as a separate line item
- */
-function deriveDueItemsFromRaw(raw: any): DueItem[] {
-  console.log('[PaymentDue] ========== deriveDueItemsFromRaw START ==========');
-  const items: DueItem[] = [];
-  if (!raw?.booking || !raw?.property) return items;
-
-  const booking = raw.booking;
-  const rentPeriod = String(booking.rentPeriod || 'month').toLowerCase();
-  const isDailyRent = rentPeriod === 'day';
-
-  const scheduledOnlineRent = Number(booking.scheduledOnlineRent) || 0;
-  const scheduledCashRent = Number(booking.scheduledCashRent) || 0;
-
-  console.log('[PaymentDue] rentPeriod:', rentPeriod);
-
-  if (isDailyRent) {
-    const dailyPayments = Array.isArray(booking.dailyPayments) ? booking.dailyPayments : [];
-    const sortedPayments = dailyPayments
-      .map((p: any) => ({
-        ...p,
-        paymentDateObj: new Date(p.paymentDate || p.date),
-      }))
-      .sort((a: any, b: any) => b.paymentDateObj.getTime() - a.paymentDateObj.getTime());
-
-    sortedPayments.forEach((p: any) => {
-      const monthLabel = p.paymentDateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-      const rawAmount = Number(p.amount || 0);
-      const cashAmount = Number(p.cashAmount || 0);
-      const onlineAmount = Number(
-        p.onlineAmount != null
-          ? p.onlineAmount
-          : rawAmount > 0
-            ? Math.max(0, rawAmount - cashAmount)
-            : scheduledOnlineRent
-      );
-      const pid = p.id != null ? String(p.id) : undefined;
-
-      if (!toBool(p.paidOnline) && onlineAmount > 0) {
-        items.push({
-          id: `daily_online_${pid ?? monthLabel}`,
-          label: 'Daily Rent (online)',
-          monthLabel,
-          amount: onlineAmount,
-          type: 'rent_online',
-          paymentId: pid,
-        });
-      }
-
-      if (!toBool(p.paidCash) && cashAmount > 0) {
-        items.push({
-          id: `daily_cash_${pid ?? monthLabel}`,
-          label: 'Daily Rent (cash)',
-          monthLabel,
-          amount: cashAmount,
-          type: 'rent_cash',
-          paymentId: pid,
-        });
-      }
-    });
-
-    // Fallback for setups where daily rows are not yet created.
-    if (sortedPayments.length === 0) {
-      const today = new Date();
-      const monthLabel = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-      if (scheduledOnlineRent > 0 && !toBool(booking.isRentOnlinePaid)) {
-        items.push({
-          id: `daily_online_fallback_${booking.id}`,
-          label: 'Daily Rent (online)',
-          monthLabel,
-          amount: scheduledOnlineRent,
-          type: 'rent_online',
-        });
-      }
-      if (scheduledCashRent > 0 && !toBool(booking.isRentCashPaid)) {
-        items.push({
-          id: `daily_cash_fallback_${booking.id}`,
-          label: 'Daily Rent (cash)',
-          monthLabel,
-          amount: scheduledCashRent,
-          type: 'rent_cash',
-        });
-      }
-    }
-
-    // Security deposit if not paid
-    const securityAmount = Number(booking.securityDeposit) || 0;
-    if (securityAmount > 0 && !toBool(booking.isSecurityPaid)) {
-      items.push({
-        id: 'security_deposit',
-        label: 'Security deposit',
-        monthLabel: new Date(booking.moveInDate).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
-        amount: securityAmount,
-        type: 'security_deposit',
-      });
-    }
-
-    return items;
-  }
-
-  const monthlyRent = Number(booking.scheduledOnlineRent) || Number(booking.rentAmount) || 0;
-  
-  // ✅ Parse paid months from comma-separated string into a Set
-  const paidMonthsStr = booking.rentOnlinePaidYearMonth || '';
-  const paidMonths = new Set(paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean));
-  
-  console.log('[PaymentDue] Paid months:', Array.from(paidMonths));
-  console.log('[PaymentDue] Monthly rent:', monthlyRent);
-
-  // Calculate first due month based on move-in date
-  const moveInDate = booking.moveInDate ? new Date(booking.moveInDate) : null;
-  let firstDueYm = null;
-  if (moveInDate) {
-    const moveInDay = moveInDate.getDate();
-    const moveInYm = yearMonth(moveInDate);
-    const nextMonthYm = yearMonth(new Date(moveInDate.getFullYear(), moveInDate.getMonth() + 1, 1));
-    firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
-    console.log('[PaymentDue] First due month:', firstDueYm);
-  }
-
-  // ✅ Generate items for each unpaid month
-  if (firstDueYm && monthlyRent > 0) {
-    const current = new Date();
-    const currentYm = yearMonth(current);
-
-    // Parse dates
-    const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
-    const [currentYear, currentMonth] = currentYm.split('-').map(Number);
-
-    console.log('[PaymentDue] Date ranges:', {
-      firstDue: `${firstYear}-${firstMonth}`,
-      current: `${currentYear}-${currentMonth}`,
-      paidMonths: Array.from(paidMonths),
-    });
-
-    // Start from first due month
-    let year = firstYear;
-    let month = firstMonth;
-
-    // ✅ Loop from first due month to current month
-    while (year < currentYear || (year === currentYear && month <= currentMonth)) {
-      const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-
-      // ✅ Skip if already paid
-      if (paidMonths.has(monthKey)) {
-        console.log(`[PaymentDue] Skipping paid month: ${monthKey}`);
-        month++;
-        if (month > 12) {
-          month = 1;
-          year++;
-        }
-        continue;
-      }
-
-      const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-      });
-
-      console.log(`[PaymentDue] ✅ Adding unpaid month: ${monthKey} -> ${monthLabel}`);
-
-      items.push({
-        id: `rent_online_${monthKey}`,
-        label: "Rent (online)",
-        monthLabel,
-        amount: monthlyRent,
-        type: "rent_online",
-      });
-
-      // Move to next month
-      month++;
-      if (month > 12) {
-        month = 1;
-        year++;
-      }
-    }
-  }
-
-  // Add security deposit if not paid (only once)
-  const securityAmount = Number(booking.securityDeposit) || 0;
-  if (securityAmount > 0 && !toBool(booking.isSecurityPaid)) {
-    items.push({
-      id: "security_deposit",
-      label: "Security deposit",
-      monthLabel: new Date(booking.moveInDate).toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-      }),
-      amount: securityAmount,
-      type: "security_deposit",
-    });
-    console.log('[PaymentDue] ✅ Adding security deposit:', securityAmount);
-  }
-
-  // Add cash rent if configured (simplified - assumes single amount)
-  const cashRecv = Number(booking.cashPaymentRecv) || 0;
-  if (cashRecv > 0 && !toBool(booking.isRentCashPaid)) {
-    items.push({
-      id: "rent_cash",
-      label: "Rent (cash)",
-      monthLabel: new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
-      amount: cashRecv,
-      type: "rent_cash",
-    });
-    console.log('[PaymentDue] ✅ Adding cash rent:', cashRecv);
-  }
-
-  console.log('[PaymentDue] Final items count:', items.length);
-  return items;
-}
+import { deriveDueItemsGrouped, stayListFromRaw, type DueItem } from "./DueAmount";
 
 export default function PaymentDueScreen({ navigation }: any) {
   const { raw, loading, refresh } = useCurrentStay();
@@ -276,10 +48,10 @@ export default function PaymentDueScreen({ navigation }: any) {
     return () => clearInterval(t);
   }, [refresh, refreshHistory]);
 
-  const dueItems = useMemo(() => deriveDueItemsFromRaw(raw), [raw]);
+  const dueGroups = useMemo(() => deriveDueItemsGrouped(raw), [raw]);
   const totalDue = useMemo(
-    () => dueItems.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
-    [dueItems]
+    () => dueGroups.reduce((sum, g) => sum + g.total, 0),
+    [dueGroups]
   );
 
   const formatAmount = (n: number) =>
@@ -292,12 +64,16 @@ export default function PaymentDueScreen({ navigation }: any) {
 
     let yearMonthValue: string | undefined;
 
-    if (item.id.startsWith("rent_online_")) {
-      yearMonthValue = item.id.replace("rent_online_", "");
-    } else if (item.id.startsWith("daily_online_")) {
-      // Keep monthly marker for backwards compatibility; concrete daily row uses paymentId.
-      const today = new Date();
-      yearMonthValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    // `daily_online_*` contains substring `rent_online_` — check daily patterns first.
+    const todayYm = () => {
+      const t = new Date();
+      return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+    };
+    if (item.id.includes("daily_online_") || item.id.includes("dailyrent_agg_online")) {
+      yearMonthValue = todayYm();
+    } else if (item.id.includes("rent_online_")) {
+      const rentMatch = item.id.match(/rent_online_(\d{4}-\d{2})/);
+      yearMonthValue = rentMatch ? rentMatch[1] : undefined;
     }
 
     console.log('[PaymentDue] Paying item:', item.id, 'yearMonthValue:', yearMonthValue);
@@ -305,10 +81,14 @@ export default function PaymentDueScreen({ navigation }: any) {
     navigation.navigate("DepositCheckoutScreen", {
       type: item.type,
       amount: item.amount,
+      propertyId: item.propertyId,
+      ownerId: item.ownerId,
+      bookingId: item.bookingId,
       monthLabel: item.monthLabel,
       yearMonth: yearMonthValue,
       paymentId: item.paymentId,
-      returnTo: "PaymentDue"
+      paymentDate: item.paymentDate,
+      returnTo: "PaymentDue",
     });
   };
 
@@ -359,57 +139,76 @@ export default function PaymentDueScreen({ navigation }: any) {
         {/* Due Amount Section */}
         <View className="flex-row justify-between items-center mb-3">
           <Text className="text-lg font-semibold text-slate-800">Due Amount</Text>
-          {dueItems.length > 0 && (
+          {dueGroups.length > 0 && (
             <Text className="text-base text-slate-600">Total: ₹{formatAmount(totalDue)}</Text>
           )}
         </View>
 
-        {dueItems.length === 0 ? (
+        {dueGroups.length === 0 ? (
           <View className="bg-white rounded-2xl py-5 px-5 mb-4 border border-slate-200 shadow-sm">
             <Text className="text-slate-600 text-base">No pending dues.</Text>
-            {!!raw?.booking?.rentInfoMessage && (
-              <Text className="text-slate-500 text-sm mt-3 leading-5">
-                {String(raw.booking.rentInfoMessage)}
-              </Text>
-            )}
-            <TouchableOpacity
+            {stayListFromRaw(raw)
+              .map((s) => s?.booking?.rentInfoMessage)
+              .filter(Boolean)
+              .map((msg, idx) => (
+                <Text key={idx} className="text-slate-500 text-sm mt-3 leading-5">
+                  {String(msg)}
+                </Text>
+              ))}
+            {/* <TouchableOpacity
               onPress={handleForceRefresh}
               className="mt-4 px-6 py-2 bg-yellow-500/20 rounded-full border border-yellow-500/30 self-start"
             >
               <Text className="text-yellow-600 font-semibold text-xs uppercase tracking-widest">
                 Force Refresh
               </Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         ) : (
           <>
-            {dueItems.map((item, index) => (
-              <View
-                key={`due-${index}-${item.id}`}
-                className="bg-[#FFECEC] border-2 border-[#FFB3B3] rounded-2xl py-4 px-5 mb-3 flex-row justify-between items-center shadow-sm"
-              >
-                <View className="flex-1">
-                  <Text className="text-red-800 font-semibold text-base">{item.label}</Text>
-                  <Text className="text-red-600/90 text-sm mt-1">{item.monthLabel}</Text>
+            {dueGroups.map((group) => (
+              <View key={group.key} className="mb-5">
+                <View className="mb-2 px-1">
+                  <Text className="text-slate-900 font-bold text-base">{group.propertyName}</Text>
+                  <Text className="text-slate-500 text-xs mt-0.5">
+                    {group.dueContext === "enrollment"
+                      ? "Pending enrollment — security / rent for this property only"
+                      : "Active stay — rent & deposit for this property only"}
+                  </Text>
                 </View>
-                <View className="flex-row items-center gap-3">
-                  <Text className="text-red-700 font-bold text-lg">₹{formatAmount(item.amount)}</Text>
-                  {item.type === "rent_cash" ? (
-                    <Text className="text-red-600/90 text-sm font-medium">Pay via cash</Text>
-                  ) : (
-                    <TouchableOpacity
-                      activeOpacity={0.8}
-                      onPress={() => handlePayNow(item)}
-                      className="bg-red-600 px-4 py-2.5 rounded-xl"
-                    >
-                      <Text className="text-white text-sm font-semibold">Pay Now</Text>
-                    </TouchableOpacity>
-                  )}
+                {group.items.map((item, index) => (
+                  <View
+                    key={`${group.key}-due-${item.id}-${index}`}
+                    className="bg-[#FFECEC] border-2 border-[#FFB3B3] rounded-2xl py-4 px-5 mb-3 flex-row justify-between items-center shadow-sm"
+                  >
+                    <View className="flex-1 pr-2">
+                      <Text className="text-red-800 font-semibold text-base">{item.label}</Text>
+                      <Text className="text-red-600/90 text-sm mt-1">{item.monthLabel}</Text>
+                    </View>
+                    <View className="flex-row items-center gap-3">
+                      <Text className="text-red-700 font-bold text-lg">₹{formatAmount(item.amount)}</Text>
+                      {item.type === "rent_cash" ? (
+                        <Text className="text-red-600/90 text-sm font-medium">Pay via cash</Text>
+                      ) : (
+                        <TouchableOpacity
+                          activeOpacity={0.8}
+                          onPress={() => handlePayNow(item)}
+                          className="bg-red-600 px-4 py-2.5 rounded-xl"
+                        >
+                          <Text className="text-white text-sm font-semibold">Pay Now</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                ))}
+                <View className="bg-amber-50 rounded-xl py-2 px-3 mb-1 flex-row justify-between border border-amber-100">
+                  <Text className="text-amber-900 text-sm font-medium">Subtotal ({group.propertyName})</Text>
+                  <Text className="text-amber-900 font-bold">₹{formatAmount(group.total)}</Text>
                 </View>
               </View>
             ))}
-            <View className="bg-slate-200/70 rounded-2xl py-4 px-5 mt-3 flex-row justify-between items-center border border-slate-300">
-              <Text className="text-slate-700 font-semibold text-base">Total due</Text>
+            <View className="bg-slate-200/70 rounded-2xl py-4 px-5 mt-2 flex-row justify-between items-center border border-slate-300">
+              <Text className="text-slate-700 font-semibold text-base">Total due (all properties)</Text>
               <Text className="text-slate-900 font-bold text-lg">₹{formatAmount(totalDue)}</Text>
             </View>
           </>

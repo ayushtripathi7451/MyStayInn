@@ -16,14 +16,17 @@ import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "../context/ThemeContext";
 import { ticketApi, userApi } from "../utils/api";
 
-// Build property options from current stay. value = property name (what user selects) so ticket stores name and owner can match.
-function buildPropertyOptions(currentStay: any): { label: string; value: string }[] {
-  if (!currentStay?.booking || !currentStay?.room || !currentStay?.property) return [];
-  const name = currentStay.room?.propertyName || currentStay.property?.name || "Property";
-  const roomNumber = currentStay.room?.roomNumber || "";
-  const label = roomNumber ? `${name} - Room ${roomNumber}` : name;
-  if (!label.trim()) return [];
-  return [{ label, value: label }];
+// Build property options from one or more active stays. value = property name (what user selects).
+function buildPropertyOptionsFromStays(stays: any[]): { label: string; value: string }[] {
+  const out: { label: string; value: string }[] = [];
+  for (const currentStay of stays) {
+    if (!currentStay?.booking || !currentStay?.room || !currentStay?.property) continue;
+    const name = currentStay.room?.propertyName || currentStay.property?.name || "Property";
+    const roomNumber = currentStay.room?.roomNumber || "";
+    const label = roomNumber ? `${name} - Room ${roomNumber}` : name;
+    if (label.trim()) out.push({ label, value: label });
+  }
+  return out;
 }
 
 export default function CreateRequestScreen({ navigation }: any) {
@@ -43,9 +46,19 @@ export default function CreateRequestScreen({ navigation }: any) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await userApi.get<{ success: boolean; currentStay: any }>("/api/users/me/current-stay");
+        const res = await userApi.get<{
+          success: boolean;
+          currentStay: any;
+          currentStays?: any[];
+        }>("/api/users/me/current-stay");
         if (cancelled) return;
-        const options = buildPropertyOptions(res.data?.currentStay ?? null);
+        const list =
+          Array.isArray(res.data?.currentStays) && res.data!.currentStays!.length > 0
+            ? res.data!.currentStays!
+            : res.data?.currentStay
+              ? [res.data.currentStay]
+              : [];
+        const options = buildPropertyOptionsFromStays(list);
         setPropertyOptions(options);
         if (options.length === 1) setSelectedPropertyRef(options[0].value);
       } catch (_) {

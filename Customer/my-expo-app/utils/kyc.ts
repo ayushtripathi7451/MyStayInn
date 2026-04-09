@@ -6,7 +6,8 @@ const norm = (value: MaybeString) =>
     .toLowerCase()
     .replace(/\s+/g, " ");
 
-const parseDateOnly = (value: MaybeString): string | null => {
+/** Normalize a date string to ISO `YYYY-MM-DD` for comparison (same logic as Complete Profile). */
+export const parseDateOnly = (value: MaybeString): string | null => {
   const raw = String(value || "").trim();
   if (!raw) return null;
 
@@ -63,6 +64,40 @@ const isExplicitKycVerified = (value: unknown): boolean | null => {
   if (["verified", "kyc_verified", "approved"].includes(status)) return true;
   if (["unverified", "rejected", "pending", "kyc_unverified"].includes(status)) return false;
   return null;
+};
+
+/**
+ * Same rules as Complete Profile: full name, DOB, and gender must match Aadhaar data.
+ * Ignores stored `kycStatus` / `kycVerified` so we can decide verification after a fresh KYC response.
+ */
+export const computeKycIdentityMatch = (
+  profile: any,
+  aadhaarData: any,
+  aadhaarVerified = true
+): boolean => {
+  if (!aadhaarVerified || !aadhaarData || typeof aadhaarData !== "object") return false;
+
+  const profileName = norm([profile?.firstName, profile?.lastName].filter(Boolean).join(" "));
+  const aadhaarName = norm(aadhaarData?.name);
+  const nameMatch = Boolean(profileName && aadhaarName && profileName === aadhaarName);
+
+  const profileDob = parseDateOnly(profile?.profileExtras?.dob);
+  const aadhaarDob = parseDateOnly(aadhaarData?.dob);
+  const dobMatch = Boolean(profileDob && aadhaarDob && profileDob === aadhaarDob);
+
+  const aadhaarGenderDisplay =
+    aadhaarData?.gender === "M"
+      ? "Male"
+      : aadhaarData?.gender === "F"
+        ? "Female"
+        : String(aadhaarData?.gender || "");
+  const profileGenderNorm = norm(profile?.sex || "");
+  const aadhaarGenderNorm = norm(aadhaarGenderDisplay);
+  const genderMatch = Boolean(
+    aadhaarGenderNorm && profileGenderNorm && profileGenderNorm === aadhaarGenderNorm
+  );
+
+  return Boolean(nameMatch && dobMatch && genderMatch);
 };
 
 export const resolveFinalKycVerified = (profile: any, aadhaarDataOverride?: any): boolean => {

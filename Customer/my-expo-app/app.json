@@ -2,6 +2,7 @@
   "expo": {
     "name": "my-expo-app",
     "slug": "my-expo-app",
+    "owner": "its.ayushhhhh",  
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -52,7 +53,6 @@
           }
         }
       ],
-      
       "expo-secure-store",
       "expo-web-browser"
     ],
@@ -61,7 +61,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "9900608b-36a5-4f28-acdd-79466b0bd53b"
+        "projectId": "5252b5b9-f010-46e0-844b-225ad2f455a3"
       }
     }
   }

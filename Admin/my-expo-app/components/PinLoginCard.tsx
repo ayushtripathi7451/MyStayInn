@@ -5,17 +5,17 @@ import {
   TextInput,
   TouchableOpacity,
   Keyboard,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api, propertyApi } from '../utils/api';
+import { api, propertyApi, getAuthBearerToken } from '../utils/api';
 
 export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinFocus }: any) {
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const inputRef = useRef<TextInput>(null);
   const [showCaret, setShowCaret] = useState(true);
 
@@ -44,13 +44,13 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
   const handleVerifyMPIN = async () => {
     try {
       setLoading(true);
+      setError('');
 
       // Check if user token exists (required for API call)
       // The actual token is automatically added by api.interceptors
-      const token = await AsyncStorage.getItem('USER_TOKEN');
-      
+      const token = await getAuthBearerToken();
       if (!token) {
-        Alert.alert('Error', 'Authentication token not found. Please login again.');
+        setError('Session expired. Please sign in again.');
         navigation.replace('Register');
         return;
       }
@@ -63,8 +63,8 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
       );
 
       if (response.data.success) {
-        // Successful login
         setPin('');
+        setError('');
         Keyboard.dismiss();
         setGlobalPinFocus(false);
         
@@ -98,26 +98,23 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
           ? `Account locked. Please try again in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}.`
           : error.response?.data?.message || 'Account temporarily locked. Please try again later.';
         
-        Alert.alert('Account Locked', message);
+        setError(message);
         setPin('');
       } else if (error.response?.status === 401) {
         // Wrong MPIN
         const attemptsLeft = error.response?.data?.attemptsLeft;
         setPin('');
-        
         if (attemptsLeft !== undefined) {
-          Alert.alert('Wrong MPIN', `Attempts left: ${attemptsLeft}`);
+          setError(`Incorrect MPIN. Attempts left: ${attemptsLeft}.`);
         } else {
-          Alert.alert('Wrong MPIN', 'Please try again.');
+          setError('Incorrect MPIN. Please try again.');
         }
       } else if (error.response?.status === 404) {
-        // MPIN not set
-        Alert.alert('MPIN not found', 'Please create your MPIN first.');
+        setError('No MPIN set yet. Opening MPIN setup…');
         navigation.replace('CreateMPIN');
       } else {
-        // Other errors
         const errorMessage = error.response?.data?.message || 'Failed to verify MPIN. Please try again.';
-        Alert.alert('Error', errorMessage);
+        setError(errorMessage);
         setPin('');
       }
     } finally {
@@ -146,12 +143,15 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
       <Text className="mb-1 text-center text-[22px] font-semibold text-white">
         Unlock to use MyStayInn
       </Text>
-      <Text className="mb-4 text-center text-[14px] text-white/80">Enter your current PIN</Text>
+      <Text className="mb-4 text-center text-[14px] text-white/80">Enter your current MPIN</Text>
 
       <TextInput
         ref={inputRef}
         value={pin}
-        onChangeText={(t) => setPin(t.replace(/[^0-9]/g, '').slice(0, 4))}
+        onChangeText={(t) => {
+          setPin(t.replace(/[^0-9]/g, '').slice(0, 4));
+          setError('');
+        }}
         keyboardType="number-pad"
         maxLength={4}
         caretHidden={true}
@@ -177,10 +177,20 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
         </View>
       </TouchableOpacity>
 
+      {error ? (
+        <Text
+          className="text-center text-amber-100 text-sm mb-3 px-1"
+          accessibilityLiveRegion="polite"
+        >
+          {error}
+        </Text>
+      ) : null}
+
       <View className="flex-row justify-between items-center">
         <TouchableOpacity 
           onPress={() => { 
             setPin('');
+            setError('');
             Keyboard.dismiss();
             setGlobalPinFocus(false); 
           }}

@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api } from "../utils/api";
+import { api, userApi } from "../utils/api";
 
 export default function ChangeMPINScreen({ navigation }: any) {
   const [mobile, setMobile] = useState("");
@@ -121,8 +121,34 @@ export default function ChangeMPINScreen({ navigation }: any) {
         newPin,
       });
       if (response.data?.success) {
-        Alert.alert("Success", "MPIN changed successfully");
-        navigation.replace("LoginPin");
+        const token = await AsyncStorage.getItem("USER_TOKEN");
+        if (!token) {
+          Alert.alert("Success", "MPIN changed successfully. Please log in with your new MPIN.");
+          navigation.replace("LoginPin");
+          return;
+        }
+        try {
+          const me = await userApi.get("/api/users/me");
+          const user = me.data?.user;
+          const extras = user?.profileExtras || {};
+          if (extras.profileCompleted === true) {
+            const userData = await AsyncStorage.getItem("userData");
+            if (userData) {
+              const u = JSON.parse(userData);
+              const { registerPushNotifications } = await import(
+                "../utils/pushNotifications"
+              );
+              if (u?.id != null || u?.uniqueId) {
+                registerPushNotifications().catch(() => {});
+              }
+            }
+            navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+          } else {
+            navigation.reset({ index: 0, routes: [{ name: "CompleteProfile" }] });
+          }
+        } catch {
+          navigation.reset({ index: 0, routes: [{ name: "CompleteProfile" }] });
+        }
       } else {
         Alert.alert("Error", response.data?.message || "Failed to change MPIN");
       }

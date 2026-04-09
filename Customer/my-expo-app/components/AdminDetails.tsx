@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -22,6 +23,7 @@ import { useTheme } from "../context/ThemeContext";
 import MapFallback from "./MapFallback";
 import ScrollableDatePicker from "./ScrollableDatePicker";
 import { Keyboard } from "react-native";
+import { propertyApi } from "../utils/api";
 
 type Admin = {
   id: string;
@@ -48,6 +50,32 @@ function toList(value: any): string[] {
       .filter(([, v]) => !!v)
       .map(([k]) => k);
   return [];
+}
+
+function extractSecurityDepositFromRules(rules: any): number | null {
+  if (rules == null) return null;
+  let parsed: any = rules;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof parsed !== "object") return null;
+  const candidates = [
+    parsed?.securityDeposit,
+    parsed?.security_deposit,
+    parsed?.deposit,
+    parsed?.depositAmount,
+    parsed?.terms?.securityDeposit,
+    parsed?.terms?.security_deposit,
+    parsed?.rules?.securityDeposit,
+  ];
+  for (const c of candidates) {
+    if (c != null && !Number.isNaN(Number(c))) return Number(c);
+  }
+  return null;
 }
 
 export default function AdminDetailsScreen({ route, navigation }: any) {
@@ -98,11 +126,32 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
   const propertyType = fp?.propertyType ?? property?.roomType ?? "—";
   const propertyId = fp?.uniqueId ?? fp?.id ?? admin?.id ?? "—";
   const hasFullData = !!fp;
-  // Security deposit from backend (rules.securityDeposit)
-  const securityDepositAmount =
-    hasFullData && fp?.rules && typeof fp.rules === "object" && (fp.rules as any).securityDeposit != null
-      ? Number((fp.rules as any).securityDeposit)
-      : null;
+  // Prefer human-readable property id (MYP…) for API; internal numeric id second — avoids flaky public lookups
+  const propertyLookupIds = useMemo(() => {
+    const raw = [fullProperty?.uniqueId, fullProperty?.id, property?.uniqueId, property?.id];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const x of raw) {
+      if (x == null) continue;
+      const s = String(x).trim();
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+    }
+    return out;
+  }, [fullProperty?.uniqueId, fullProperty?.id, property?.uniqueId, property?.id]);
+
+  // Security deposit set by owner in property rules
+  const [securityDepositAmount, setSecurityDepositAmount] = useState<number | null>(() => {
+    const initFp = fullProperty;
+    if (
+      initFp?.securityDeposit != null &&
+      !Number.isNaN(Number(initFp.securityDeposit))
+    ) {
+      return Number(initFp.securityDeposit);
+    }
+    return extractSecurityDepositFromRules(initFp?.rules);
+  });
   // Boys / Girls / Colive from description (e.g. "PG for Boys") or rules.propertyFor if added later
   const propertyFor =
     hasFullData && fp?.rules && typeof fp.rules === "object" && (fp.rules as any).propertyFor
@@ -172,12 +221,81 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
   const [checkOut, setCheckOut] = useState<Date | null>(null);
   const [roomPreference, setRoomPreference] = useState("");
   const [comments, setComments] = useState("");
+  // Re-sync deposit when search payload updates (e.g. list vs detail shape)
+  useEffect(() => {
+    if (!fullProperty) return;
+    const fromPayload =
+      fullProperty.securityDeposit != null &&
+      !Number.isNaN(Number(fullProperty.securityDeposit))
+        ? Number(fullProperty.securityDeposit)
+        : extractSecurityDepositFromRules(fullProperty.rules);
+    if (fromPayload != null && !Number.isNaN(fromPayload)) {
+      setSecurityDepositAmount((prev) =>
+        prev == null || Number.isNaN(Number(prev)) ? fromPayload : prev
+      );
+    }
+  }, [fullProperty]);
+
   // Pre-fill security deposit from backend when available
   useEffect(() => {
     if (securityDepositAmount != null && !isNaN(securityDepositAmount) && advance === "") {
       setAdvance(String(securityDepositAmount));
     }
-  }, [securityDepositAmount]);
+  }, [securityDepositAmount, advance]);
+
+  const fetchSecurityDepositFromApi = useCallback(
+    async (shouldAbort?: () => boolean) => {
+      if (propertyLookupIds.length === 0) return;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (shouldAbort?.()) return;
+        for (const lookupId of propertyLookupIds) {
+          if (shouldAbort?.()) return;
+          try {
+            const res = await propertyApi.get(
+              `/api/properties/public/${encodeURIComponent(lookupId)}`,
+              { timeout: 15000 }
+            );
+            const fetched = res?.data?.property;
+            const sd =
+              fetched?.securityDeposit != null &&
+              !Number.isNaN(Number(fetched?.securityDeposit))
+                ? Number(fetched.securityDeposit)
+                : extractSecurityDepositFromRules(fetched?.rules);
+            if (shouldAbort?.()) return;
+            if (sd != null && !Number.isNaN(Number(sd))) {
+              setSecurityDepositAmount(Number(sd));
+              return;
+            }
+          } catch {
+            /* try next id / retry */
+          }
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        }
+      }
+    },
+    [propertyLookupIds]
+  );
+
+  // If list payload omitted deposit or rules, load from public property API (customer-safe; owner-only GET /:id skipped — 403 for non-owners)
+  useEffect(() => {
+    if (securityDepositAmount != null && !Number.isNaN(securityDepositAmount)) return;
+    if (propertyLookupIds.length === 0) return;
+    let cancelled = false;
+    void fetchSecurityDepositFromApi(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [securityDepositAmount, propertyLookupIds, fetchSecurityDepositFromApi]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (securityDepositAmount != null && !Number.isNaN(securityDepositAmount)) return;
+      if (propertyLookupIds.length === 0) return;
+      void fetchSecurityDepositFromApi();
+    }, [securityDepositAmount, propertyLookupIds, fetchSecurityDepositFromApi])
+  );
 
   const today = new Date(new Date().setHours(0, 0, 0, 0));
   const isPastCheckIn = !!checkIn && checkIn < today;
@@ -213,7 +331,12 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
         propertyId,
         moveInDate: checkIn?.toISOString?.()?.split("T")[0],
         moveOutDate: checkOut ? checkOut.toISOString?.()?.split("T")[0] : null,
-        securityDeposit: advance ? Number(advance) : securityDepositAmount ?? 0,
+        securityDeposit:
+          securityDepositAmount != null && !Number.isNaN(securityDepositAmount)
+            ? Number(securityDepositAmount)
+            : advance
+              ? Number(advance)
+              : 0,
         payDepositLater: true,
         roomPreference: roomPreference.trim() || null,
         comments: comments.trim() || null,
@@ -672,7 +795,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
               </TouchableOpacity>
             )}
 
-            {/* SECURITY DEPOSIT (pre-filled from backend, always visible and editable) */}
+            {/* SECURITY DEPOSIT (owner-configured, read-only for customer) */}
             <Text className="text-gray-700 mb-1 mt-2">
               Security Deposit
             </Text>
@@ -680,14 +803,13 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
               <Ionicons name="cash-outline" size={18} color="#6B7280" />
               <TextInput
                 value={advance}
-                onChangeText={setAdvance}
-                editable
+                editable={false}
                 keyboardType="numeric"
                 placeholderTextColor="#64748B"
                 placeholder={
                   securityDepositAmount != null && !isNaN(securityDepositAmount)
                     ? `₹${securityDepositAmount.toLocaleString("en-IN")} (as per property)`
-                    : "Enter amount (optional)"
+                    : "Security deposit not configured by owner"
                 }
                 className="ml-2 flex-1"
                 style={{ color: "#0F172A", fontWeight: "700" }}
@@ -695,7 +817,7 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
             </View>
             {securityDepositAmount != null && !isNaN(securityDepositAmount) && (
               <Text className="text-[12px] font-semibold mt-1" style={{ color: "#1E33FF" }}>
-                Auto-fetched deposit: ₹{securityDepositAmount.toLocaleString("en-IN")}
+                As set by owner: ₹{securityDepositAmount.toLocaleString("en-IN")}
               </Text>
             )}
 

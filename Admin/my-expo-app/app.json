@@ -59,14 +59,15 @@
           ]
         }
       ],
-      "@react-native-firebase/auth"
+      "@react-native-firebase/auth",
+      "expo-web-browser"
     ],
     "assetBundlePatterns": [
       "**/*"
     ],
     "extra": {
       "eas": {
-        "projectId": "9900608b-36a5-4f28-acdd-79466b0bd53b"
+        "projectId": "5252b5b9-f010-46e0-844b-225ad2f455a3"
       }
     }
   }

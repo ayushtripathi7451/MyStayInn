@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { bookingApi, expenseApi } from '../../utils/api';
 import { isBookingMovedOut, calculateMoveOutPL } from '../../utils/financialCalculations';
+import { getLocalTodayMonthKey, sumEnrollmentRentDueForMonthKey } from '../../utils/enrollmentDues';
 
 /**
  * Matches the exact financial logic from Reports Hub
@@ -31,6 +32,33 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   };
 
+  const defaultDailyOnlinePerBooking = (b: any): number => {
+    const s = num(b?.scheduledOnlineRent);
+    if (s > 0) return s;
+    return num(b?.rentAmount);
+  };
+  const defaultDailyCashPerBooking = (b: any): number => num(b?.scheduledCashRent);
+  const effectiveDailyOnlineAmount = (dp: any, b: any): number => {
+    const row = num(dp?.onlineAmount);
+    return row > 0 ? row : defaultDailyOnlinePerBooking(b);
+  };
+  const effectiveDailyCashAmount = (dp: any, b: any): number => {
+    const row = num(dp?.cashAmount);
+    return row > 0 ? row : defaultDailyCashPerBooking(b);
+  };
+
+  /** Same as ReportsHubScreen: amount may be on pendingAllocation only. */
+  const effectiveBookingSecurityDeposit = (b: any): number => {
+    const top = num(b?.securityDeposit);
+    const pa = b?.pendingAllocation;
+    const fromPa =
+      pa && typeof pa === 'object' && (pa as { securityDeposit?: unknown }).securityDeposit != null
+        ? num((pa as { securityDeposit: unknown }).securityDeposit)
+        : 0;
+    const n = (v: number) => (Number.isFinite(v) && v > 0 ? v : 0);
+    return Math.max(n(top), n(fromPa));
+  };
+
   const rentStartYm = (booking: any): string | null => {
     try {
       const moveIn = booking?.moveInDate ? new Date(booking.moveInDate) : null;
@@ -57,15 +85,13 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         return booking.dailyPayments
           .filter((dp: any) => {
             const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
-            return (
-              dpMonthKey === monthKey &&
-              !toBool(dp.paidOnline) &&
-              num(dp.onlineAmount) > 0
-            );
+            const eff = effectiveDailyOnlineAmount(dp, booking);
+            return dpMonthKey === monthKey && !toBool(dp.paidOnline) && eff > 0;
           })
-          .reduce((sum: number, dp: any) => sum + num(dp.onlineAmount), 0);
+          .reduce((sum: number, dp: any) => sum + effectiveDailyOnlineAmount(dp, booking), 0);
       }
       if (toBool(booking?.isRentOnlinePaid)) return 0;
+      if (monthKey !== getLocalTodayMonthKey()) return 0;
       const ra = num(booking?.rentAmount);
       return ra > 0 ? ra : legacyOn;
     }
@@ -93,15 +119,13 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         return booking.dailyPayments
           .filter((dp: any) => {
             const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
-            return (
-              dpMonthKey === monthKey &&
-              !toBool(dp.paidCash) &&
-              num(dp.cashAmount) > 0
-            );
+            const eff = effectiveDailyCashAmount(dp, booking);
+            return dpMonthKey === monthKey && !toBool(dp.paidCash) && eff > 0;
           })
-          .reduce((sum: number, dp: any) => sum + num(dp.cashAmount), 0);
+          .reduce((sum: number, dp: any) => sum + effectiveDailyCashAmount(dp, booking), 0);
       }
       if (toBool(booking?.isRentCashPaid)) return 0;
+      if (monthKey !== getLocalTodayMonthKey()) return 0;
       return legacyCash;
     }
 
@@ -130,9 +154,9 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
       const rp = String(b.rentPeriod || 'month').toLowerCase();
       const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
 
-      // Security deposit — counted in move-in month only (not revenue)
+      // Security deposit — move-in month (legacy helper; home “collected” uses Reports Hub month logic below)
       if (moveInMonthKey === monthKey) {
-        const sec = num(b.securityDeposit);
+        const sec = effectiveBookingSecurityDeposit(b);
         if (toBool(b.isSecurityPaid) && sec > 0) {
           securityTotal += sec;
         }
@@ -144,13 +168,15 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         dailyPayments.forEach((dp: any) => {
           const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
           if (dpMonthKey === monthKey) {
-            if (toBool(dp.paidOnline) && num(dp.onlineAmount) > 0) {
-              total += num(dp.onlineAmount);
-              onlineTotal += num(dp.onlineAmount);
+            const effOn = effectiveDailyOnlineAmount(dp, b);
+            const effCash = effectiveDailyCashAmount(dp, b);
+            if (toBool(dp.paidOnline) && effOn > 0) {
+              total += effOn;
+              onlineTotal += effOn;
             }
-            if (toBool(dp.paidCash) && num(dp.cashAmount) > 0) {
-              total += num(dp.cashAmount);
-              cashTotal += num(dp.cashAmount);
+            if (toBool(dp.paidCash) && effCash > 0) {
+              total += effCash;
+              cashTotal += effCash;
             }
           }
         });
@@ -202,7 +228,6 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
       setOnline(0);
       setCash(0);
       setMoveOutPL(0);
-      setMoveOutPL(0);
       return;
     }
     setLoading(true);
@@ -210,7 +235,7 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
       const now = new Date();
       const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-      console.log(`[useHomeFinancialStats] Fetching data for month: ${currentMonthKey}`);
+      if (__DEV__) console.log(`[useHomeFinancialStats] Fetching data for month: ${currentMonthKey}`);
 
       const params: Record<string, string> = { includeCompleted: 'true', propertyId };
       const [bookingsRes, expensesRes, monthlyRes] = await Promise.all([
@@ -256,95 +281,60 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
 
       // ── Collections for current month ──────────────────────────────────────
       const {
-        total: collections,
+        total: rentCollections,
         securityTotal: securityDeposits,
         onlineTotal: onlineTotalFromCollections,
         cashTotal: cashTotalFromCollections,
       } = collectionsForMonthKeyFromBookings(bookings, currentMonthKey);
 
-      // ── Online / Cash split for current month (will be replaced by collections split)
+      // Rolling 3-month keys — same as ReportsHubScreen (m0 = current calendar month)
+      const currentMonthIdx = now.getMonth();
+      const currentYear = now.getFullYear();
+      const monthYear = (mIdx: number) =>
+        `${currentYear}-${String(((currentMonthIdx - mIdx + 12) % 12) + 1).padStart(2, '0')}`;
+      const m0 = monthYear(0);
+      const m1 = monthYear(1);
+      const m2 = monthYear(2);
+
+      const toMonthKeyNullable = (d: any): string | null => {
+        if (d == null) return null;
+        const date = new Date(d);
+        if (Number.isNaN(date.getTime())) return null;
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      // Security collected attributed to m0 (matches ReportsHub securityDepositsByMonth[m0]); counts as online in split
+      let securityCollectedM0 = 0;
       let onlineTotal = onlineTotalFromCollections;
       let cashTotal = cashTotalFromCollections;
-
       bookings.forEach((b: any) => {
-        const rp = String(b.rentPeriod || 'month').toLowerCase();
-        const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
-
-        // Security deposit (counts as online collection in move-in month)
-        if (moveInMonthKey === currentMonthKey) {
-          const sec = num(b.securityDeposit);
-          if (toBool(b.isSecurityPaid) && sec > 0) {
-            onlineTotal += sec;
-          }
-        }
-
-        // Daily rent online/cash split
-        if (rp === 'day') {
-          const dailyPayments = Array.isArray(b.dailyPayments) ? b.dailyPayments : [];
-          dailyPayments.forEach((dp: any) => {
-            const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
-            if (dpMonthKey === currentMonthKey) {
-              if (toBool(dp.paidOnline) && num(dp.onlineAmount) > 0) {
-                onlineTotal += num(dp.onlineAmount);
-              }
-              if (toBool(dp.paidCash) && num(dp.cashAmount) > 0) {
-                cashTotal += num(dp.cashAmount);
-              }
-            }
-          });
-          return; // skip monthly logic
-        }
-
-        // Monthly online rent
-        const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
-        const onlinePaidMonths = onlinePaidYm
-          ? onlinePaidYm.split(',').map((s: string) => s.trim())
-          : [];
-        const schedOnline = num(b.scheduledOnlineRent);
-        const legacyOnline = num(b.onlinePaymentRecv);
-
-        if (schedOnline > 0 && onlinePaidMonths.includes(currentMonthKey)) {
-          onlineTotal += schedOnline;
-        } else if (
-          legacyOnline > 0 &&
-          toBool(b.isRentOnlinePaid) &&
-          moveInMonthKey === currentMonthKey
-        ) {
-          onlineTotal += legacyOnline;
-        }
-
-        // Monthly cash rent
-        const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
-        const cashPaidMonths = cashPaidYm
-          ? cashPaidYm.split(',').map((s: string) => s.trim())
-          : [];
-        const schedCash = num(b.scheduledCashRent);
-        const legacyCash = num(b.cashPaymentRecv);
-
-        if (schedCash > 0 && cashPaidMonths.includes(currentMonthKey)) {
-          cashTotal += schedCash;
-        } else if (
-          legacyCash > 0 &&
-          toBool(b.isRentCashPaid) &&
-          moveInMonthKey === currentMonthKey
-        ) {
-          cashTotal += legacyCash;
+        const sec = effectiveBookingSecurityDeposit(b);
+        if (!toBool(b.isSecurityPaid) || sec <= 0) return;
+        const moveInMk = toMonthKeyNullable(b.moveInDate);
+        const updatedMk = toMonthKeyNullable(b.updatedAt);
+        const inWindow = (k: string | null) => Boolean(k && [m0, m1, m2].includes(k));
+        const inWinKeys = [updatedMk, moveInMk].filter((k): k is string => inWindow(k));
+        const secMonth = inWinKeys.length > 0 ? inWinKeys.sort().pop()! : null;
+        if (secMonth === m0) {
+          securityCollectedM0 += sec;
+          onlineTotal += sec;
         }
       });
+
+      const collections = rentCollections + securityCollectedM0;
 
       // ── Pending dues for current month ────────────────────────────────────
       // Mirrors ReportsHub pendingDuesByMonth logic for the current month key
       let pending = 0;
 
       bookings.forEach((b: any) => {
-        const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
         const rp = String(b.rentPeriod || 'month').toLowerCase();
         const status = String(b.status || '').toLowerCase();
         const isMovedOut = status === 'completed' || status === 'moved_out';
-        const sec = num(b.securityDeposit);
+        const sec = effectiveBookingSecurityDeposit(b);
 
-        // Security deposit due in move-in month only
-        if (currentMonthKey === moveInMonthKey && !toBool(b.isSecurityPaid) && sec > 0 && !isMovedOut) {
+        // Unpaid security — same bucket as ReportsHub pendingDuesByMonth[m0]
+        if (!toBool(b.isSecurityPaid) && sec > 0 && !isMovedOut) {
           pending += sec;
         }
 
@@ -354,22 +344,16 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
             const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
             if (dpMonthKey !== currentMonthKey) return;
 
-            const onlineAmount = num(dp.onlineAmount);
-            const cashAmount = num(dp.cashAmount);
+            const effOn = effectiveDailyOnlineAmount(dp, b);
+            const effCash = effectiveDailyCashAmount(dp, b);
             const paidOnline = toBool(dp.paidOnline);
             const paidCash = toBool(dp.paidCash);
 
-            if (!paidOnline && onlineAmount > 0) {
-              pending += onlineAmount;
-              console.log(
-                `[Home] Added daily online due: month=${currentMonthKey}, amount=${onlineAmount}, total=${pending}`
-              );
+            if (!paidOnline && effOn > 0) {
+              pending += effOn;
             }
-            if (!paidCash && cashAmount > 0) {
-              pending += cashAmount;
-              console.log(
-                `[Home] Added daily cash due: month=${currentMonthKey}, amount=${cashAmount}, total=${pending}`
-              );
+            if (!paidCash && effCash > 0) {
+              pending += effCash;
             }
           });
           return;
@@ -381,6 +365,32 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         if (onlineDue > 0) pending += onlineDue;
         if (cashDue > 0) pending += cashDue;
       });
+
+      try {
+        const [enrollDueRes, enrollListRes] = await Promise.all([
+          bookingApi.get('/api/enrollment-requests/unpaid-deposit-sum', {
+            params: { propertyId },
+            timeout: 8000,
+          }),
+          bookingApi
+            .get('/api/enrollment-requests', { params: { propertyId }, timeout: 8000 })
+            .catch(() => null),
+        ]);
+        const enrollDue = num(enrollDueRes?.data?.totalAmount);
+        if (enrollDue > 0) pending += enrollDue;
+
+        const enrollRequests =
+          enrollListRes?.data?.success && Array.isArray(enrollListRes.data.requests)
+            ? enrollListRes.data.requests.filter((r: any) => {
+                const st = String(r.status || '').trim().toLowerCase();
+                return st === 'requested' || st === 'pay_pending';
+              })
+            : [];
+        const enrollRent = sumEnrollmentRentDueForMonthKey(enrollRequests, currentMonthKey);
+        if (enrollRent > 0) pending += enrollRent;
+      } catch {
+        /* enrollment service optional */
+      }
 
       // ── Expenses ──────────────────────────────────────────────────────────
       const expensesData = expensesRes.data?.data ?? expensesRes.data;
@@ -404,7 +414,7 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         .reduce((s: number, m: any) => s + (num(m.amount) || 0), 0);
 
       const totalExpense = fixedExpenseTotal + monthlyRecurringTotal;
-      const profitVal = Math.round(collections - totalExpense);
+      const profitVal = Math.round(rentCollections - totalExpense);
 
       // Calculate MoveOut P/L for current month
       let moveOutPLVal = 0;
@@ -431,11 +441,14 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         }
       });
 
-      console.log(
-        `[useHomeFinancialStats] Month ${currentMonthKey}: ` +
-          `rentCollections=${collections}, securityDeposits=${securityDeposits}, online=${onlineTotal}, cash=${cashTotal}, ` +
-          `pending=${pending}, expense=${totalExpense}, profit=${profitVal}, moveOutPL=${moveOutPLVal}`
-      );
+      if (__DEV__) {
+        console.log(
+          `[useHomeFinancialStats] Month ${currentMonthKey}: ` +
+            `rentCollections=${rentCollections}, securityM0=${securityCollectedM0}, securityLegacy=${securityDeposits}, ` +
+            `totalCollected=${collections}, online=${onlineTotal}, cash=${cashTotal}, ` +
+            `pending=${pending}, expense=${totalExpense}, profit=${profitVal}, moveOutPL=${moveOutPLVal}`
+        );
+      }
 
       setCollected(collections);
       setPendingDues(pending);

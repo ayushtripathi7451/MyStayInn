@@ -1,55 +1,23 @@
 import { call, put, select } from 'redux-saga/effects';
-import { userApi, bookingApi, moveOutApi } from '../../../utils/api';
+import { userApi, bookingApi } from '../../../utils/api';
 import { setCurrentStay, setCurrentStayLoading, setCurrentStayError } from '../redux/slices/currentStaySlice';
 import type { RootState } from '../redux';
 import type { CurrentStayProperty } from '../redux/slices/currentStaySlice';
-import { pickAdminPhoneFromStay } from '../../../utils/currentStayAdminPhone';
-
-const toBool = (v: unknown) => v === true || v === 'true' || v === 1;
-type MoveOutStatusValue = 'requested' | 'accepted' | 'moved_out' | 'cancelled';
-
-function normalizeMoveOutStatus(raw: unknown): MoveOutStatusValue | null {
-  const status = String(raw ?? '').trim().toLowerCase();
-  if (
-    status === 'requested' ||
-    status === 'accepted' ||
-    status === 'moved_out' ||
-    status === 'cancelled'
-  ) {
-    return status;
-  }
-  return null;
-}
-
-/**
- * Prefer effective-dues ledger when it has rows; never replace a non-empty current-stay
- * ledger with an empty array (effective-dues can omit or return [] while /customer still had rows).
- */
-function mergeDailyPaymentsFromDues(booking: any, d: any): any[] | undefined {
-  const fromBooking = Array.isArray(booking?.dailyPayments) ? booking.dailyPayments : [];
-  const fromDues = d?.dailyPayments;
-  const fromDuesArr = Array.isArray(fromDues) ? fromDues : null;
-  if (fromDuesArr != null && fromDuesArr.length > 0) return fromDuesArr;
-  if (fromBooking.length > 0) return fromBooking;
-  if (fromDuesArr != null) return fromDuesArr;
-  return fromBooking.length > 0 ? fromBooking : undefined;
-}
 
 function mergeDuesIntoBooking(booking: any, d: any): any {
   if (!booking || !d) return booking;
-  const mergedDaily = mergeDailyPaymentsFromDues(booking, d);
   return {
     ...booking,
     onlinePaymentRecv: d.onlinePaymentRecv,
     cashPaymentRecv: d.cashPaymentRecv,
     isRentOnlinePaid: d.isRentOnlinePaid,
     isRentCashPaid: d.isRentCashPaid,
-    isSecurityPaid: toBool(d.isSecurityPaid),
+    isSecurityPaid: d.isSecurityPaid,
     securityDeposit: d.securityDeposit,
     currentDue: d.currentDue,
     rentPeriod: d.rentPeriod ?? booking.rentPeriod,
     rentInfoMessage: d.rentInfoMessage ?? null,
-    ...(mergedDaily !== undefined ? { dailyPayments: mergedDaily } : {}),
+    dailyPayments: Array.isArray(d.dailyPayments) ? d.dailyPayments : booking.dailyPayments || [],
     scheduledOnlineRent:
       d.scheduledOnlineRent != null ? d.scheduledOnlineRent : booking.scheduledOnlineRent,
     scheduledCashRent:
@@ -89,15 +57,8 @@ export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty 
     pricePerMonth: undefined,
   };
   const address = [p?.city, p?.state].filter(Boolean).join(', ') || '';
-  const isSecurityPaid = toBool(b.isSecurityPaid);
-  const serverMoveOutStatus = normalizeMoveOutStatus(
-    b.moveOutStatus ?? b.move_out_status ?? b.moveOutRequestStatus
-  );
-  const cardStatus = serverMoveOutStatus === 'requested'
-    ? 'Move-out requested'
-    : serverMoveOutStatus === 'accepted'
-      ? 'Move-out accepted'
-      : isEnrollmentPending
+  const isSecurityPaid = Boolean(b.isSecurityPaid);
+  const cardStatus = isEnrollmentPending
     ? 'Pending enrollment'
     : isSecurityPaid
       ? 'Approved'
@@ -115,9 +76,6 @@ export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty 
     roomId: r.id,
     propertyId: p?.uniqueId || p?.id,
     moveOutDate: b.moveOutDate,
-    ...(serverMoveOutStatus === 'requested' || serverMoveOutStatus === 'accepted'
-      ? { moveOutStatus: serverMoveOutStatus }
-      : {}),
     bgColor: 'bg-[#FFE8E8]',
     propertyType: p?.propertyType,
     roomType: r?.roomType,
@@ -127,12 +85,6 @@ export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty 
     currentDue: b.currentDue != null ? Number(b.currentDue) : 0,
     securityDeposit: b.securityDeposit != null ? Number(b.securityDeposit as unknown as number) : 0,
     rules: p?.rules ?? undefined,
-    ...(() => {
-      const phone = pickAdminPhoneFromStay(p, b);
-      return phone
-        ? { adminPhone: phone, propertyAdminPhone: phone }
-        : {};
-    })(),
   };
 }
 
@@ -162,32 +114,9 @@ function* mergeEffectiveDuesIntoStaysList(
       });
       const d = duesRes?.data?.dues;
       if (duesRes?.data?.success && d && stay.booking) {
-        let mergedBooking = mergeDuesIntoBooking(stay.booking, d);
-        const isDay = String(mergedBooking.rentPeriod || '').toLowerCase() === 'day';
-        const ledgerLen = Array.isArray(mergedBooking.dailyPayments)
-          ? mergedBooking.dailyPayments.length
-          : 0;
-        if (isDay && ledgerLen === 0) {
-          try {
-            const dpRes = yield call([bookingApi, 'get'], `/api/bookings/${bidStr}/daily-payments`);
-            const ledger = dpRes?.data?.dailyPayments;
-            if (dpRes?.data?.success && Array.isArray(ledger) && ledger.length > 0) {
-              mergedBooking = { ...mergedBooking, dailyPayments: ledger };
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          console.log('[CurrentStay Saga] dues merged', bidStr, {
-            rentPeriod: mergedBooking.rentPeriod,
-            dailyPaymentsLen: mergedBooking.dailyPayments?.length ?? 0,
-            onlineDue: d.onlinePaymentRecv,
-          });
-        }
         out.push({
           ...stay,
-          booking: mergedBooking,
+          booking: mergeDuesIntoBooking(stay.booking, d),
         });
       } else {
         out.push(stay);
@@ -205,21 +134,6 @@ type RefreshCurrentStayAction = { type: string; payload?: { force?: boolean } };
 let currentStayFetchInFlight = false;
 
 /**
- * Incremented in `resetClientStateBeforeNewSession` when switching accounts.
- * Any in-flight refresh from the previous JWT is ignored so Redux cannot show the last user's stay.
- */
-let currentStayAccountEpoch = 0;
-
-export function bumpCurrentStayAccountEpoch(): void {
-  currentStayAccountEpoch += 1;
-  currentStayFetchInFlight = false;
-}
-
-function isStaleAccountEpoch(atStart: number): boolean {
-  return atStart !== currentStayAccountEpoch;
-}
-
-/**
  * Fetches current stay from user-service and merges per-booking effective dues.
  * Always loads the full stay list (no stale 5‑min skip) so new enrollments stack with existing stays.
  */
@@ -227,7 +141,6 @@ export function* refreshCurrentStaySaga(
   action: RefreshCurrentStayAction
 ): Generator<any, void, any> {
   const force = action.payload?.force === true;
-  const accountEpochAtStart = currentStayAccountEpoch;
 
   if (currentStayFetchInFlight && !force) {
     console.log('[CurrentStay Saga] Already fetching, skipping...');
@@ -264,10 +177,6 @@ export function* refreshCurrentStaySaga(
     const res = yield call([userApi, 'get'], '/api/users/me/current-stay', {
       params: { now: clientNow },
     });
-    if (isStaleAccountEpoch(accountEpochAtStart)) {
-      console.log('[CurrentStay Saga] Discarding /current-stay response (account switched)');
-      return;
-    }
     const body = res?.data ?? {};
     let list: any[] = [];
     if (Array.isArray(body.currentStays) && body.currentStays.length > 0) {
@@ -285,70 +194,19 @@ export function* refreshCurrentStaySaga(
     if (list.some((s) => s?.booking)) {
       list = yield* mergeEffectiveDuesIntoStaysList(list, clientNow);
     }
-    if (isStaleAccountEpoch(accountEpochAtStart)) {
-      console.log('[CurrentStay Saga] Discarding after dues merge (account switched)');
-      return;
-    }
 
     const rawOut = { currentStays: list };
-    let mapped = list.map(mapCurrentStayToProperty).filter(Boolean) as CurrentStayProperty[];
-
-    // Overlay latest move-out status from move-out-service on matching booking.
-    // - requested => card shows Move-out requested
-    // - accepted  => card shows Move-out accepted
-    // - cancelled/moved_out/none => fallback to normal booking status on card
-    try {
-      const moveOutRes = yield call([moveOutApi, 'get'], '/api/move-out/status');
-      const latest = moveOutRes?.data?.success ? moveOutRes?.data?.data : null;
-      const latestStatus = normalizeMoveOutStatus(latest?.status);
-      const latestBookingId = latest?.bookingId != null ? String(latest.bookingId) : '';
-      if (latestStatus && latestBookingId) {
-        mapped = mapped.map((stay) => {
-          const stayBookingId = stay.bookingId != null ? String(stay.bookingId) : '';
-          if (stayBookingId !== latestBookingId) return stay;
-          if (latestStatus === 'requested') {
-            return { ...stay, moveOutStatus: 'requested', status: 'Move-out requested' };
-          }
-          if (latestStatus === 'accepted') {
-            return { ...stay, moveOutStatus: 'accepted', status: 'Move-out accepted' };
-          }
-          const rawBookingStatus = String(
-            list.find((s: any) => String(s?.booking?.id) === stayBookingId)?.booking?.status || ''
-          ).toLowerCase();
-          const isEnrollmentPending =
-            rawBookingStatus === 'enrollment_pending' ||
-            rawBookingStatus === 'enrollment_pay_pending' ||
-            rawBookingStatus === 'enrollment_requested';
-          const fallbackStatus = isEnrollmentPending
-            ? 'Pending enrollment'
-            : stay.isSecurityPaid
-              ? 'Approved'
-              : 'Pending Payment';
-          return { ...stay, moveOutStatus: undefined, status: fallbackStatus };
-        });
-      }
-    } catch {
-      // Keep current-stay mapping even if move-out status endpoint fails.
-    }
-    if (isStaleAccountEpoch(accountEpochAtStart)) {
-      console.log('[CurrentStay Saga] Discarding before Redux put (account switched)');
-      return;
-    }
+    const mapped = list.map(mapCurrentStayToProperty).filter(Boolean) as CurrentStayProperty[];
     console.log('[CurrentStay Saga] Final mapped stays:', mapped.length);
     yield put(setCurrentStay({ stays: mapped, raw: rawOut }));
   } catch (e: any) {
-    if (isStaleAccountEpoch(accountEpochAtStart)) {
-      return;
-    }
     const status = e?.response?.status;
     const msg = e?.response?.data?.message || e?.message || 'Failed to load current stay';
     console.log('[CurrentStay Saga] Error:', msg);
     yield put(setCurrentStay({ stays: [], data: null, raw: null }));
     yield put(setCurrentStayError(status === 401 ? 'Session invalid. Try logging in again.' : msg));
   } finally {
-    if (!isStaleAccountEpoch(accountEpochAtStart)) {
-      currentStayFetchInFlight = false;
-      yield put(setCurrentStayLoading(false));
-    }
+    currentStayFetchInFlight = false;
+    yield put(setCurrentStayLoading(false));
   }
 }

@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  Alert,
   Keyboard,
   Image,
   KeyboardAvoidingView,
@@ -36,6 +35,10 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [confirmation, setConfirmationState] = useState<any>(null);
   const lastOtpRef = useRef("");
+  const [mobileError, setMobileError] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [sendError, setSendError] = useState("");
+  const [resendHint, setResendHint] = useState("");
 
 useEffect(() => {
   if (step !== "otp") return;
@@ -76,8 +79,11 @@ useEffect(() => {
   }, [timer, step]);
 
   const sendOTP = async () => {
+    setMobileError("");
+    setSendError("");
+    setResendHint("");
     if (mobile.length !== 10) {
-      Alert.alert("Invalid Number", "Enter valid 10-digit mobile number");
+      setMobileError("Enter a valid 10-digit mobile number.");
       return;
     }
 
@@ -90,10 +96,9 @@ useEffect(() => {
       setConfirmationState(confirmationResult);
       setConfirmation(confirmationResult);
 
-      Alert.alert("OTP Sent!", `OTP sent to ${fullPhoneNumber}`);
-      
       Keyboard.dismiss();
       setStep("otp");
+      setResendHint("OTP sent. Enter the code below.");
       setTimer(30);
       setCanResend(false);
       setTimeout(() => otpRef.current?.focus(), 500);
@@ -110,15 +115,20 @@ useEffect(() => {
         friendlyMessage = "Too many attempts. Please try again later.";
       }
 
-      Alert.alert("Error", friendlyMessage);
+      setSendError(friendlyMessage);
     } finally {
       setLoading(false);
     }
   };
 
   const handleVerifyOTP = async () => {
+    setOtpError("");
     if (otp.length !== 6) {
-      Alert.alert("Invalid OTP", "Enter 6 digit OTP");
+      setOtpError("Enter the full 6-digit OTP.");
+      return;
+    }
+    if (!confirmation) {
+      setOtpError("Session expired. Request OTP again.");
       return;
     }
 
@@ -138,8 +148,11 @@ useEffect(() => {
       });
 
       const data = response.data;
+      const hasMpinSet = data?.hasMpinSet === true;
 
-      // 4. Store JWT token and user data
+      // 4. Store JWT token and user data (clear previous account first)
+      const { resetClientStateBeforeNewSession } = await import("../utils/sessionStorage");
+      await resetClientStateBeforeNewSession();
       await AsyncStorage.setItem("USER_TOKEN", data.token);
       await AsyncStorage.setItem("userData", JSON.stringify(data.user));
 
@@ -150,29 +163,42 @@ useEffect(() => {
         registerPushNotifications().catch(() => {});
       }
 
-      // 6. Skip PIN screen — go directly to the app
+      // 6. If MPIN not set, force MPIN creation first
+      if (!hasMpinSet) {
+        navigation.reset({ index: 0, routes: [{ name: "CreateMPINScreen" }] });
+        return;
+      }
+
+      // 7. MPIN exists, continue to app
       navigation.reset({ index: 0, routes: [{ name: "CompleteProfile" }] });
     } catch (error: any) {
       console.error("Login Error:", error);
+
+      if (error?.code === "auth/invalid-verification-code") {
+        setOtpError("Invalid OTP. Check the code and try again.");
+        return;
+      }
+      if (error?.code === "auth/session-expired") {
+        setOtpError("OTP expired. Request a new code.");
+        return;
+      }
       
       // Handle specific error cases
       if (error.response?.status === 403) {
-        // Wrong app type or inactive account
         const correctAppType = error.response?.data?.correctAppType;
         if (correctAppType) {
           const correctApp = correctAppType === 'admin' ? 'Admin' : 'Customer';
-          Alert.alert(
-            'Wrong App', 
-            `This account is registered for ${correctApp} app. Please use the correct app to login.`
+          setOtpError(
+            `This account is for the ${correctApp} app. Use the correct app to sign in.`
           );
         } else {
-          Alert.alert('Error', error.response?.data?.message || 'Access denied.');
+          setOtpError(error.response?.data?.message || 'Access denied.');
         }
       } else if (error.response?.status === 404) {
-        Alert.alert('Account Not Found', 'No account found with this phone number. Please register first.');
+        setOtpError('No account with this number. Please register first.');
       } else {
         const errorMessage = error.response?.data?.message || error.message || "Invalid OTP or login failed.";
-        Alert.alert("Error", errorMessage);
+        setOtpError(errorMessage);
       }
     } finally {
       setLoading(false);
@@ -180,6 +206,8 @@ useEffect(() => {
   };
 
   const resendOTP = async () => {
+    setOtpError("");
+    setSendError("");
     try {
       setLoading(true);
       const fullPhoneNumber = `${countryCode}${mobile}`;
@@ -191,10 +219,10 @@ useEffect(() => {
       setTimer(30);
       setCanResend(false);
       setOtp("");
-      Alert.alert("OTP Resent", "A new OTP has been sent to your phone");
+      setResendHint("A new OTP has been sent.");
     } catch (error: any) {
       console.error("Resend OTP Error:", error);
-      Alert.alert("Error", "Failed to resend OTP. Please try again.");
+      setSendError("Failed to resend OTP. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -250,7 +278,11 @@ useEffect(() => {
   <View className="h-full justify-center border-r border-white">
     <TextInput
       value={countryCode}
-      onChangeText={(t) => setCountryCode(t.replace(/[^+0-9]/g, ""))}
+      onChangeText={(t) => {
+                      setCountryCode(t.replace(/[^+0-9]/g, ""));
+                      setMobileError("");
+                      setSendError("");
+                    }}
       keyboardType="phone-pad"
       className="px-4 text-white text-xl font-bold"
       style={{
@@ -266,7 +298,11 @@ useEffect(() => {
   <TextInput
     ref={mobileRef}
     value={mobile}
-    onChangeText={(t) => setMobile(t.replace(/[^0-9]/g, "").slice(0, 10))}
+    onChangeText={(t) => {
+                    setMobile(t.replace(/[^0-9]/g, "").slice(0, 10));
+                    setMobileError("");
+                    setSendError("");
+                  }}
     keyboardType="number-pad"
     maxLength={10}
     placeholder="Mobile number"
@@ -280,6 +316,11 @@ useEffect(() => {
     }}
   />
 </View>
+                    {mobileError || sendError ? (
+                      <Text className="text-amber-200 text-sm mb-3 text-center" accessibilityLiveRegion="polite">
+                        {mobileError || sendError}
+                      </Text>
+                    ) : null}
                     <TouchableOpacity 
                       onPress={sendOTP} 
                       disabled={loading}
@@ -298,7 +339,11 @@ useEffect(() => {
                     <TextInput
   ref={otpRef}
   value={otp}
-  onChangeText={(t) => setOtp(t.replace(/[^0-9]/g, "").slice(0, 6))}
+  onChangeText={(t) => {
+    setOtp(t.replace(/[^0-9]/g, "").slice(0, 6));
+    setOtpError("");
+    setResendHint("");
+  }}
   keyboardType="number-pad"
   maxLength={6}
   textContentType="oneTimeCode"
@@ -308,6 +353,14 @@ useEffect(() => {
   placeholder="••••••"
   placeholderTextColor="rgba(255,255,255,0.5)"
 />
+                    {otpError ? (
+                      <Text className="text-amber-200 text-sm mb-3 text-center" accessibilityLiveRegion="polite">
+                        {otpError}
+                      </Text>
+                    ) : null}
+                    {resendHint ? (
+                      <Text className="text-emerald-200 text-sm mb-3 text-center">{resendHint}</Text>
+                    ) : null}
                     <View className="items-center mb-6">
                       {!canResend ? (
                         <Text className="text-white/80 text-sm">
@@ -332,6 +385,16 @@ useEffect(() => {
                   </>
                 )}
               </View>
+
+              <Text className="text-center mt-6 px-6 text-white/90 text-[14px]">
+                Don&apos;t have an account?{" "}
+                <Text
+                  className="font-bold text-white underline"
+                  onPress={() => navigation.navigate("Signup")}
+                >
+                  Sign up
+                </Text>
+              </Text>
 
               {/* ✅ BACKGROUND TEXT + IMAGE (Repositioned for iOS) */}
               <View className="w-full mt-10 items-center">

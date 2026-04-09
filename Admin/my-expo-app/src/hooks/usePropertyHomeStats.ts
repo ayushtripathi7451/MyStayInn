@@ -30,7 +30,7 @@ export function usePropertyHomeStats(propertyId: string | undefined, propertyNam
     try {
       const propertyMatchValues = [propertyName, propertyUniqueId, propertyId].filter((x): x is string => typeof x === 'string' && x.length > 0);
 
-      const requestedRes = await MoveOutService.getMoveOutRequests(undefined, 'pending');
+      const requestedRes = await MoveOutService.getMoveOutRequests(undefined, 'pending', propertyId);
       const allRequests = requestedRes.success && requestedRes.data?.requests ? requestedRes.data.requests : [];
       const tenantRequestedOnly = allRequests.filter((r: { type?: string }) => r.type !== 'admin_initiated');
       setMoveOutCount(tenantRequestedOnly.length);

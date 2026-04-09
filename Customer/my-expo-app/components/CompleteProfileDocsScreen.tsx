@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "../context/ThemeContext";
@@ -78,7 +79,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
         mediaTypes: ["images"],
         allowsEditing: true,
         aspect: [4, 3], // Good aspect ratio for documents
-        quality: 0.8,
+        quality: 0.5,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -123,15 +124,73 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
     aadharBack &&
     (!requiresExtraId || (idFront && idBack));
 
+  /**
+   * Document uploads: keep under ~500KB file / ~700KB base64 so nginx (often 1MB) + JSON keys do not 413.
+   */
+  const prepareLocalImageForUpload = async (uri: string): Promise<string> => {
+    if (!uri.startsWith("file://")) return uri;
+    const maxEdge = 600;
+    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      Image.getSize(
+        uri,
+        (w, h) => resolve({ width: w, height: h }),
+        (e) => reject(e)
+      );
+    });
+    const actions: ImageManipulator.Action[] = [];
+    if (width > maxEdge || height > maxEdge) {
+      if (width >= height) {
+        actions.push({ resize: { width: maxEdge } });
+      } else {
+        actions.push({ resize: { height: maxEdge } });
+      }
+    }
+    const manipulated = await ImageManipulator.manipulateAsync(uri, actions, {
+      compress: 0.3,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return manipulated.uri;
+  };
+
+  /** Re-encode until base64 fits typical 1MB proxy limits (filename + JSON overhead). */
+  const ensureBase64UnderLimit = async (startUri: string): Promise<string> => {
+    const MAX_BASE64_CHARS = 300_000;
+    let u = startUri;
+    let base64 = await FileSystem.readAsStringAsync(u, { encoding: "base64" });
+    if (base64.length <= MAX_BASE64_CHARS) return base64;
+
+    for (const q of [0.4, 0.34, 0.28, 0.24]) {
+      const m = await ImageManipulator.manipulateAsync(u, [], {
+        compress: q,
+        format: ImageManipulator.SaveFormat.JPEG,
+      });
+      u = m.uri;
+      base64 = await FileSystem.readAsStringAsync(u, { encoding: "base64" });
+      if (base64.length <= MAX_BASE64_CHARS) return base64;
+    }
+
+    const m2 = await ImageManipulator.manipulateAsync(
+      u,
+      [{ resize: { width: 640 } }],
+      { compress: 0.28, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    base64 = await FileSystem.readAsStringAsync(m2.uri, { encoding: "base64" });
+    if (base64.length <= MAX_BASE64_CHARS) return base64;
+
+    const m3 = await ImageManipulator.manipulateAsync(m2.uri, [], {
+      compress: 0.22,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return FileSystem.readAsStringAsync(m3.uri, { encoding: "base64" });
+  };
+
   const uploadImageIfLocal = async (uri: string | null, key: string): Promise<string | null> => {
     if (!uri) return null;
     if (!uri.startsWith("file://")) return uri;
     try {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: "base64",
-      });
-      const ext = uri.toLowerCase().endsWith(".png") ? ".png" : ".jpg";
-      const body = { image: base64, filename: `${key}${ext}` };
+      const preparedUri = await prepareLocalImageForUpload(uri);
+      const base64 = await ensureBase64UnderLimit(preparedUri);
+      const body = { image: base64, filename: `${key}.jpg` };
       let res: any;
       try {
         res = await api.post("/api/auth/upload", body);
@@ -147,6 +206,39 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
     return null;
   };
 
+  /**
+   * Never send base64 in complete-profile JSON (413). Upload local/data URIs → S3 URL; remote http(s) unchanged.
+   */
+  const resolveProfileImageToUrl = async (raw: string | null | undefined): Promise<string | null> => {
+    const s = typeof raw === "string" ? raw.trim() : "";
+    if (!s) return null;
+
+    const lower = s.toLowerCase();
+    if (lower.startsWith("http://") || lower.startsWith("https://")) {
+      return s;
+    }
+
+    if (s.startsWith("file://")) {
+      return uploadImageIfLocal(s, "profileImage");
+    }
+
+    if (s.startsWith("data:image")) {
+      const comma = s.indexOf(",");
+      if (comma === -1) return null;
+      const base64Payload = s.slice(comma + 1);
+      const dir = FileSystem.cacheDirectory;
+      if (!dir) return null;
+      const tmp = `${dir}profile-pending-${Date.now()}.jpg`;
+      await FileSystem.writeAsStringAsync(tmp, base64Payload, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const fileUri = tmp.startsWith("file://") ? tmp : `file://${tmp}`;
+      return uploadImageIfLocal(fileUri, "profileImage");
+    }
+
+    return null;
+  };
+
   /* ---------------- SUBMIT ---------------- */
   const onSubmit = async () => {
     if (!validate()) return;
@@ -159,16 +251,8 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       }
 
       const rawProfileImage = (profileData?.profileImage as string | null) || null;
-      // Profile image is already base64 from CompleteProfileScreen, no need to upload
-      const profileImageBase64 = rawProfileImage;
-      
-      console.log('[CompleteProfileDocsScreen] profileImage present:', !!profileImageBase64);
-      if (profileImageBase64) {
-        console.log('[CompleteProfileDocsScreen] profileImage type:', typeof profileImageBase64);
-        console.log('[CompleteProfileDocsScreen] profileImage length:', profileImageBase64.length);
-        console.log('[CompleteProfileDocsScreen] profileImage preview:', profileImageBase64.substring(0, 50));
-      }
-      
+      const { profileImage: _profileImageOmit, ...profileDataWithoutImage } = profileData || {};
+
       const aadharFrontUrl = await uploadImageIfLocal(aadharFront, "aadharFront");
       const aadharBackUrl = await uploadImageIfLocal(aadharBack, "aadharBack");
       const idFrontUrl = requiresExtraId ? await uploadImageIfLocal(idFront, "idFront") : null;
@@ -183,12 +267,18 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
         return;
       }
 
+      const profileImageUrl = await resolveProfileImageToUrl(rawProfileImage);
+      if (String(rawProfileImage || "").trim() && !profileImageUrl) {
+        Alert.alert("Error", "Could not upload profile photo. Please try again.");
+        return;
+      }
+
       const payload = {
-        ...profileData,
+        ...profileDataWithoutImage,
         emergencyContactName: contactName,
         emergencyContactPhone: `${countryCode}${contactNumber}`,
         profession,
-        ...(profileImageBase64 ? { profileImage: profileImageBase64 } : {}),
+        ...(profileImageUrl ? { profileImage: profileImageUrl } : {}),
         documents: {
           aadharFront: aadharFrontUrl,
           aadharBack: aadharBackUrl,
@@ -196,7 +286,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
         },
       };
 
-      console.log('[CompleteProfileDocsScreen] Submitting payload with profileImage:', !!payload.profileImage);
+      console.log("[CompleteProfileDocsScreen] Submitting profileImage as URL:", !!payload.profileImage);
 
       const response = await userApi.post("/api/users/complete-profile", payload);
 
@@ -264,7 +354,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
               <TextInput
                 placeholder="Enter contact name"
                 placeholderTextColor="#9CA3AF"
-                className="border border-gray-300 rounded-xl px-4 py-3 mb-1 bg-gray-50"
+                className="border border-gray-300 rounded-xl px-4 py-3 mb-1 bg-white"
                 value={contactName}
                 onChangeText={setContactName}
               />
@@ -278,7 +368,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
               <Text className="text-gray-700 font-semibold mb-2 mt-3">
                 Emergency Contact Number
               </Text>
-              <View className="flex-row border border-gray-300 rounded-xl overflow-hidden mb-2 bg-gray-50">
+              <View className="flex-row border border-gray-300 rounded-xl overflow-hidden mb-2 bg-white">
                 <TextInput
                   value={countryCode}
                   keyboardType="phone-pad"
@@ -312,7 +402,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
                   onPress={() =>
                     setShowProfessionDropdown(!showProfessionDropdown)
                   }
-                  className="border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-gray-50"
+                  className="border border-gray-300 rounded-xl px-4 py-3 flex-row justify-between items-center bg-white"
                 >
                   <Text
                     className={profession ? "text-black" : "text-gray-400"}
@@ -346,7 +436,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
                 ].map((item) => (
                   <TouchableOpacity
                     key={item.label}
-                    className="w-[48%] h-32 border-2 border-dashed border-gray-300 rounded-xl items-center justify-center overflow-hidden bg-gray-50"
+                    className="w-[48%] h-32 border-2 border-dashed border-gray-300 rounded-xl items-center justify-center overflow-hidden bg-white"
                     onPress={() => pickImage(item.setter, item.label)}
                   >
                     {item.value ? (
@@ -378,7 +468,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
                     ].map((item) => (
                       <TouchableOpacity
                         key={item.label}
-                        className="w-[48%] h-32 border-2 border-dashed border-gray-300 rounded-xl items-center justify-center overflow-hidden bg-gray-50"
+                        className="w-[48%] h-32 border-2 border-dashed border-gray-300 rounded-xl items-center justify-center overflow-hidden bg-white"
                         onPress={() => pickImage(item.setter, item.label)}
                       >
                         {item.value ? (
@@ -406,9 +496,9 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
             <View className="flex-row justify-between mt-2">
               <TouchableOpacity
                 onPress={() => navigation.goBack()}
-                className="flex-1 py-4 rounded-2xl mr-3 bg-gray-100 border border-gray-200"
+                className="flex-1 py-4 rounded-2xl mr-3 bg-white border border-gray-300"
               >
-                <Text className="text-center text-gray-600 font-bold text-base">
+                <Text className="text-center text-gray-700 font-bold text-base">
                   Back
                 </Text>
               </TouchableOpacity>

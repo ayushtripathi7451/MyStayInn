@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, Alert } from "react-native";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAuthBearerToken, propertyApi } from "../utils/api";
 
 export default function BiometricsCard({ navigation }: any) {
   const [bioType, setBioType] = useState<"fingerprint" | "face">("fingerprint");
   const [available, setAvailable] = useState(false);
+  const [navigating, setNavigating] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     checkBiometrics();
@@ -36,34 +40,60 @@ export default function BiometricsCard({ navigation }: any) {
     setAvailable(true);
   };
 
-  const handleBiometricLogin = async () => {
-  if (!available) {
-    Alert.alert("Biometrics not available");
-    return;
-  }
-
-  try {
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage:
-        bioType === "face" ? "Unlock with Face ID" : "Unlock with Fingerprint",
-      fallbackLabel: "Use MPIN",
-      disableDeviceFallback: false,
-    });
-
-    if (result.success) {
-      // ✅ OPTIONAL: Store that biometric was used
-      await SecureStore.setItemAsync("BIO_UNLOCKED", "true");
-
-      // ✅ DIRECT NAVIGATION TO ProfileSetup
-      navigation.replace("ProfileSetup");
-    } else {
-      Alert.alert("Authentication Failed");
+  /** Same post-auth routing as PinLoginCard: Home if user already has properties, else ProfileSetup. */
+  const goHomeOrPropertySetup = async () => {
+    const token = await getAuthBearerToken();
+    if (!token) {
+      setError("Session expired. Please sign in again.");
+      navigation.replace("Register");
+      return;
     }
-  } catch (err) {
-    console.log("Biometric error:", err);
-    Alert.alert("Something went wrong");
-  }
-};
+    try {
+      const propertiesResponse = await propertyApi.get("/api/properties");
+      if (propertiesResponse.data.success && propertiesResponse.data.properties?.length > 0) {
+        const firstProperty = propertiesResponse.data.properties[0];
+        await AsyncStorage.setItem("currentProperty", JSON.stringify(firstProperty));
+        navigation.replace("Home");
+      } else {
+        navigation.replace("ProfileSetup");
+      }
+    } catch (e) {
+      console.error("[BiometricsCard] Error fetching properties:", e);
+      navigation.replace("ProfileSetup");
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    setError("");
+    if (!available) {
+      setError("Biometrics not available on this device.");
+      return;
+    }
+
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage:
+          bioType === "face" ? "Unlock with Face ID" : "Unlock with Fingerprint",
+        fallbackLabel: "Use MPIN",
+        disableDeviceFallback: false,
+      });
+
+      if (result.success) {
+        await SecureStore.setItemAsync("BIO_UNLOCKED", "true");
+        setNavigating(true);
+        try {
+          await goHomeOrPropertySetup();
+        } finally {
+          setNavigating(false);
+        }
+      } else {
+        setError("Biometric authentication failed. Try again or use MPIN.");
+      }
+    } catch (err) {
+      console.log("Biometric error:", err);
+      setError("Something went wrong. Try again.");
+    }
+  };
 
   return (
     <View
@@ -121,14 +151,25 @@ export default function BiometricsCard({ navigation }: any) {
           : "Scan your face"}
       </Text>
 
+      {error ? (
+        <Text className="text-amber-200 text-sm text-center mb-4 px-1" accessibilityLiveRegion="polite">
+          {error}
+        </Text>
+      ) : null}
+
       {/* LOGIN BUTTON */}
       <TouchableOpacity
         onPress={handleBiometricLogin}
+        disabled={navigating}
         className="bg-white py-4 rounded-full items-center"
       >
-        <Text className="text-blue-600 font-bold text-[16px]">
-          Authenticate
-        </Text>
+        {navigating ? (
+          <ActivityIndicator color="#2563eb" />
+        ) : (
+          <Text className="text-blue-600 font-bold text-[16px]">
+            Authenticate
+          </Text>
+        )}
       </TouchableOpacity>
     </View>
   );

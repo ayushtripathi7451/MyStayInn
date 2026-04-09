@@ -86,7 +86,7 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
 
       // Prepare booking data (enrollmentRequestId so backend removes that request from the list)
       const bookingPayload = {
-        customerId: customer?.id,
+        customerId: customer?.customerId ?? customer?.id,
         ...(propertyId != null && { propertyId }),
         ...(enrollmentRequestId != null && enrollmentRequestId !== "" && { enrollmentRequestId }),
         roomId: allocationData?.selectedRoom?.id,
@@ -109,6 +109,20 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
       const response = await bookingApi.post("/api/bookings/allocate-room", bookingPayload);
 
       if (response.data.success) {
+        if (response.data.payPendingOnly) {
+          setSuccessMessage(
+            response.data.message ||
+              "Marked as pay pending. Collect security deposit, then confirm with deposit marked paid."
+          );
+          setShowSuccessMessage(true);
+          setTimeout(() => {
+            setShowSuccessMessage(false);
+            setIsAllocating(false);
+            navigation.navigate("CustomersScreen", { initialTab: "enrollment", refreshEnrollmentList: true });
+          }, 2200);
+          return;
+        }
+
         const bedText = beds.length > 1 
           ? `Beds ${beds.join(', ')}` 
           : beds.length === 1 

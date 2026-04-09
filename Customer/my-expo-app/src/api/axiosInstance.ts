@@ -5,10 +5,9 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_HOST = process.env.EXPO_PUBLIC_API_HOST || '192.168.1.7';
 const DEFAULT_TIMEOUT = 10000;
 
-export const getBaseURL = (port: number) => `http://${API_HOST}:${port}`;
+export const getBaseURL = (port: number) => `http://192.168.1.7:${port}`;
 
 /** Attach JWT from AsyncStorage to request */
 export async function attachAuth(config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> {

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, TextInput, Image, TouchableOpacity, Alert } from "react-native";
+import { View, Text, TextInput, Image, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -8,6 +8,7 @@ export default function OTPVerifyScreen({ navigation, route }: any) {
   const { mobile } = route.params;
 
   const [otp, setOtp] = useState("");
+  const [otpError, setOtpError] = useState("");
   const inputRef = useRef<TextInput>(null);
 
   // ✅ TIMER STATES
@@ -16,8 +17,9 @@ export default function OTPVerifyScreen({ navigation, route }: any) {
 
   // ✅ VERIFY HANDLER
   const handleVerify = () => {
+    setOtpError("");
     if (otp.length !== 6) {
-      Alert.alert("Invalid OTP", "Enter 6 digit OTP");
+      setOtpError("Enter the full 6-digit OTP.");
       return;
     }
 
@@ -107,6 +109,12 @@ export default function OTPVerifyScreen({ navigation, route }: any) {
                 </Text>
               </View>
             </TouchableOpacity>
+
+            {otpError ? (
+              <Text className="text-amber-200 text-sm text-center mb-3" accessibilityLiveRegion="polite">
+                {otpError}
+              </Text>
+            ) : null}
 
             {/* ✅ RESEND OTP TIMER */}
             <View className="items-center mb-6">

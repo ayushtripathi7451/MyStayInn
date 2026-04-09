@@ -581,6 +581,8 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
                 comments: (route?.params as any)?.customer?.comments,
                 securityDeposit: (route?.params as any)?.customer?.securityDeposit,
                 enrollmentRequestId: (route?.params as any)?.customer?.enrollmentRequestId,
+                customerId: (route?.params as any)?.customer?.customerId,
+                pendingAllocation: (route?.params as any)?.customer?.pendingAllocation,
               },
             })
           }

@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -55,6 +54,7 @@ export default function CreateMPINScreen({ navigation }: any) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isChecked, setIsChecked] = useState(false);
   const [mpinError, setMpinError] = useState("");
+  const [apiError, setApiError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
 
@@ -67,6 +67,7 @@ export default function CreateMPINScreen({ navigation }: any) {
   const handleSaveMPIN = async () => {
     try {
       setLoading(true);
+      setApiError("");
 
       // Get the auth token from AsyncStorage (primary: USER_TOKEN, fallback: authToken)
       let token = await AsyncStorage.getItem("USER_TOKEN");
@@ -75,7 +76,7 @@ export default function CreateMPINScreen({ navigation }: any) {
       }
       
       if (!token) {
-        Alert.alert("Error", "Authentication token not found. Please register again.");
+        setApiError("Session expired. Please register again from the start.");
         navigation.navigate("Success");
         return;
       }
@@ -104,7 +105,7 @@ export default function CreateMPINScreen({ navigation }: any) {
     } catch (error: any) {
       console.error("MPIN Save Error:", error);
       const errorMessage = error.response?.data?.message || "Failed to save MPIN. Please try again.";
-      Alert.alert("Error", errorMessage);
+      setApiError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -159,6 +160,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               secure={!showMpin}
               onChange={(v) => {
                 setMpin(v);
+                setApiError("");
                 if (confirm && v !== confirm)
                   setMpinError("MPINs do not match");
                 else setMpinError("");
@@ -184,6 +186,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               secure={!showConfirm}
               onChange={(v) => {
                 setConfirm(v);
+                setApiError("");
                 if (v !== mpin)
                   setMpinError("MPINs do not match");
                 else setMpinError("");
@@ -193,6 +196,11 @@ export default function CreateMPINScreen({ navigation }: any) {
             {mpinError ? (
               <Text className="text-red-500 text-xs mt-2">
                 {mpinError}
+              </Text>
+            ) : null}
+            {apiError ? (
+              <Text className="text-red-600 text-sm mt-2" accessibilityLiveRegion="polite">
+                {apiError}
               </Text>
             ) : null}
 

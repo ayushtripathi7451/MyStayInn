@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   Pressable,
-  Alert,
   KeyboardAvoidingView,
   ScrollView,
   Platform,
@@ -26,6 +25,8 @@ export default function BasicInfoScreen({ navigation }: any) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
   const [cleaningUp, setCleaningUp] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [sendError, setSendError] = useState("");
 
   // Clear any stale confirmation when component mounts
   useEffect(() => {
@@ -63,14 +64,28 @@ export default function BasicInfoScreen({ navigation }: any) {
     });
   };
 
-  const validate = () => {
-    if (!first.trim()) return Alert.alert("Error", "First name is required");
-    if (!last.trim()) return Alert.alert("Error", "Last name is required");
-    if (!gender.trim()) return Alert.alert("Error", "Select gender");
-    if (!/^[0-9]{10}$/.test(mobile))
-      return Alert.alert("Error", "Enter valid 10 digit mobile");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return Alert.alert("Error", "Enter valid email");
+  const validate = (): boolean => {
+    if (!first.trim()) {
+      setFormError("First name is required.");
+      return false;
+    }
+    if (!last.trim()) {
+      setFormError("Last name is required.");
+      return false;
+    }
+    if (!gender.trim()) {
+      setFormError("Please select gender.");
+      return false;
+    }
+    if (!/^[0-9]{10}$/.test(mobile)) {
+      setFormError("Enter a valid 10-digit mobile number.");
+      return false;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setFormError("Enter a valid email address.");
+      return false;
+    }
+    setFormError("");
     return true;
   };
 
@@ -82,6 +97,7 @@ export default function BasicInfoScreen({ navigation }: any) {
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const sendOTP = async () => {
+    setSendError("");
     if (!validate()) return;
 
     try {
@@ -109,8 +125,6 @@ export default function BasicInfoScreen({ navigation }: any) {
       const confirmation = await auth().signInWithPhoneNumber(fullPhoneNumber);
       setConfirmation(confirmation);
 
-      Alert.alert("OTP Sent!", `OTP sent to ${fullPhoneNumber}`);
-
       navigation.navigate("VerifyEmail", {
         mobile: fullPhoneNumber,
         first,
@@ -136,7 +150,7 @@ export default function BasicInfoScreen({ navigation }: any) {
         friendlyMessage = "This phone number has been disabled.";
       }
 
-      Alert.alert("Error", friendlyMessage);
+      setSendError(friendlyMessage);
     } finally {
       setLoading(false);
     }
@@ -186,7 +200,11 @@ export default function BasicInfoScreen({ navigation }: any) {
                 placeholder="Enter your first name"
                 placeholderTextColor="#9CA3AF"
                 value={first}
-                onChangeText={setFirst}
+                onChangeText={(t) => {
+                  setFirst(t);
+                  setFormError("");
+                  setSendError("");
+                }}
                 className="border border-gray-300 rounded-lg px-4 py-3"
                 style={{ color: '#000000' }}
               />
@@ -197,7 +215,11 @@ export default function BasicInfoScreen({ navigation }: any) {
                 placeholder="Enter your last name"
                 placeholderTextColor="#9CA3AF"
                 value={last}
-                onChangeText={setLast}
+                onChangeText={(t) => {
+                  setLast(t);
+                  setFormError("");
+                  setSendError("");
+                }}
                 className="border border-gray-300 rounded-lg px-4 py-3"
                 style={{ color: '#000000' }}
               />
@@ -227,6 +249,8 @@ export default function BasicInfoScreen({ navigation }: any) {
                         onPress={() => {
                           setGender(item);
                           setShowDropdown(false);
+                          setFormError("");
+                          setSendError("");
                         }}
                         className="px-4 py-3 border-b border-gray-100"
                       >
@@ -242,9 +266,11 @@ export default function BasicInfoScreen({ navigation }: any) {
               <View className="flex-row border border-gray-300 rounded-lg overflow-hidden">
                 <TextInput
                   value={countryCode}
-                  onChangeText={(t) =>
-                    setCountryCode(t.replace(/[^+0-9]/g, "").slice(0, 4))
-                  }
+                  onChangeText={(t) => {
+                    setCountryCode(t.replace(/[^+0-9]/g, "").slice(0, 4));
+                    setFormError("");
+                    setSendError("");
+                  }}
                   keyboardType="phone-pad"
                   className="px-4 py-3 border-r border-gray-300 text-center"
                   style={{ minWidth: 70, color: '#000000' }}
@@ -253,9 +279,11 @@ export default function BasicInfoScreen({ navigation }: any) {
                   placeholder="Enter mobile number"
                   placeholderTextColor="#9CA3AF"
                   value={mobile}
-                  onChangeText={(t) =>
-                    setMobile(t.replace(/[^0-9]/g, "").slice(0, 10))
-                  }
+                  onChangeText={(t) => {
+                    setMobile(t.replace(/[^0-9]/g, "").slice(0, 10));
+                    setFormError("");
+                    setSendError("");
+                  }}
                   keyboardType="numeric"
                   maxLength={10}
                   className="flex-1 px-4 py-3"
@@ -269,12 +297,22 @@ export default function BasicInfoScreen({ navigation }: any) {
                 placeholder="example@example.com"
                 placeholderTextColor="#9CA3AF"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(t) => {
+                  setEmail(t);
+                  setFormError("");
+                  setSendError("");
+                }}
                 className="border border-gray-300 rounded-lg px-4 py-3"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 style={{ color: '#000000' }}
               />
+
+              {(formError || sendError) ? (
+                <Text className="text-red-600 text-sm mt-4" accessibilityLiveRegion="polite">
+                  {formError || sendError}
+                </Text>
+              ) : null}
 
               {/* BUTTON */}
               <TouchableOpacity

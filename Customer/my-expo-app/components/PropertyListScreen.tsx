@@ -5,19 +5,29 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { userApi } from "../utils/api";
 import type { CurrentStayProperty } from "./InfoCards";
+import { pickAdminPhoneFromStay } from "../utils/currentStayAdminPhone";
 
 function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null {
-  if (!currentStay?.booking || !currentStay?.room) return null;
+  if (!currentStay?.booking) return null;
   const b = currentStay.booking;
-  const r = currentStay.room;
+  const isEnrollmentPending = String(b.status || "") === "enrollment_pending";
   const p = currentStay.property;
+  const r = currentStay.room || {
+    roomNumber: "—",
+    propertyName: p?.name || "Property",
+  };
   const address = [p?.city, p?.state].filter(Boolean).join(", ") || "";
   const isSecurityPaid = Boolean(b.isSecurityPaid);
+  const cardStatus = isEnrollmentPending
+    ? "Pending enrollment"
+    : isSecurityPaid
+      ? "Approved"
+      : "Pending Payment";
   return {
     id: b.id,
     bookingId: b.id,
     name: r.propertyName || p?.name || "Property",
-    status: isSecurityPaid ? "Approved" : "Pending Payment",
+    status: cardStatus,
     isSecurityPaid,
     roomNumber: r.roomNumber,
     monthlyRent: Number(b.rentAmount) || 0,
@@ -30,6 +40,10 @@ function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null 
     propertyType: p?.propertyType,
     roomType: r?.roomType,
     floor: r?.floor != null ? Number(r.floor) : undefined,
+    ...(() => {
+      const phone = pickAdminPhoneFromStay(p, b);
+      return phone ? { adminPhone: phone, propertyAdminPhone: phone } : {};
+    })(),
   };
 }
 
@@ -40,10 +54,21 @@ export default function PropertyListScreen() {
 
   const fetchCurrentStay = async () => {
     try {
-      const res = await userApi.get<{ success: boolean; currentStay: any }>("/api/users/me/current-stay");
-      const currentStay = res.data?.currentStay ?? null;
-      const mapped = mapCurrentStayToProperty(currentStay);
-      setProperties(mapped ? [mapped] : []);
+      const res = await userApi.get<{
+        success: boolean;
+        currentStay: any;
+        currentStays?: any[];
+      }>("/api/users/me/current-stay");
+      const list =
+        Array.isArray(res.data?.currentStays) && res.data!.currentStays!.length > 0
+          ? res.data!.currentStays!
+          : res.data?.currentStay
+            ? [res.data.currentStay]
+            : [];
+      const mapped = list
+        .map((s) => mapCurrentStayToProperty(s))
+        .filter(Boolean) as CurrentStayProperty[];
+      setProperties(mapped);
     } catch (e) {
       setProperties([]);
     } finally {

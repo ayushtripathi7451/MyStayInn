@@ -15,6 +15,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { userApi, bookingApi, propertyApi } from "../utils/api";
 import { formatAddress } from "../utils/address";
 import { resolveFinalKycVerified } from "../utils/kyc";
+import { adminDisplayDueAmount } from "./DueAmount";
 
 interface TenantDetailScreenProps {
   navigation: any;
@@ -156,6 +157,7 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
           const roomRes = await propertyApi.get(`/api/properties/rooms/${active.roomId}`).catch(() => null);
           const room = roomRes?.data?.success && roomRes?.data?.room ? roomRes.data.room : null;
           nextBooking = {
+            ...active,
             id: active.id,
             roomId: active.roomId,
             roomNumber: room?.roomNumber != null ? String(room.roomNumber) : undefined,
@@ -164,6 +166,13 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
             securityDeposit: Number(active.securityDeposit ?? 0),
             isSecurityPaid: Boolean(active.isSecurityPaid),
             propertyName: room?.propertyName,
+            room: room
+              ? {
+                  propertyId: room.propertyId != null ? String(room.propertyId) : undefined,
+                  propertyUniqueId: room.propertyUniqueId != null ? String(room.propertyUniqueId) : undefined,
+                  propertyName: room.propertyName,
+                }
+              : undefined,
           };
         }
       }
@@ -230,7 +239,7 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
   const profileExtras = profile?.profileExtras || {};
   const documents = profileExtras.documents || {};
   const hasAnyDocument = !!(documents.aadharFront || documents.aadharBack || documents.idFront || documents.idBack);
-  const dueAmount = booking && !booking.isSecurityPaid && booking.securityDeposit > 0 ? booking.securityDeposit : 0;
+  const dueAmount = adminDisplayDueAmount(booking);
   const isKycVerified = resolveFinalKycVerified(profile);
   const kycStatusLabel = isKycVerified ? "Verified" : "Unverified";
 
@@ -246,12 +255,14 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
   ].filter((t) => t.show);
 
   const hasAnyData = !!(profile || passedCustomer || booking);
-  const isInactiveTenant =
-    isInactiveRoute ||
-    profile?.status === "inactive" ||
-    passedCustomer?.status === "inactive" ||
-    booking?.status === "inactive" ||
-    bookingHistory.every((b) => b.status !== "active");
+  const isInactiveTenant = (() => {
+    if (isInactiveRoute) return true;
+    if (profile?.status === "inactive" || passedCustomer?.status === "inactive") return true;
+    if (booking?.status === "active") return false;
+    if (bookingHistory.some((b) => b.status === "active")) return false;
+    if (bookingHistory.length === 0 && !booking) return false;
+    return true;
+  })();
   if (!hasAnyData) {
     return (
       <SafeAreaView className="flex-1 bg-[#F1F5F9] justify-center px-6">

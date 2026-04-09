@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { resetToWelcome } from "../utils/navigationRef";
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavigationProp<any>>();
@@ -16,9 +17,9 @@ export default function SettingsScreen() {
         text: "Logout",
         style: "destructive",
         onPress: async () => {
-          await AsyncStorage.removeItem("USER_TOKEN");
-          await AsyncStorage.removeItem("authToken");
-          navigation.reset({ index: 0, routes: [{ name: "Welcome" as never }] });
+          const { logoutClearClientSession } = await import("../utils/sessionStorage");
+          await logoutClearClientSession();
+          resetToWelcome();
         },
       },
     ]);

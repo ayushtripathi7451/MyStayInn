@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "../context/ThemeContext";
 import { useCurrentStay } from "../src/hooks";
 
+/** JSON/axios may serialize booleans as strings; Boolean("false") === true in JS. */
+const toBool = (v: unknown) => v === true || v === "true" || v === 1;
+
 export type DueItem = {
   id: string;
   label: string;
@@ -20,41 +23,307 @@ export type DueItem = {
   propertyId?: string;
   ownerId?: string;
   paymentId?: string;
+  bookingId?: string;
+  /** YYYY-MM-DD for day-rent ledger row (online checkout + webhook) */
+  paymentDate?: string;
 };
 
-// Helper function for year-month formatting
+/** One property / stay: dues + pay links stay under that property only. */
+export type DueGroup = {
+  key: string;
+  propertyName: string;
+  propertyId?: string;
+  /** Enrollment flow vs allocated active booking (rent due after move-in). */
+  dueContext: "enrollment" | "active_booking";
+  items: DueItem[];
+  total: number;
+};
+
 function yearMonth(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/** Derives all unpaid dues: security deposit, rent (online), rent (cash).
- * Shows each unpaid month as a separate line item for monthly rent,
- * or daily unpaid amounts for daily rent */
-function deriveDueItemsFromRaw(raw: any): DueItem[] {
-  console.log('[deriveDueItemsFromRaw] Input raw:', raw);
+/**
+ * Property for Pay Now + tagging. Uses `raw.property`, then booking + room property ids
+ * (multi-stay often only has room.propertyId).
+ */
+export function propertyForDue(raw: any): {
+  id: string;
+  ownerId?: string;
+  uniqueId?: string;
+} | null {
+  if (!raw?.booking) return null;
+  const full = raw.property;
+  if (full?.id != null && String(full.id).trim() !== "") {
+    return {
+      id: String(full.id),
+      ownerId: full.ownerId != null ? String(full.ownerId) : undefined,
+      uniqueId: full.uniqueId != null ? String(full.uniqueId) : undefined,
+    };
+  }
+  const b = raw.booking;
+  const room = b.room && typeof b.room === "object" ? b.room : null;
+  const pid =
+    b.propertyId ??
+    b.propertyUniqueId ??
+    room?.propertyId ??
+    room?.propertyUniqueId;
+  const oid = b.propertyOwnerId ?? b.ownerId ?? room?.ownerId;
+  if (pid != null && String(pid).trim() !== "") {
+    return {
+      id: String(pid),
+      ownerId: oid != null ? String(oid) : undefined,
+      uniqueId:
+        b.propertyUniqueId != null
+          ? String(b.propertyUniqueId)
+          : room?.propertyUniqueId != null
+            ? String(room.propertyUniqueId)
+            : undefined,
+    };
+  }
+  return null;
+}
 
+function bookingShapeForDueDerivation(b: Record<string, any>): Record<string, any> {
+  const merged = { ...b };
+  const r = b?.room;
+  if (r && typeof r === "object") {
+    if (merged.propertyId == null && r.propertyId != null) merged.propertyId = String(r.propertyId);
+    if (merged.propertyUniqueId == null && r.propertyUniqueId != null)
+      merged.propertyUniqueId = String(r.propertyUniqueId);
+  }
+  return merged;
+}
+
+/** Ensures deriveDueItems can run: synthetic `property.id` when only room/booking ids exist. */
+function ensureStayForDueDerivation(stay: any): any {
+  if (!stay?.booking) return stay;
+  const mergedBooking = bookingShapeForDueDerivation(stay.booking);
+  const next = { ...stay, booking: mergedBooking };
+  if (propertyForDue(next)) return next;
+  const b = mergedBooking;
+  const anchor =
+    b.room?.propertyId ??
+    b.room?.propertyUniqueId ??
+    b.propertyId ??
+    b.propertyUniqueId ??
+    (b.roomId != null ? `room:${b.roomId}` : null) ??
+    (b.id != null ? `booking:${b.id}` : null);
+  if (anchor == null) return next;
+  return { ...next, property: { ...(next.property || {}), id: String(anchor) } };
+}
+
+export function stayListFromRaw(raw: any): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw.currentStays) && raw.currentStays.length > 0) {
+    return raw.currentStays.map((s: any) => ensureStayForDueDerivation(s));
+  }
+  if (raw.booking) return [ensureStayForDueDerivation(raw)];
+  return [];
+}
+
+/** Any booking status that represents an enrollment / pre-allocation flow (case-insensitive). */
+export function isEnrollmentBookingStatus(status: string): boolean {
+  const s = String(status || "").toLowerCase().trim();
+  return s.startsWith("enrollment");
+}
+
+/** Dues grouped per property/stay — use for Home + Payments UI (no cross-property mixing). */
+export function deriveDueItemsGrouped(raw: any): DueGroup[] {
+  const stays = stayListFromRaw(raw);
+  const groups: DueGroup[] = [];
+  for (let idx = 0; idx < stays.length; idx++) {
+    const stay = stays[idx];
+    const b = stay?.booking;
+    if (!b) continue;
+    const items = deriveDueItemsForOneStay(stay, `${b.id ?? idx}_`);
+    if (items.length === 0) continue;
+    const st = String(b.status || "");
+    const propertyName = stay.property?.name || stay.room?.propertyName || "Property";
+    const prop = propertyForDue(stay);
+    groups.push({
+      key: `${String(b.id ?? idx)}-${propertyName}-${idx}`,
+      propertyName,
+      propertyId: prop?.id,
+      dueContext: isEnrollmentBookingStatus(st) ? "enrollment" : "active_booking",
+      items,
+      total: items.reduce((s, i) => s + (Number(i.amount) || 0), 0),
+    });
+  }
+  return groups;
+}
+
+export function deriveDueItemsFromRaw(raw: any): DueItem[] {
+  return deriveDueItemsGrouped(raw).flatMap((g) => g.items);
+}
+
+function deriveDueItemsForOneStay(raw: any, idPrefix: string): DueItem[] {
   const items: DueItem[] = [];
-  if (!raw?.booking || !raw?.property) {
-    console.log('[deriveDueItemsFromRaw] Missing booking or property data');
+  const prop = propertyForDue(raw);
+  if (!raw?.booking || !prop) {
     return items;
   }
 
   const booking = raw.booking;
+  const bookingStatus = String(booking.status || "");
+  const bookingId = String(booking.id ?? '');
   const rentPeriod = String(booking.rentPeriod || 'month').toLowerCase();
   const isDailyRent = rentPeriod === 'day';
 
-  console.log('[deriveDueItemsFromRaw] Rent period:', rentPeriod, 'isDaily:', isDailyRent);
+  console.log(`[deriveDueItemsForOneStay] Processing stay:`, {
+    bookingId,
+    status: bookingStatus,
+    rentPeriod,
+    isDailyRent
+  });
 
+  const isEnrollmentStatus = isEnrollmentBookingStatus(bookingStatus);
+
+  // Monthly enrollment only — day-rent enrollments are handled below with daily ledger / virtual rows.
+  if (
+    !isDailyRent &&
+    isEnrollmentStatus
+  ) {
+    const securityAmount = Number(booking.securityDeposit) || 0;
+    const isSecurityPaid = toBool(booking.isSecurityPaid);
+    if (securityAmount > 0 && !isSecurityPaid) {
+      items.push({
+        id: `${idPrefix}security_deposit`,
+        label: "Security deposit",
+        monthLabel: booking.moveInDate
+          ? new Date(booking.moveInDate).toLocaleDateString("en-GB", {
+              month: "short",
+              year: "numeric",
+            })
+          : "—",
+        amount: securityAmount,
+        paid: false,
+        type: "security_deposit",
+        propertyId: prop.id,
+        ownerId: prop.ownerId ?? undefined,
+        bookingId,
+      });
+    }
+
+    // Monthly rent: same rules as confirmed booking — move-in day 1–10 ⇒ first month due immediately (with security).
+    {
+      const monthlyRent = Number(booking.scheduledOnlineRent) || Number(booking.rentAmount) || 0;
+      const paidMonthsStr = booking.rentOnlinePaidYearMonth || "";
+      const paidMonths = new Set(paidMonthsStr.split(",").map((m: string) => m.trim()).filter(Boolean));
+      const moveInDate = booking.moveInDate;
+      const moveIn = moveInDate ? new Date(moveInDate) : null;
+      let firstDueYm: string | null = null;
+      if (moveIn) {
+        const moveInDay = moveIn.getDate();
+        const moveInYm = yearMonth(moveIn);
+        const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
+        firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
+      }
+      if (firstDueYm && monthlyRent > 0) {
+        const current = new Date();
+        const currentYm = yearMonth(current);
+        const [firstYear, firstMonth] = firstDueYm.split("-").map(Number);
+        const [currentYear, currentMonth] = currentYm.split("-").map(Number);
+        let year = firstYear;
+        let month = firstMonth;
+        while (year < currentYear || (year === currentYear && month <= currentMonth)) {
+          const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+          if (!paidMonths.has(monthKey)) {
+            const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+              month: "short",
+              year: "numeric",
+            });
+            items.push({
+              id: `${idPrefix}rent_online_${monthKey}`,
+              label: "Rent (online)",
+              monthLabel,
+              amount: monthlyRent,
+              paid: false,
+              type: "rent_online",
+              propertyId: prop.id,
+              ownerId: prop.ownerId ?? undefined,
+              bookingId,
+            });
+          }
+          month++;
+          if (month > 12) {
+            month = 1;
+            year++;
+          }
+        }
+      }
+
+      const cashRecv = Number(booking.scheduledCashRent) || Number(booking.cashPaymentRecv) || 0;
+      const isRentCashPaid = toBool(booking.isRentCashPaid);
+      if (cashRecv > 0 && !isRentCashPaid) {
+        items.push({
+          id: `${idPrefix}rent_cash`,
+          label: "Rent (cash)",
+          monthLabel: new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
+          amount: cashRecv,
+          paid: false,
+          type: "rent_cash",
+          propertyId: prop.id,
+          ownerId: prop.ownerId ?? undefined,
+          bookingId,
+        });
+      }
+    }
+
+    return items;
+  }
+
+  // Handle daily rent (amounts must match booking-service dailyDue / customerDueDisplay fallbacks)
   if (isDailyRent) {
-    // Handle daily rent periods
-    console.log('[deriveDueItemsFromRaw] Processing daily rent');
+    if (isEnrollmentStatus) {
+      const securityAmountEnr = Number(booking.securityDeposit) || 0;
+      const isSecurityPaidEnr = toBool(booking.isSecurityPaid);
+      if (securityAmountEnr > 0 && !isSecurityPaidEnr) {
+        items.push({
+          id: `${idPrefix}security_deposit`,
+          label: "Security deposit",
+          monthLabel: booking.moveInDate
+            ? new Date(booking.moveInDate).toLocaleDateString("en-GB", {
+                month: "short",
+                year: "numeric",
+              })
+            : "—",
+          amount: securityAmountEnr,
+          paid: false,
+          type: "security_deposit",
+          propertyId: prop.id,
+          ownerId: prop.ownerId ?? undefined,
+          bookingId,
+        });
+      }
+    }
 
-    // Get daily payments from booking (should be included in API response)
-    const dailyPayments = booking.dailyPayments || [];
-    console.log('[deriveDueItemsFromRaw] Daily payments:', dailyPayments);
+    // Match booking-service defaultOnlinePerDay / defaultCashPerDay (do not use merged
+    // onlinePaymentRecv/cashPaymentRecv — those are aggregate dues after effective-dues merge).
+    const defaultOnlinePerDay = () => {
+      const s = Number(booking.scheduledOnlineRent || 0);
+      if (s > 0) return s;
+      return Number(booking.rentAmount || 0);
+    };
+    const defaultCashPerDay = () => Number(booking.scheduledCashRent || 0);
 
-    // Sort payments by date (most recent first) and show ALL unpaid rows
-    const sortedPayments = dailyPayments
+    let paymentsToShow: any[] = [...(booking.dailyPayments || [])];
+    // Synthetic enrollment rows have no DB ledger yet — show today’s split using scheduled amounts.
+    if (paymentsToShow.length === 0 && isEnrollmentStatus) {
+      const today = new Date();
+      paymentsToShow = [
+        {
+          id: "virtual_enrollment_day",
+          paymentDate: today,
+          paidOnline: false,
+          paidCash: false,
+          onlineAmount: defaultOnlinePerDay(),
+          cashAmount: defaultCashPerDay(),
+        },
+      ];
+    }
+
+    const sortedPayments = [...paymentsToShow]
       .map((p: any) => ({
         ...p,
         paymentDate: new Date(p.paymentDate || p.date)
@@ -62,101 +331,111 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
       .sort((a: any, b: any) => b.paymentDate.getTime() - a.paymentDate.getTime());
 
     sortedPayments.forEach((p: any) => {
-      const monthLabel = p.paymentDate.toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-        day: "numeric"
-      });
+      const pdRaw = p.paymentDate instanceof Date && !Number.isNaN(p.paymentDate.getTime())
+        ? p.paymentDate
+        : new Date(p.paymentDate || p.date);
+      const monthLabel = !Number.isNaN(pdRaw.getTime())
+        ? pdRaw.toLocaleDateString("en-GB", {
+            month: "short",
+            year: "numeric",
+            day: "numeric"
+          })
+        : "—";
 
-      const rawAmount = Number(p.amount || 0);
-      const cashAmount = Number(p.cashAmount || 0);
-      const onlineAmount = Number(
-        p.onlineAmount != null
-          ? p.onlineAmount
-          : rawAmount > 0
-            ? Math.max(0, rawAmount - cashAmount)
-            : (Number(booking.scheduledOnlineRent) || 0)
-      );
-      const pid = p.id != null ? String(p.id) : undefined;
+      const rowOnline = Number(p.onlineAmount || 0);
+      const rowCash = Number(p.cashAmount || 0);
+      const effectiveOnline = rowOnline > 0 ? rowOnline : defaultOnlinePerDay();
+      const effectiveCash = rowCash > 0 ? rowCash : defaultCashPerDay();
+      const pid =
+        p.id != null && String(p.id) !== "virtual_enrollment_day" ? String(p.id) : undefined;
+      const pd =
+        pdRaw instanceof Date && !Number.isNaN(pdRaw.getTime())
+          ? `${pdRaw.getFullYear()}-${String(pdRaw.getMonth() + 1).padStart(2, "0")}-${String(pdRaw.getDate()).padStart(2, "0")}`
+          : String(p.paymentDate || "").slice(0, 10);
 
-      if (!p.paidOnline && onlineAmount > 0) {
+      if (!p.paidOnline && effectiveOnline > 0) {
         items.push({
-          id: `daily_online_${pid ?? monthLabel}`,
+          id: `${idPrefix}daily_online_${pid ?? monthLabel}`,
           label: "Daily Rent (online)",
           monthLabel,
-          amount: onlineAmount,
+          amount: effectiveOnline,
           paid: false,
           type: "rent_online",
-          propertyId: raw.property.id,
-          ownerId: raw.property.ownerId ?? undefined,
+          propertyId: prop.id,
+          ownerId: prop.ownerId ?? undefined,
           paymentId: pid,
+          bookingId,
+          paymentDate: /^\d{4}-\d{2}-\d{2}$/.test(pd) ? pd : undefined,
         });
       }
 
-      if (!p.paidCash && cashAmount > 0) {
+      if (!p.paidCash && effectiveCash > 0) {
         items.push({
-          id: `daily_cash_${pid ?? monthLabel}`,
+          id: `${idPrefix}daily_cash_${pid ?? monthLabel}`,
           label: "Daily Rent (cash)",
           monthLabel,
-          amount: cashAmount,
+          amount: effectiveCash,
           paid: false,
           type: "rent_cash",
-          propertyId: raw.property.id,
-          ownerId: raw.property.ownerId ?? undefined,
+          propertyId: prop.id,
+          ownerId: prop.ownerId ?? undefined,
           paymentId: pid,
+          bookingId,
+          paymentDate: /^\d{4}-\d{2}-\d{2}$/.test(pd) ? pd : undefined,
         });
       }
     });
 
-    // Fallback: if daily payments are not present or this day payment isn't found, derive from booking flags
-    const isRentOnlinePaid = Boolean(booking.isRentOnlinePaid);
-    const isRentCashPaid = Boolean(booking.isRentCashPaid);
-    const onlineAmount = Number(booking.scheduledOnlineRent) || Number(booking.rentAmount) || 0;
-    const cashAmount = Number(booking.scheduledCashRent) || 0;
-
-    if (sortedPayments.length === 0 && !isRentOnlinePaid && onlineAmount > 0) {
-      const today = new Date();
-      const monthLabel = today.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-      items.push({
-        id: `daily_online_fallback_${booking.id}`,
-        label: "Daily Rent (online)",
-        monthLabel,
-        amount: onlineAmount,
-        paid: false,
-        type: "rent_online",
-        propertyId: raw.property.id,
-        ownerId: raw.property.ownerId ?? undefined,
-      });
+    // Ledger missing client-side but effective-dues merged aggregate (co/cc) > 0
+    const hasDailyLine = items.some(
+      (i) =>
+        (i.id.includes("daily_online_") && !i.id.includes("daily_online_agg")) ||
+        (i.id.includes("daily_cash_") && !i.id.includes("daily_cash_agg"))
+    );
+    if (!hasDailyLine && sortedPayments.length === 0) {
+      const onlineDueAgg = Number(booking.onlinePaymentRecv || 0);
+      const cashDueAgg = Number(booking.cashPaymentRecv || 0);
+      const ym = yearMonth(new Date());
+      if (onlineDueAgg > 0) {
+        items.push({
+          id: `${idPrefix}dailyrent_agg_online_${ym}`,
+          label: "Daily Rent (online)",
+          monthLabel: new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
+          amount: onlineDueAgg,
+          paid: false,
+          type: "rent_online",
+          propertyId: prop.id,
+          ownerId: prop.ownerId ?? undefined,
+          bookingId,
+        });
+      }
+      if (cashDueAgg > 0) {
+        items.push({
+          id: `${idPrefix}dailyrent_agg_cash_${ym}`,
+          label: "Daily Rent (cash)",
+          monthLabel: new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
+          amount: cashDueAgg,
+          paid: false,
+          type: "rent_cash",
+          propertyId: prop.id,
+          ownerId: prop.ownerId ?? undefined,
+          bookingId,
+        });
+      }
     }
 
-    if (sortedPayments.length === 0 && !isRentCashPaid && cashAmount > 0) {
-      const today = new Date();
-      const monthLabel = today.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-      items.push({
-        id: `daily_cash_fallback_${booking.id}`,
-        label: "Daily Rent (cash)",
-        monthLabel,
-        amount: cashAmount,
-        paid: false,
-        type: "rent_cash",
-        propertyId: raw.property.id,
-        ownerId: raw.property.ownerId ?? undefined,
-      });
+    if (isEnrollmentStatus) {
+      return items;
     }
+  }
 
-  } else {
-    // Handle monthly rent periods (existing logic)
-    console.log('[deriveDueItemsFromRaw] Processing monthly rent');
-
+  // Handle monthly rent
+  if (!isDailyRent) {
     const moveInDate = booking.moveInDate;
     const monthlyRent = Number(booking.scheduledOnlineRent) || Number(booking.rentAmount) || 0;
     const paidMonthsStr = booking.rentOnlinePaidYearMonth || '';
-
-    // Parse comma-separated list of paid months into a Set for fast lookup
     const paidMonths = new Set(paidMonthsStr.split(',').map((m: string) => m.trim()).filter(Boolean));
-    console.log('[deriveDueItemsFromRaw] Paid months:', Array.from(paidMonths));
 
-    // Calculate first due month based on move-in date
     const moveIn = moveInDate ? new Date(moveInDate) : null;
     let firstDueYm = null;
     if (moveIn) {
@@ -164,62 +443,39 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
       const moveInYm = yearMonth(moveIn);
       const nextMonthYm = yearMonth(new Date(moveIn.getFullYear(), moveIn.getMonth() + 1, 1));
       firstDueYm = moveInDay <= 10 ? moveInYm : nextMonthYm;
-      console.log('[deriveDueItemsFromRaw] First due month:', firstDueYm);
     }
 
-    // Generate items for each unpaid month
     if (firstDueYm && monthlyRent > 0) {
       const current = new Date();
       const currentYm = yearMonth(current);
-
-      // Parse dates for comparison
       const [firstYear, firstMonth] = firstDueYm.split('-').map(Number);
       const [currentYear, currentMonth] = currentYm.split('-').map(Number);
 
-      console.log('[deriveDueItemsFromRaw] Date ranges:', {
-        firstDue: `${firstYear}-${firstMonth}`,
-        paidMonths: Array.from(paidMonths),
-        current: `${currentYear}-${currentMonth}`,
-      });
-
-      // Start from first due month
       let year = firstYear;
       let month = firstMonth;
 
-      // Generate months until current month
       while (year < currentYear || (year === currentYear && month <= currentMonth)) {
         const monthKey = `${year}-${String(month).padStart(2, '0')}`;
 
-        // Skip if already paid
-        if (paidMonths.has(monthKey)) {
-          console.log(`[deriveDueItemsFromRaw] Skipping paid month: ${monthKey}`);
-          month++;
-          if (month > 12) {
-            month = 1;
-            year++;
-          }
-          continue;
+        if (!paidMonths.has(monthKey)) {
+          const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+            month: "short",
+            year: "numeric",
+          });
+
+          items.push({
+            id: `${idPrefix}rent_online_${monthKey}`,
+            label: "Rent (online)",
+            monthLabel,
+            amount: monthlyRent,
+            paid: false,
+            type: "rent_online",
+            propertyId: prop.id,
+            ownerId: prop.ownerId ?? undefined,
+            bookingId,
+          });
         }
 
-        const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
-          month: "short",
-          year: "numeric",
-        });
-
-        console.log(`[deriveDueItemsFromRaw] Adding unpaid month: ${monthKey}`);
-
-        items.push({
-          id: `rent_online_${monthKey}`,
-          label: "Rent (online)",
-          monthLabel,
-          amount: monthlyRent,
-          paid: false,
-          type: "rent_online",
-          propertyId: raw.property.id,
-          ownerId: raw.property.ownerId ?? undefined,
-        });
-
-        // Move to next month
         month++;
         if (month > 12) {
           month = 1;
@@ -229,48 +485,48 @@ function deriveDueItemsFromRaw(raw: any): DueItem[] {
     }
   }
 
-  // Add security deposit if not paid (only once, same for both rent periods)
+  // Add security deposit (common for both rent types)
   const securityAmount = Number(booking.securityDeposit) || 0;
-  const isSecurityPaid = Boolean(booking.isSecurityPaid);
-  console.log('[deriveDueItemsFromRaw] security:', { securityAmount, isSecurityPaid });
-
+  const isSecurityPaid = toBool(booking.isSecurityPaid);
   if (securityAmount > 0 && !isSecurityPaid) {
     items.push({
-      id: "security_deposit",
+      id: `${idPrefix}security_deposit`,
       label: "Security deposit",
-      monthLabel: new Date(booking.moveInDate).toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-      }),
+      monthLabel: booking.moveInDate
+        ? new Date(booking.moveInDate).toLocaleDateString("en-GB", {
+            month: "short",
+            year: "numeric",
+          })
+        : "—",
       amount: securityAmount,
       paid: false,
       type: "security_deposit",
-      propertyId: raw.property.id,
-      ownerId: raw.property.ownerId ?? undefined,
+      propertyId: prop.id,
+      ownerId: prop.ownerId ?? undefined,
+      bookingId,
     });
   }
 
-  // Add cash rent if configured (only for monthly rent - daily cash is handled above)
+  // Add cash rent for monthly only
   if (!isDailyRent) {
-    const cashRecv = Number(booking.cashPaymentRecv) || 0;
-    const isRentCashPaid = Boolean(booking.isRentCashPaid);
-    console.log('[deriveDueItemsFromRaw] cash rent:', { cashRecv, isRentCashPaid });
-
+    const cashRecv = Number(booking.scheduledCashRent) || Number(booking.cashPaymentRecv) || 0;
+    const isRentCashPaid = toBool(booking.isRentCashPaid);
     if (cashRecv > 0 && !isRentCashPaid) {
       items.push({
-        id: "rent_cash",
+        id: `${idPrefix}rent_cash`,
         label: "Rent (cash)",
         monthLabel: new Date().toLocaleDateString("en-GB", { month: "short", year: "numeric" }),
         amount: cashRecv,
         paid: false,
         type: "rent_cash",
-        propertyId: raw.property.id,
-        ownerId: raw.property.ownerId ?? undefined,
+        propertyId: prop.id,
+        ownerId: prop.ownerId ?? undefined,
+        bookingId,
       });
     }
   }
 
-  console.log('[deriveDueItemsFromRaw] Final items:', items);
+  console.log(`[deriveDueItemsForOneStay] Items for booking ${bookingId}:`, items.length);
   return items;
 }
 
@@ -280,24 +536,12 @@ export default function DueAmount() {
   const { raw, loading, refresh } = useCurrentStay();
   const [payingId, setPayingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    console.log('========== DUE AMOUNT DEBUG ==========');
-    console.log('1. Raw data from useCurrentStay:', raw);
-    console.log('2. Booking object:', raw?.booking);
-    console.log('3. onlinePaymentRecv:', raw?.booking?.onlinePaymentRecv);
-    console.log('4. isRentOnlinePaid:', raw?.booking?.isRentOnlinePaid);
-    console.log('5. rentPeriod:', raw?.booking?.rentPeriod);
-    console.log('6. moveInDate:', raw?.booking?.moveInDate);
-    console.log('7. scheduledOnlineRent:', raw?.booking?.scheduledOnlineRent);
-    console.log('8. rentOnlinePaidYearMonth:', raw?.booking?.rentOnlinePaidYearMonth);
-    console.log('9. rentInfoMessage:', raw?.booking?.rentInfoMessage);
-    console.log('======================================');
-  }, [raw]);
+  /** Per-property groups — payment links stay scoped to that property’s booking. */
+  const dueGroups = useMemo(() => deriveDueItemsGrouped(raw), [raw]);
 
-  const dueItems = useMemo(() => deriveDueItemsFromRaw(raw), [raw]);
   const totalDue = useMemo(
-    () => dueItems.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
-    [dueItems]
+    () => dueGroups.reduce((sum, g) => sum + g.total, 0),
+    [dueGroups]
   );
 
   const isFemale = theme === "female";
@@ -309,41 +553,34 @@ export default function DueAmount() {
 
     setPayingId(item.id);
     try {
-      // Check if this is a daily payment
-      const isDailyPayment = item.id.startsWith("daily_online_");
       let paymentId: string | undefined;
-      let yearMonth: string | undefined;
+      let yearMonthValue: string | undefined;
 
-      if (isDailyPayment) {
-        // Extract payment ID from daily payment item (format: "daily_online_{paymentId}")
-        paymentId = item.paymentId || item.id.replace("daily_online_", "");
-        console.log('[DueAmount] Paying daily rent for payment ID:', paymentId);
-      } else {
-        // Extract monthKey from monthly payment item (format: "rent_online_2026-04")
-        yearMonth = item.id.startsWith("rent_online_")
-          ? item.id.replace("rent_online_", "")
-          : undefined;
-        console.log('[DueAmount] Paying monthly rent for month:', yearMonth);
+      const todayYm = () => {
+        const t = new Date();
+        return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+      };
+      if (item.id.includes("dailyrent_agg_online")) {
+        paymentId = item.paymentId;
+        yearMonthValue = todayYm();
+      } else if (item.id.includes("rent_online_") && !item.id.includes("daily_online_")) {
+        const rentMatch = item.id.match(/rent_online_(\d{4}-\d{2})/);
+        yearMonthValue = rentMatch ? rentMatch[1] : undefined;
+      } else if (item.id.includes("daily_online_")) {
+        paymentId = item.paymentId || item.id.replace(/^.*daily_online_/, "");
+        yearMonthValue = todayYm();
       }
-
-      console.log('[DueAmount] Navigation params:', {
-        type: item.type,
-        amount: item.amount,
-        propertyId: item.propertyId,
-        ownerId: item.ownerId,
-        monthLabel: item.monthLabel,
-        yearMonth,
-        paymentId,
-      });
 
       navigation.navigate("DepositCheckoutScreen", {
         type: item.type,
         amount: item.amount,
         propertyId: item.propertyId,
-        ownerId: item.ownerId, // ✅ Pass ownerId
+        ownerId: item.ownerId,
         monthLabel: item.monthLabel,
-        yearMonth, // For monthly payments
-        paymentId, // For daily payments
+        yearMonth: yearMonthValue,
+        paymentId,
+        paymentDate: item.paymentDate,
+        bookingId: item.bookingId,
         returnTo: "Home",
       });
     } finally {
@@ -358,128 +595,161 @@ export default function DueAmount() {
     <View className="px-4 mt-6">
       <View className="flex-row justify-between items-end mb-4">
         <Text className="text-xl font-bold text-slate-800">Due Amount</Text>
-        {dueItems.length > 0 && (
+        {dueGroups.length > 0 && (
           <Text className="text-sm text-slate-600">
             Total: ₹{formatAmount(totalDue)}
           </Text>
         )}
       </View>
 
-      <View className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20">
-        <LinearGradient
-          colors={gradientColors}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          className="pt-6 pb-2 px-2"
-        >
-          {loading ? (
-            <View className="py-8 items-center">
+      {loading ? (
+        <View className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20">
+          <LinearGradient
+            colors={gradientColors}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            className="py-8 px-2"
+          >
+            <View className="items-center">
               <ActivityIndicator size="small" color="#fff" />
               <Text className="text-white/80 mt-2 text-sm">Loading dues...</Text>
             </View>
-          ) : dueItems.length === 0 ? (
-            <View className="py-2 px-6 items-center justify-center">
-              <Text className="text-white/80 text-center leading-5 text-[14px]">
-                You have no pending dues.
+          </LinearGradient>
+        </View>
+      ) : dueGroups.length === 0 ? (
+        <View className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20">
+          <LinearGradient
+            colors={gradientColors}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            className="py-6 px-6"
+          >
+            <Text className="text-white/80 text-center leading-5 text-[14px]">
+              You have no pending dues.
+            </Text>
+            <TouchableOpacity
+              onPress={() => refresh(true)}
+              className="mt-6 px-6 py-2 bg-white/10 rounded-full border border-white/20 self-center"
+            >
+              <Text className="text-white font-semibold text-xs uppercase tracking-widest">
+                Refresh Status
               </Text>
-              {!!raw?.booking?.rentInfoMessage && (
-                <Text className="text-white/90 text-center text-[13px] mt-3 leading-5 px-2">
-                  {String(raw.booking.rentInfoMessage)}
-                </Text>
-              )}
-              <TouchableOpacity
-                onPress={() => refresh(true)}
-                className="mt-6 px-6 py-2 bg-white/10 rounded-full border border-white/20"
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      ) : (
+        <View className="gap-4">
+          {dueGroups.map((group) => (
+            <View
+              key={group.key}
+              className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20"
+            >
+              <LinearGradient
+                colors={gradientColors}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                className="pt-5 pb-2 px-2"
               >
-                <Text className="text-white font-semibold text-xs uppercase tracking-widest">
-                  Refresh Status
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              {/* Table Header */}
-              <View className="flex-row items-center bg-white/10 rounded-full py-3 mb-4 mx-2">
-                <Text className="flex-[1.2] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
-                  Month
-                </Text>
-                <Text className="flex-[1] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
-                  Due
-                </Text>
-                <Text className="flex-[1] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
-                  Paid
-                </Text>
-                <Text className="flex-[1.5] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
-                  Action
-                </Text>
-              </View>
-
-              {/* Due Items */}
-              {dueItems.map((item, index) => (
-                <View
-                  key={`due-${index}-${item.id}`}
-                  className={`flex-row items-center py-4 px-2 ${
-                    index !== dueItems.length - 1 ? "border-b border-white/10" : ""
-                  }`}
-                >
-                  <Text className="flex-[1.2] text-left pl-4 text-white font-bold text-[16px]">
-                    {item.monthLabel}
+                <View className="px-3 pb-3 border-b border-white/15">
+                  <Text className="text-white font-black text-[17px]" numberOfLines={2}>
+                    {group.propertyName}
                   </Text>
-                  <Text className="flex-[1] text-center text-white font-medium text-[15px]">
-                    ₹{formatAmount(item.amount)}
-                  </Text>
-                  <Text className="flex-[1] text-center text-white/70 font-medium text-[15px]">
-                    {item.paid ? `₹${formatAmount(item.amount)}` : "—"}
-                  </Text>
-
-                  <View className="flex-[1.5] items-center">
-                    {item.paid ? (
-                      <View className="bg-green-400/30 rounded-full px-3 py-1 border border-green-300/50">
-                        <Text className="text-green-100 font-bold text-[11px] uppercase">
-                          Paid
-                        </Text>
-                      </View>
-                    ) : item.type === "rent_cash" ? (
-                      <Text className="text-white/90 text-[11px] font-medium text-center">
-                        Pay via cash
+                  <View className="flex-row items-center mt-2 gap-2 flex-wrap">
+                    <View
+                      className={`px-2.5 py-1 rounded-full ${
+                        group.dueContext === "enrollment" ? "bg-amber-400/25" : "bg-white/15"
+                      }`}
+                    >
+                      <Text className="text-white text-[11px] font-bold uppercase tracking-wide">
+                        {group.dueContext === "enrollment"
+                          ? "Pending enrollment"
+                          : "Rent & deposit"}
                       </Text>
-                    ) : payingId === item.id ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => handlePayNow(item)}
-                        className="bg-white rounded-xl px-4 py-2 shadow-sm"
-                      >
-                        <Text
-                          style={{ color: gradientColors[1] }}
-                          className="font-bold text-[12px] uppercase"
-                        >
-                          Pay Now
-                        </Text>
-                      </TouchableOpacity>
-                    )}
+                    </View>
+                    <Text className="text-white/90 text-sm font-semibold">
+                      Due: ₹{formatAmount(group.total)}
+                    </Text>
                   </View>
                 </View>
-              ))}
 
-              {/* Total Row */}
-              {dueItems.length > 0 && (
-                <View className="flex-row items-center py-4 px-2 mt-2 border-t-2 border-white/20">
-                  <Text className="flex-[1.2] text-left pl-4 text-white font-bold text-[16px]">
-                    Total due
+                <View className="flex-row items-center bg-white/10 rounded-full py-3 mb-3 mt-3 mx-2">
+                  <Text className="flex-[1.2] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
+                    Month
                   </Text>
-                  <Text className="flex-[1] text-center text-white font-bold text-[16px]">
-                    ₹{formatAmount(totalDue)}
+                  <Text className="flex-[1] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
+                    Due
                   </Text>
-                  <Text className="flex-[1] text-center text-white/70" />
+                  <Text className="flex-[1] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
+                    Paid
+                  </Text>
+                  <Text className="flex-[1.5] text-center text-white/80 font-bold text-[13px] uppercase tracking-wider">
+                    Action
+                  </Text>
+                </View>
+
+                {group.items.map((item, index) => (
+                  <View
+                    key={`${group.key}-due-${item.id}-${index}`}
+                    className={`flex-row items-center py-4 px-2 ${
+                      index !== group.items.length - 1 ? "border-b border-white/10" : ""
+                    }`}
+                  >
+                    <Text className="flex-[1.2] text-left pl-4 text-white font-bold text-[16px]">
+                      {item.monthLabel}
+                    </Text>
+                    <Text className="flex-[1] text-center text-white font-medium text-[15px]">
+                      ₹{formatAmount(item.amount)}
+                    </Text>
+                    <Text className="flex-[1] text-center text-white/70 font-medium text-[15px]">
+                      {item.paid ? `₹${formatAmount(item.amount)}` : "—"}
+                    </Text>
+
+                    <View className="flex-[1.5] items-center">
+                      {item.paid ? (
+                        <View className="bg-green-400/30 rounded-full px-3 py-1 border border-green-300/50">
+                          <Text className="text-green-100 font-bold text-[11px] uppercase">
+                            Paid
+                          </Text>
+                        </View>
+                      ) : item.type === "rent_cash" ? (
+                        <Text className="text-white/90 text-[11px] font-medium text-center">
+                          Pay via cash
+                        </Text>
+                      ) : payingId === item.id ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          onPress={() => handlePayNow(item)}
+                          className="bg-white rounded-xl px-4 py-2 shadow-sm"
+                        >
+                          <Text
+                            style={{ color: gradientColors[1] }}
+                            className="font-bold text-[12px] uppercase"
+                          >
+                            Pay Now
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                ))}
+
+                <View className="flex-row items-center py-3 px-2 mt-1 border-t border-white/20">
+                  <Text className="flex-[1.2] text-left pl-4 text-white font-bold text-[15px]">
+                    Subtotal
+                  </Text>
+                  <Text className="flex-[1] text-center text-white font-bold text-[15px]">
+                    ₹{formatAmount(group.total)}
+                  </Text>
+                  <Text className="flex-[1]" />
                   <View className="flex-[1.5]" />
                 </View>
-              )}
-            </>
-          )}
-        </LinearGradient>
-      </View>
+              </LinearGradient>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }

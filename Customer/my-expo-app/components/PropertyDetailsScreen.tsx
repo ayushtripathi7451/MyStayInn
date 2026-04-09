@@ -7,6 +7,7 @@ import {
   Linking,
   Platform,
   StyleSheet,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
@@ -14,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import type { CurrentStayProperty } from "./InfoCards";
 import MapFallback from "./MapFallback";
+import { pickAdminPhoneFromDetailParam } from "../utils/currentStayAdminPhone";
 
 const MAP_HEIGHT = 220;
 const DEFAULT_LAT = 20.5937;
@@ -34,6 +36,18 @@ function formatDate(dateString: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+/** Normalize stored phone for `tel:` (India: 10 digits → +91). */
+function dialableHref(raw: string | undefined | null): string | null {
+  if (raw == null || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length === 0) return null;
+  if (trimmed.startsWith("+")) return trimmed;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
 }
 
 function getFloorLabel(floor: number | undefined): string {
@@ -91,6 +105,9 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
   const priceText = property.monthlyRent
     ? `₹${Number(property.monthlyRent).toLocaleString()}/month`
     : "—";
+
+  const adminPhoneRaw = pickAdminPhoneFromDetailParam(property as unknown as Record<string, unknown>);
+  const adminTel = dialableHref(adminPhoneRaw ?? null);
 
   const lat = (property as any).latitude ?? (property as any).coordinates?.latitude;
   const lng = (property as any).longitude ?? (property as any).coordinates?.longitude;
@@ -412,16 +429,26 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        {/* Contact / Call to action — optional */}
+        {/* Contact property admin — uses admin phone from current-stay API */}
         <View className="bg-[#EEF2FF] rounded-xl p-4 mb-4 flex-row items-center justify-between">
-          <View>
+          <View className="flex-1 pr-3">
             <Text className="text-gray-600 text-[12px]">Need help?</Text>
             <Text className="text-[15px] font-semibold text-slate-800">
               Contact property admin
             </Text>
+            //
           </View>
           <TouchableOpacity
-            onPress={() => Linking.openURL("tel:")}
+            onPress={() => {
+              if (!adminTel) {
+                Alert.alert(
+                  "Contact unavailable",
+                  "Property admin phone could not be loaded. Try again later or use in-app support."
+                );
+                return;
+              }
+              Linking.openURL(`tel:${adminTel}`);
+            }}
             className="w-12 h-12 rounded-full items-center justify-center bg-[#1E33FF]"
           >
             <Ionicons name="call-outline" size={22} color="#fff" />
@@ -439,9 +466,9 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
             hasDue ? "bg-gray-300" : "bg-red-500"
           }`}
           activeOpacity={hasDue ? 1 : 0.85}
-          disabled={hasDue}
+          disabled={!hasDue}
           onPress={() => {
-            if (!hasDue) {
+            if (hasDue) {
               navigation.navigate("MoveOutRequestScreen", { property });
             }
           }}
