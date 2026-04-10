@@ -271,7 +271,7 @@ export default function BasicInfoScreen({ navigation }) {
 
               {/* PROGRESS BAR */}
               <View className="flex-row justify-center mt-3 mb-8">
-                <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+                <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
                 <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
                 <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
               </View>
@@ -408,7 +408,7 @@ export default function BasicInfoScreen({ navigation }) {
                   </Text>
                   <TouchableOpacity
                     onPress={() => navigation.navigate("Login")}
-                    className="bg-purple-600 py-3 rounded-xl"
+                    className="bg-indigo-600 py-3 rounded-xl"
                   >
                     <Text className="text-center text-white font-semibold">Go to login</Text>
                   </TouchableOpacity>
@@ -420,7 +420,7 @@ export default function BasicInfoScreen({ navigation }) {
                 onPress={sendOTP}
                 disabled={!isValid || loading}
                 className={`w-full py-4 rounded-xl mt-8 flex-row justify-center items-center ${
-                  isValid && !loading ? "bg-purple-500" : "bg-purple-300"
+                  isValid && !loading ? "bg-indigo-500" : "bg-indigo-300"
                 }`}
               >
                 {loading && <ActivityIndicator color="white" className="mr-2" />}

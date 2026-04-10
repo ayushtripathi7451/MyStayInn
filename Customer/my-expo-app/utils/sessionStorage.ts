@@ -3,7 +3,7 @@ import { store } from "../src/store/redux";
 import { clearCurrentStay } from "../src/store/redux/slices/currentStaySlice";
 import { clearUser } from "../src/store/redux/slices/userSlice";
 import { bumpCurrentStayAccountEpoch } from "../src/store/sagas/currentStaySaga";
-import { CUSTOMER_PUSH_INBOX_KEY } from "./customerInbox";
+import { CUSTOMER_ANNOUNCEMENTS_CACHE_KEY, CUSTOMER_PUSH_INBOX_KEY } from "./customerInbox";
 
 /**
  * Keys that must be wiped when switching accounts so the previous user's
@@ -15,6 +15,7 @@ const USER_SCOPED_ASYNC_KEYS = [
   "userData",
   "userProfile",
   CUSTOMER_PUSH_INBOX_KEY,
+  CUSTOMER_ANNOUNCEMENTS_CACHE_KEY,
 ] as const;
 
 function dispatchClearReduxSession(): void {

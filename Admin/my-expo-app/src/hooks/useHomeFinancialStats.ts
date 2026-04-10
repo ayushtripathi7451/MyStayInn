@@ -32,6 +32,17 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   };
 
+  const normalizeYearMonthKey = (raw: string | null | undefined): string | null => {
+    const t = String(raw ?? '').trim();
+    if (!t) return null;
+    const parts = t.split('-').map((p) => p.trim());
+    if (parts.length < 2) return null;
+    const y = parseInt(parts[0], 10);
+    const mo = parseInt(parts[1], 10);
+    if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return null;
+    return `${y}-${String(mo).padStart(2, '0')}`;
+  };
+
   const defaultDailyOnlinePerBooking = (b: any): number => {
     const s = num(b?.scheduledOnlineRent);
     if (s > 0) return s;
@@ -97,8 +108,14 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
     }
 
     if (schedOn > 0) {
-      const paidMonths = paidYm ? paidYm.split(',').map((m: string) => m.trim()) : [];
-      if (paidMonths.includes(monthKey)) return 0;
+      const mkN = normalizeYearMonthKey(monthKey) ?? monthKey;
+      const paidMonths = paidYm
+        ? paidYm
+            .split(',')
+            .map((m: string) => normalizeYearMonthKey(m.trim()))
+            .filter((x): x is string => Boolean(x))
+        : [];
+      if (paidMonths.includes(mkN)) return 0;
       return schedOn;
     }
     if (toBool(booking?.isRentOnlinePaid)) return 0;
@@ -130,21 +147,28 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
     }
 
     if (schedCash > 0) {
-      const paidMonths = paidYm ? paidYm.split(',').map((m: string) => m.trim()) : [];
-      if (paidMonths.includes(monthKey)) return 0;
+      const mkN = normalizeYearMonthKey(monthKey) ?? monthKey;
+      const paidMonths = paidYm
+        ? paidYm
+            .split(',')
+            .map((m: string) => normalizeYearMonthKey(m.trim()))
+            .filter((x): x is string => Boolean(x))
+        : [];
+      if (paidMonths.includes(mkN)) return 0;
       return schedCash;
     }
     if (toBool(booking?.isRentCashPaid)) return 0;
     return legacyCash > 0 ? legacyCash : 0;
   };
 
-  // Mirrors ReportsHub collectionsForMonthKeyFromBookings exactly, but keeps security deposit separate
+  // Mirrors ReportsHub collectionsForMonthKeyFromBookings (rent split; security separate)
   const collectionsForMonthKeyFromBookings = (bookings: any[], monthKey: string): {
     total: number;
     securityTotal: number;
     onlineTotal: number;
     cashTotal: number;
   } => {
+    const mk = normalizeYearMonthKey(monthKey) ?? monthKey;
     let total = 0;
     let securityTotal = 0;
     let onlineTotal = 0;
@@ -152,65 +176,68 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
 
     bookings.forEach((b: any) => {
       const rp = String(b.rentPeriod || 'month').toLowerCase();
-      const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
+      const moveInMonthKey =
+        normalizeYearMonthKey(toMonthKeyFromDate(b.moveInDate)) ?? toMonthKeyFromDate(b.moveInDate);
 
-      // Security deposit — move-in month (legacy helper; home “collected” uses Reports Hub month logic below)
-      if (moveInMonthKey === monthKey) {
+      if (moveInMonthKey === mk) {
         const sec = effectiveBookingSecurityDeposit(b);
         if (toBool(b.isSecurityPaid) && sec > 0) {
           securityTotal += sec;
         }
       }
 
-      // Daily rent — iterate dailyPayments for paid amounts
-      if (rp === 'day') {
-        const dailyPayments = Array.isArray(b.dailyPayments) ? b.dailyPayments : [];
-        dailyPayments.forEach((dp: any) => {
-          const dpMonthKey = toMonthKeyFromDate(dp.paymentDate);
-          if (dpMonthKey === monthKey) {
-            const effOn = effectiveDailyOnlineAmount(dp, b);
-            const effCash = effectiveDailyCashAmount(dp, b);
-            if (toBool(dp.paidOnline) && effOn > 0) {
-              total += effOn;
-              onlineTotal += effOn;
-            }
-            if (toBool(dp.paidCash) && effCash > 0) {
-              total += effCash;
-              cashTotal += effCash;
-            }
+      const hasDailyRows = Array.isArray(b.dailyPayments) && b.dailyPayments.length > 0;
+
+      if (rp === 'day' && hasDailyRows) {
+        b.dailyPayments.forEach((dp: any) => {
+          const dpMk = normalizeYearMonthKey(toMonthKeyFromDate(dp.paymentDate)) ?? toMonthKeyFromDate(dp.paymentDate);
+          if (dpMk !== mk) return;
+          const effOn = effectiveDailyOnlineAmount(dp, b);
+          const effCash = effectiveDailyCashAmount(dp, b);
+          if (toBool(dp.paidOnline) && effOn > 0) {
+            total += effOn;
+            onlineTotal += effOn;
+          }
+          if (toBool(dp.paidCash) && effCash > 0) {
+            total += effCash;
+            cashTotal += effCash;
           }
         });
-        return; // Skip monthly logic for day-based bookings
+        return;
       }
 
-      // Monthly online rent
       const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
       const onlinePaidMonths = onlinePaidYm
-        ? onlinePaidYm.split(',').map((m: string) => m.trim()).filter(Boolean)
+        ? onlinePaidYm
+            .split(',')
+            .map((m: string) => normalizeYearMonthKey(m.trim()))
+            .filter((x): x is string => Boolean(x))
         : [];
       const schedOnline = num(b.scheduledOnlineRent);
       const legacyOnline = num(b.onlinePaymentRecv);
 
-      if (schedOnline > 0 && onlinePaidMonths.includes(monthKey)) {
+      if (schedOnline > 0 && onlinePaidMonths.includes(mk)) {
         total += schedOnline;
         onlineTotal += schedOnline;
-      } else if (legacyOnline > 0 && toBool(b.isRentOnlinePaid) && moveInMonthKey === monthKey) {
+      } else if (legacyOnline > 0 && toBool(b.isRentOnlinePaid) && moveInMonthKey === mk) {
         total += legacyOnline;
         onlineTotal += legacyOnline;
       }
 
-      // Monthly cash rent
       const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
       const cashPaidMonths = cashPaidYm
-        ? cashPaidYm.split(',').map((m: string) => m.trim()).filter(Boolean)
+        ? cashPaidYm
+            .split(',')
+            .map((m: string) => normalizeYearMonthKey(m.trim()))
+            .filter((x): x is string => Boolean(x))
         : [];
       const schedCash = num(b.scheduledCashRent);
       const legacyCash = num(b.cashPaymentRecv);
 
-      if (schedCash > 0 && cashPaidMonths.includes(monthKey)) {
+      if (schedCash > 0 && cashPaidMonths.includes(mk)) {
         total += schedCash;
         cashTotal += schedCash;
-      } else if (legacyCash > 0 && toBool(b.isRentCashPaid) && moveInMonthKey === monthKey) {
+      } else if (legacyCash > 0 && toBool(b.isRentCashPaid) && moveInMonthKey === mk) {
         total += legacyCash;
         cashTotal += legacyCash;
       }
@@ -414,7 +441,7 @@ export function useHomeFinancialStats(propertyId: string | undefined) {
         .reduce((s: number, m: any) => s + (num(m.amount) || 0), 0);
 
       const totalExpense = fixedExpenseTotal + monthlyRecurringTotal;
-      const profitVal = Math.round(rentCollections - totalExpense);
+      const profitVal = Math.round(collections - totalExpense);
 
       // Calculate MoveOut P/L for current month
       let moveOutPLVal = 0;

@@ -2,16 +2,16 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Base URLs for different services
-const AUTH_SERVICE_URL = "https://api.mystayinn.co.in/auth";
-const PROPERTY_SERVICE_URL = "https://api.mystayinn.co.in/properties";
-const USER_SERVICE_URL = "https://api.mystayinn.co.in/users";
-const BOOKING_SERVICE_URL = "https://api.mystayinn.co.in/bookings";
-const NOTIFICATION_SERVICE_URL = "https://api.mystayinn.co.in/notifications";
-const TICKET_SERVICE_URL = "https://api.mystayinn.co.in/tickets";
-const MOVE_OUT_SERVICE_URL = "https://api.mystayinn.co.in/moveouts";
-const EXPENSE_SERVICE_URL = "https://api.mystayinn.co.in/expenses";
-const ANALYTICS_SERVICE_URL = "https://api.mystayinn.co.in/analytics";
-const TRANSACTION_SERVICE_URL = "https://api.mystayinn.co.in/transactions";
+const AUTH_SERVICE_URL = "http://192.168.1.7:3001";
+const PROPERTY_SERVICE_URL = "http://192.168.1.7:3004";
+export const USER_SERVICE_URL = "http://192.168.1.7:3002";
+const BOOKING_SERVICE_URL = "http://192.168.1.7:3012";
+const NOTIFICATION_SERVICE_URL = "http://192.168.1.7:3005";
+const TICKET_SERVICE_URL = "http://192.168.1.7:3007";
+const MOVE_OUT_SERVICE_URL = "http://192.168.1.7:3010";
+const EXPENSE_SERVICE_URL = "http://192.168.1.7:3011";
+const ANALYTICS_SERVICE_URL = "http://192.168.1.7:3012";
+const TRANSACTION_SERVICE_URL = "http://192.168.1.7:3003";
 
 /** AsyncStorage may hold literal "null" / "undefined" strings — do not send as Bearer (401). */
 function isUsableJwtStorageValue(t: string | null | undefined): t is string {

@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../utils/api";
+import { hasUsableProperties } from "../utils/propertyGate";
 
 export default function MobileOTPLoginScreen({ navigation }: any) {
   const mobileRef = useRef<TextInput>(null);
@@ -128,8 +129,11 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
       try {
         const { propertyApi } = await import("../utils/api");
         const propertiesResponse = await propertyApi.get('/api/properties');
-        if (propertiesResponse.data.success && propertiesResponse.data.properties.length > 0) {
-          const firstProperty = propertiesResponse.data.properties[0];
+        const list = propertiesResponse.data?.properties;
+        if (propertiesResponse.data?.success && hasUsableProperties(list)) {
+          const arr = list as unknown[];
+          const firstProperty =
+            arr.find((p) => p != null && typeof p === "object") ?? arr[0];
           await AsyncStorage.setItem('currentProperty', JSON.stringify(firstProperty));
           navigation.reset({ index: 0, routes: [{ name: "Home" }] });
         } else {

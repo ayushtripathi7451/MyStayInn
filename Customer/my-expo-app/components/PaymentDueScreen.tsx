@@ -171,11 +171,20 @@ export default function PaymentDueScreen({ navigation }: any) {
                 <View className="mb-2 px-1">
                   <Text className="text-slate-900 font-bold text-base">{group.propertyName}</Text>
                   <Text className="text-slate-500 text-xs mt-0.5">
-                    {group.dueContext === "enrollment"
-                      ? "Pending enrollment — security / rent for this property only"
-                      : "Active stay — rent & deposit for this property only"}
+                    {group.dueContext === "booking_requested"
+                      ? "Booking requested — pay after your room is allocated"
+                      : group.dueContext === "enrollment"
+                        ? "Pending enrollment — security / rent for this property only"
+                        : "Active stay — rent & deposit for this property only"}
                   </Text>
                 </View>
+                {group.items.length === 0 ? (
+                  <View className="bg-slate-50 rounded-2xl py-4 px-4 mb-3 border border-slate-200">
+                    <Text className="text-slate-600 text-sm leading-5">
+                      No payment is due yet. Once the property assigns your room, security and rent will appear here.
+                    </Text>
+                  </View>
+                ) : null}
                 {group.items.map((item, index) => (
                   <View
                     key={`${group.key}-due-${item.id}-${index}`}

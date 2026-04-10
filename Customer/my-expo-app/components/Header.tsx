@@ -48,7 +48,7 @@ export default function Header() {
         className="flex-row items-center bg-[#F7F8FA] rounded-xl h-[42px] px-3 mt-4"
       >
         <Ionicons name="search" size={18} color="#aaa" />
-        <Text className="text-gray-400 ml-2 text-[14px]">Search Admin</Text>
+        <Text className="text-gray-400 ml-2 text-[14px]">Search Property</Text>
       </TouchableOpacity>
     </View>
   );

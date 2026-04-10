@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ticketApi } from '../../utils/api';
 import { MoveOutService } from '../../services/moveOutService';
+import { moveOutRequestMatchesProperty } from '../../utils/moveOutPropertyFilter';
 
 /** Same property match as TicketsScreen so home count matches Open tab */
 function filterTicketsByProperty(tickets: { propertyRef?: string | null }[], propertyMatchValues: string[]) {
@@ -33,7 +34,17 @@ export function usePropertyHomeStats(propertyId: string | undefined, propertyNam
       const requestedRes = await MoveOutService.getMoveOutRequests(undefined, 'pending', propertyId);
       const allRequests = requestedRes.success && requestedRes.data?.requests ? requestedRes.data.requests : [];
       const tenantRequestedOnly = allRequests.filter((r: { type?: string }) => r.type !== 'admin_initiated');
-      setMoveOutCount(tenantRequestedOnly.length);
+      const scopedForProperty =
+        propertyId || propertyName || propertyUniqueId
+          ? tenantRequestedOnly.filter((r) =>
+              moveOutRequestMatchesProperty(r as any, {
+                propertyId,
+                propertyName,
+                propertyUniqueId,
+              })
+            )
+          : tenantRequestedOnly;
+      setMoveOutCount(scopedForProperty.length);
 
       let openTicketsRes: { data?: { success?: boolean; tickets?: { propertyRef?: string | null }[] } } = { data: { success: true, tickets: [] } };
       if (propertyId || propertyName) {

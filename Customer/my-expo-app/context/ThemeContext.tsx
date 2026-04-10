@@ -8,7 +8,7 @@ export const ThemeProvider = ({ children }: any) => {
   const [theme, setTheme] = useState<ThemeType>("male");
 
   const primaryColor =
-    theme === "female" ? "bg-pink-500" : "bg-purple-500";
+    theme === "female" ? "bg-pink-500" : "bg-indigo-600";
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, primaryColor }}>

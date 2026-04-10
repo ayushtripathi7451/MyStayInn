@@ -28,6 +28,8 @@ import {
   emptyStructuredAddress,
   cashfreeAddressToStructured,
 } from "../utils/address";
+import { formatLocalYMD } from "../utils/dateCalendar";
+import { isCustomerProfileCompleteForHome } from "../utils/profileCompletion";
 import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
 import ScrollableDatePicker from "./ScrollableDatePicker";
 
@@ -223,9 +225,9 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
       if (user) {
         console.log("👤 Fetched user data:", JSON.stringify(user, null, 2));
         
-        // Check if profile is already completed
+        // Check if profile is already completed (incl. documents — avoid Home when setup unfinished)
         const extras = user.profileExtras || {};
-        if (extras.profileCompleted === true) {
+        if (isCustomerProfileCompleteForHome(extras)) {
           navigation.replace("Home");
           return;
         }
@@ -755,6 +757,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
 
     navigation.navigate("CompleteProfileDocs", {
       profileData: {
+        fullName: normalizedFullName,
         firstName: derivedFirst,
         lastName: derivedLast,
         aadhaarLast4: aadhaarLast4.replace(/\D/g, ""),
@@ -893,7 +896,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                   onDateChange={(date) => {
                     setSelectedDate(date || undefined);
                     if (date) {
-                      setDob(date.toISOString().split("T")[0]);
+                      setDob(formatLocalYMD(date));
                     }
                   }}
                   maximumDate={new Date()}
@@ -953,6 +956,10 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
               </View>
             )}
             {!aadhaarVerified ? (
+              <>
+                <Text className="text-gray-600 text-xs mb-3 leading-5">
+                  Note: Keep your Aadhaar number ready, then tap Verify Aadhaar with DigiLocker.
+                </Text>
               <TouchableOpacity
                 onPress={() => setAadhaarCheckoutVisible(true)}
                 disabled={verifyingAadhaar}
@@ -966,10 +973,11 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 ) : (
                   <>
                     <Ionicons name="shield-checkmark" size={20} color="white" />
-                    <Text className="text-white font-bold ml-2">Verify Aadhaar via DigiLocker</Text>
+                    <Text className="text-white font-bold ml-2">Verify Aadhaar</Text>
                   </>
                 )}
               </TouchableOpacity>
+              </>
             ) : (
               <View className={`px-4 py-4 rounded-xl flex-row items-center justify-center ${kycAllMatch ? "bg-green-600" : "bg-amber-600"}`}>
                 <Ionicons name="shield-checkmark" size={20} color="white" />

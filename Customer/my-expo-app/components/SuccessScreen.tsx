@@ -34,7 +34,7 @@ export default function SuccessScreen({ navigation, route }: any) {
           <View className="w-full mt-10">
             <TouchableOpacity
               onPress={() => navigation.navigate("CompleteProfile")}
-              className="bg-purple-600 py-4 rounded-xl items-center w-full"
+              className="bg-indigo-600 py-4 rounded-xl items-center w-full"
             >
               <Text className="text-white font-semibold text-md">
                 Continue

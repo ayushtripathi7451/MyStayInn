@@ -1,4 +1,4 @@
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import {
   getMessaging,
@@ -9,14 +9,42 @@ import {
 } from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { userApi } from './api';
-import { appendCustomerPushInbox } from './customerInbox';
+import { appendCustomerPushInbox, hasDisplayablePushContent } from './customerInbox';
+
+function extractPushText(remoteMessage: any): { title: string; body: string } {
+  const n = remoteMessage?.notification;
+  const d = (remoteMessage?.data || {}) as Record<string, unknown>;
+  const title = String(n?.title ?? d.title ?? d.notification_title ?? '').trim();
+  const body = String(
+    n?.body ?? d.body ?? d.message ?? d.notification_body ?? d.content ?? ''
+  ).trim();
+  return { title, body };
+}
+
+/**
+ * Property-owner enrollment alerts — must not show in the customer app (one user may
+ * register both admin + customer FCM tokens on the same account).
+ */
+function isOwnerOnlyEnrollmentNotification(remoteMessage: any): boolean {
+  const d = (remoteMessage?.data || {}) as Record<string, unknown>;
+  const kind = String(d.notificationKind ?? d.audience ?? '').toLowerCase();
+  if (kind === 'owner_new_enrollment') return true;
+  if (kind === 'admin' || kind === 'owner') return true;
+  const { title } = extractPushText(remoteMessage);
+  const t = title.toLowerCase();
+  if (t.includes('new booking request received')) return true;
+  return false;
+}
 
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
-  const title = String(
-    remoteMessage?.notification?.title ?? remoteMessage?.data?.title ?? 'Notification'
-  );
-  const body = String(remoteMessage?.notification?.body ?? remoteMessage?.data?.body ?? '');
-  console.log('[PushNotifications] Background message:', title);
+  if (isOwnerOnlyEnrollmentNotification(remoteMessage)) {
+    return;
+  }
+  const { title, body } = extractPushText(remoteMessage);
+  if (!hasDisplayablePushContent(title, body)) {
+    return;
+  }
+  console.log('[PushNotifications] Background message:', title || '(body only)');
   await appendCustomerPushInbox(title, body);
 });
 
@@ -129,10 +157,15 @@ export function setupForegroundNotificationHandler(): void {
   try {
     const messagingInstance = getMessaging();
     onMessage(messagingInstance, (remoteMessage) => {
-      const title = String(remoteMessage.notification?.title ?? remoteMessage.data?.title ?? 'Notification');
-      const body = String(remoteMessage.notification?.body ?? remoteMessage.data?.body ?? '');
+      if (isOwnerOnlyEnrollmentNotification(remoteMessage)) {
+        return;
+      }
+      const { title, body } = extractPushText(remoteMessage);
+      if (!hasDisplayablePushContent(title, body)) {
+        return;
+      }
+      // Foreground: store in inbox only — no modal alert (owner-only pushes are dropped above).
       void appendCustomerPushInbox(title, body);
-      Alert.alert(title, body);
     });
   } catch (err) {
     console.warn('[PushNotifications] foreground handler setup failed:', err);

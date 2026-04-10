@@ -8,6 +8,7 @@ import {
   fetchAnnouncementRows,
   getCustomerPushRows,
   mergeInboxRows,
+  hasDisplayablePushContent,
   truncateInboxPreview,
   INBOX_PREVIEW_MAX_CHARS,
   type InboxRow,
@@ -29,15 +30,13 @@ export default function NotificationScreen() {
       const [ann, push] = await Promise.all([fetchAnnouncementRows(), getCustomerPushRows()]);
       const merged = mergeInboxRows(ann, push);
       
-      // Filter out notifications with empty or whitespace-only title AND body
       const filtered = merged.filter((r) => {
-        const hasTitle = r.title && r.title.trim().length > 0;
-        const hasBody = r.body && r.body.trim().length > 0;
-        if (!hasTitle && !hasBody) {
-          console.warn('[NotificationScreen] Filtering out notification with no content:', r.id);
-          return false;
+        if (r.kind === "push") {
+          return hasDisplayablePushContent(r.title, r.body);
         }
-        return true;
+        const hasTitle = String(r.title || "").trim().length > 0;
+        const hasBody = String(r.body || "").trim().length > 0;
+        return hasTitle || hasBody;
       });
       
       const mapped: ListItem[] = filtered.map((r) => {
@@ -128,7 +127,7 @@ export default function NotificationScreen() {
           >
             <Text
               className={`text-center font-semibold ${
-                tab === "recent" ? "text-purple-600" : "text-gray-500"
+                tab === "recent" ? "text-indigo-600" : "text-gray-500"
               }`}
             >
               Recent
@@ -141,7 +140,7 @@ export default function NotificationScreen() {
           >
             <Text
               className={`text-center font-semibold ${
-                tab === "past" ? "text-purple-600" : "text-gray-500"
+                tab === "past" ? "text-indigo-600" : "text-gray-500"
               }`}
             >
               Past History

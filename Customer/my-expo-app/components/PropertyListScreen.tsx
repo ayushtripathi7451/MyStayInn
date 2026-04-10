@@ -7,10 +7,18 @@ import { userApi } from "../utils/api";
 import type { CurrentStayProperty } from "./InfoCards";
 import { pickAdminPhoneFromStay } from "../utils/currentStayAdminPhone";
 
+function normalizeMoveOutStatus(raw: unknown): "requested" | "accepted" | null {
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (s === "requested" || s === "accepted") return s;
+  return null;
+}
+
 function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null {
   if (!currentStay?.booking) return null;
   const b = currentStay.booking;
-  const isEnrollmentPending = String(b.status || "") === "enrollment_pending";
+  const statusStr = String(b.status || "").toLowerCase();
   const p = currentStay.property;
   const r = currentStay.room || {
     roomNumber: "—",
@@ -18,11 +26,20 @@ function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null 
   };
   const address = [p?.city, p?.state].filter(Boolean).join(", ") || "";
   const isSecurityPaid = Boolean(b.isSecurityPaid);
-  const cardStatus = isEnrollmentPending
-    ? "Pending enrollment"
-    : isSecurityPaid
-      ? "Approved"
-      : "Pending Payment";
+  const serverMoveOutStatus = normalizeMoveOutStatus(
+    b.moveOutStatus ?? b.move_out_status ?? b.moveOutRequestStatus
+  );
+  const cardStatus = serverMoveOutStatus === "requested"
+    ? "Move-out requested"
+    : serverMoveOutStatus === "accepted"
+      ? "Move-out accepted"
+      : statusStr === "enrollment_requested"
+        ? "Booking requested"
+        : statusStr === "enrollment_pay_pending" || statusStr === "enrollment_pending"
+          ? "Pending enrollment"
+          : isSecurityPaid
+            ? "Approved"
+            : "Pending Payment";
   return {
     id: b.id,
     bookingId: b.id,
@@ -40,6 +57,10 @@ function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null 
     propertyType: p?.propertyType,
     roomType: r?.roomType,
     floor: r?.floor != null ? Number(r.floor) : undefined,
+    rules: p?.rules ?? undefined,
+    ...(Array.isArray(b.bedNumbers) && b.bedNumbers.length > 0
+      ? { bedNumbers: b.bedNumbers as (string | number)[] }
+      : {}),
     ...(() => {
       const phone = pickAdminPhoneFromStay(p, b);
       return phone ? { adminPhone: phone, propertyAdminPhone: phone } : {};
@@ -69,7 +90,7 @@ export default function PropertyListScreen() {
         .map((s) => mapCurrentStayToProperty(s))
         .filter(Boolean) as CurrentStayProperty[];
       setProperties(mapped);
-    } catch (e) {
+    } catch {
       setProperties([]);
     } finally {
       setLoading(false);

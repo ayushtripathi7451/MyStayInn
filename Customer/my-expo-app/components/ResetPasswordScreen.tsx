@@ -76,7 +76,7 @@ export default function ResetPasswordScreen({ navigation }: any) {
             onPress={() => navigation.navigate("ResetPasswordSent")}
             disabled={!isValid}
             className={`w-full py-4 rounded-xl mt-6 ${
-              isValid ? "bg-purple-500" : "bg-purple-300"
+              isValid ? "bg-indigo-500" : "bg-indigo-300"
             }`}
           >
             <Text className="text-center text-white font-semibold text-lg">

@@ -7,7 +7,7 @@ export default function SearchBar() {
     <View className="flex-row items-center bg-white rounded-xl h-12 px-3 mb-6">
       <Ionicons name="search" size={18} color="#aaa" />
       <TextInput
-        placeholder="Search Admin"
+        placeholder="Search Property"
         placeholderTextColor="#aaa"
         className="flex-1 ml-2 text-gray-700"
       />

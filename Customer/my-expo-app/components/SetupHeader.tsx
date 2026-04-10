@@ -55,14 +55,14 @@ export default function SetupHeader({ activeTab }: any) {
                 // onPress={() => navigation.navigate(tab.screen as never)}
                 className={`px-4 py-1.5 rounded-full border ${
                   isActive
-                    ? "border-purple-600 bg-white"
+                    ? "border-indigo-600 bg-white"
                     : "border-gray-200 bg-gray-100"
                 }`}
               >
                 <Text
                   className={
                     isActive
-                      ? "text-purple-600 font-semibold"
+                      ? "text-indigo-600 font-semibold"
                       : "text-gray-500"
                   }
                 >

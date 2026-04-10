@@ -407,20 +407,6 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
                 mode="date"
                 placeholder="Select"
               />
-              {allocationData.moveIn && (
-                <TouchableOpacity
-                  onPress={() =>
-                    setAllocationData({
-                      ...allocationData,
-                      moveIn: null,
-                      moveOut: null,
-                    })
-                  }
-                  className="mt-2"
-                >
-                  <Text className="text-xs font-semibold text-red-500">Clear move in date</Text>
-                </TouchableOpacity>
-              )}
             </View>
 
             <View className="w-[48%]">

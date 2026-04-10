@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, TextInput, TouchableOpacity, Alert, Keyboard } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, Keyboard } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, userApi } from "../utils/api";
+import { isCustomerProfileCompleteForHome } from "../utils/profileCompletion";
 
 export default function ChangeMPINScreen({ navigation }: any) {
   const [mobile, setMobile] = useState("");
@@ -24,6 +25,10 @@ export default function ChangeMPINScreen({ navigation }: any) {
   const otpRef = useRef<TextInput>(null);
   const [confirmation, setConfirmationState] = useState<any>(null);
   const [firebaseIdToken, setFirebaseIdToken] = useState<string | null>(null);
+  const [otpError, setOtpError] = useState("");
+  const [mobileError, setMobileError] = useState("");
+  const [otpInfo, setOtpInfo] = useState("");
+  const [mpinError, setMpinError] = useState("");
 
   /* ✅ OTP TIMER */
   useEffect(() => {
@@ -44,8 +49,10 @@ export default function ChangeMPINScreen({ navigation }: any) {
 
   /* ✅ SEND OTP via Firebase */
   const sendOTP = async () => {
+    setMobileError("");
+    setOtpError("");
     if (mobile.length !== 10) {
-      Alert.alert("Invalid Number", "Enter valid 10-digit number");
+      setMobileError("Enter a valid 10-digit mobile number.");
       return;
     }
 
@@ -56,10 +63,11 @@ export default function ChangeMPINScreen({ navigation }: any) {
 
       setOtpSent(true);
       setOtp("");
+      setOtpError("");
+      setOtpInfo("OTP sent. Enter the 6-digit code below.");
       setTimer(30);
       setCanResend(false);
 
-      Alert.alert("OTP Sent", `OTP sent to ${fullPhoneNumber}`);
       Keyboard.dismiss();
       setTimeout(() => otpRef.current?.focus(), 500);
     } catch (error: any) {
@@ -70,19 +78,24 @@ export default function ChangeMPINScreen({ navigation }: any) {
       } else if (error.code === "auth/too-many-requests") {
         friendlyMessage = "Too many attempts. Please try again later.";
       }
-      Alert.alert("Error", friendlyMessage);
+      if (otpSent) {
+        setOtpError(friendlyMessage);
+      } else {
+        setMobileError(friendlyMessage);
+      }
     }
   };
 
   /* ✅ VERIFY OTP via Firebase (only verifies number & stores firebaseIdToken) */
   const verifyOTP = async () => {
+    setOtpError("");
     if (otp.length !== 6) {
-      Alert.alert("Invalid OTP", "Enter 6-digit OTP");
+      setOtpError("Enter the full 6-digit OTP.");
       return;
     }
 
     if (!confirmation) {
-      Alert.alert("Error", "Please request OTP again.");
+      setOtpError("Session expired. Request OTP again.");
       return;
     }
 
@@ -91,27 +104,38 @@ export default function ChangeMPINScreen({ navigation }: any) {
       const token = await userCredential.user.getIdToken();
       setFirebaseIdToken(token);
       setOtpVerified(true);
-      Alert.alert("OTP Verified", "You can now change MPIN");
+      setOtpInfo("");
     } catch (error: any) {
       console.error("Verify OTP Error:", error);
-      const msg = error.response?.data?.message || error.message || "Invalid OTP or verification failed.";
-      Alert.alert("Error", msg);
+      const code = error?.code;
+      if (code === "auth/invalid-verification-code") {
+        setOtpError("Invalid OTP. Check the code and try again.");
+      } else if (code === "auth/session-expired" || code === "auth/code-expired") {
+        setOtpError("OTP expired. Request a new code.");
+      } else {
+        const msg =
+          typeof error?.message === "string" && error.message.trim()
+            ? error.message
+            : "Invalid OTP. Please try again.";
+        setOtpError(msg);
+      }
     }
   };
 
   /* ✅ SAVE MPIN (calls backend reset now that OTP/Firebase is verified) */
   const verifyAndSaveMPIN = async () => {
+    setMpinError("");
     if (newPin.length !== 4 || confirmPin.length !== 4) {
-      Alert.alert("Invalid MPIN", "MPIN must be 4 digits");
+      setMpinError("MPIN must be exactly 4 digits.");
       return;
     }
 
     if (newPin !== confirmPin) {
-      Alert.alert("MPIN Mismatch", "MPIN does not match");
+      setMpinError("New MPIN and confirmation do not match.");
       return;
     }
     if (!firebaseIdToken) {
-      Alert.alert("Error", "Phone not verified. Please complete OTP step again.");
+      setMpinError("Phone not verified. Complete the OTP step again.");
       return;
     }
 
@@ -123,7 +147,6 @@ export default function ChangeMPINScreen({ navigation }: any) {
       if (response.data?.success) {
         const token = await AsyncStorage.getItem("USER_TOKEN");
         if (!token) {
-          Alert.alert("Success", "MPIN changed successfully. Please log in with your new MPIN.");
           navigation.replace("LoginPin");
           return;
         }
@@ -131,7 +154,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
           const me = await userApi.get("/api/users/me");
           const user = me.data?.user;
           const extras = user?.profileExtras || {};
-          if (extras.profileCompleted === true) {
+          if (isCustomerProfileCompleteForHome(extras)) {
             const userData = await AsyncStorage.getItem("userData");
             if (userData) {
               const u = JSON.parse(userData);
@@ -150,11 +173,14 @@ export default function ChangeMPINScreen({ navigation }: any) {
           navigation.reset({ index: 0, routes: [{ name: "CompleteProfile" }] });
         }
       } else {
-        Alert.alert("Error", response.data?.message || "Failed to change MPIN");
+        setMpinError(response.data?.message || "Failed to change MPIN.");
       }
     } catch (error: any) {
-      const msg = error.response?.data?.message || error.message || "Failed to change MPIN";
-      Alert.alert("Error", msg);
+      const msg =
+        error.response?.data?.message ||
+        error.message ||
+        "Failed to change MPIN. Please try again.";
+      setMpinError(msg);
     }
   };
 
@@ -185,13 +211,17 @@ export default function ChangeMPINScreen({ navigation }: any) {
           placeholder="Enter 10-digit number"
           placeholderTextColor="#9CA3AF"
           value={mobile}
-          onChangeText={(t) =>
-            setMobile(t.replace(/[^0-9]/g, "").slice(0, 10))
-          }
+          onChangeText={(t) => {
+            setMobile(t.replace(/[^0-9]/g, "").slice(0, 10));
+            setMobileError("");
+          }}
           keyboardType="number-pad"
-          className="border border-gray-300 rounded-lg px-4 py-3 mb-5"
+          className={`border border-gray-300 rounded-lg px-4 py-3 ${mobileError ? "mb-2" : "mb-5"}`}
           style={{ color: "#000" }}
         />
+        {mobileError ? (
+          <Text className="text-red-500 text-sm mb-4">{mobileError}</Text>
+        ) : null}
 
         {/* ✅ SEND OTP */}
         {!otpSent && (
@@ -200,7 +230,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
             disabled={mobile.length !== 10}
             className="py-4 rounded-xl mb-6"
             style={{
-              backgroundColor: "#A855F7",
+              backgroundColor: "#4F46E5",
               opacity: mobile.length === 10 ? 1 : 0.5,
             }}
           >
@@ -214,17 +244,25 @@ export default function ChangeMPINScreen({ navigation }: any) {
         {otpSent && !otpVerified && (
           <>
             <Text className="text-gray-700 mb-1">Enter OTP</Text>
+            {otpInfo ? (
+              <Text className="text-emerald-600 text-sm mb-2">{otpInfo}</Text>
+            ) : null}
             <TextInput
               placeholder="6 digit OTP"
               placeholderTextColor="#9CA3AF"
               value={otp}
-              onChangeText={(t) =>
-                setOtp(t.replace(/[^0-9]/g, "").slice(0, 6))
-              }
+              onChangeText={(t) => {
+                setOtp(t.replace(/[^0-9]/g, "").slice(0, 6));
+                setOtpError("");
+              }}
               keyboardType="number-pad"
               className="border border-gray-300 rounded-lg px-4 py-3 mb-3"
               style={{ color: "#000" }}
             />
+
+            {otpError ? (
+              <Text className="text-red-500 text-sm mb-3">{otpError}</Text>
+            ) : null}
 
             {!canResend ? (
               <Text className="text-gray-500 mb-4">
@@ -232,7 +270,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
               </Text>
             ) : (
               <TouchableOpacity onPress={sendOTP}>
-                <Text className="text-purple-600 font-semibold mb-4">
+                <Text className="text-indigo-600 font-semibold mb-4">
                   Resend OTP
                 </Text>
               </TouchableOpacity>
@@ -243,7 +281,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
               disabled={otp.length !== 6}
               className="py-4 rounded-xl"
               style={{
-                backgroundColor: "#A855F7",
+                backgroundColor: "#4F46E5",
                 opacity: otp.length === 6 ? 1 : 0.5,
               }}
             >
@@ -257,15 +295,19 @@ export default function ChangeMPINScreen({ navigation }: any) {
         {/* ✅ MPIN INPUTS */}
         {otpVerified && (
           <>
+            <Text className="text-emerald-600 text-sm mb-3">
+              OTP verified. Enter your new MPIN below.
+            </Text>
             <Text className="text-gray-700 mb-1 ">New MPIN</Text>
             <View className="flex-row border border-gray-300 rounded-lg px-4 mb-4 items-center">
               <TextInput
                 placeholder="4 digit MPIN"
                 placeholderTextColor="#9CA3AF"
                 value={newPin}
-                onChangeText={(t) =>
-                  setNewPin(t.replace(/[^0-9]/g, "").slice(0, 4))
-                }
+                onChangeText={(t) => {
+                  setNewPin(t.replace(/[^0-9]/g, "").slice(0, 4));
+                  setMpinError("");
+                }}
                 keyboardType="number-pad"
                 secureTextEntry={!showNew}
                 className="flex-1"
@@ -286,9 +328,10 @@ export default function ChangeMPINScreen({ navigation }: any) {
                 placeholder="Re-enter MPIN"
                 placeholderTextColor="#9CA3AF"
                 value={confirmPin}
-                onChangeText={(t) =>
-                  setConfirmPin(t.replace(/[^0-9]/g, "").slice(0, 4))
-                }
+                onChangeText={(t) => {
+                  setConfirmPin(t.replace(/[^0-9]/g, "").slice(0, 4));
+                  setMpinError("");
+                }}
                 keyboardType="number-pad"
                 secureTextEntry={!showConfirm}
                 className="flex-1"
@@ -310,12 +353,16 @@ export default function ChangeMPINScreen({ navigation }: any) {
               </Text>
             )}
 
+            {mpinError ? (
+              <Text className="text-red-500 text-sm mb-3">{mpinError}</Text>
+            ) : null}
+
             <TouchableOpacity
               onPress={verifyAndSaveMPIN}
               disabled={newPin.length !== 4 || confirmPin.length !== 4 || isMismatch}
               className="py-4 rounded-xl"
               style={{
-                backgroundColor: "#A855F7",
+                backgroundColor: "#4F46E5",
                 opacity:
                   newPin.length === 4 &&
                   confirmPin.length === 4 &&

@@ -1,63 +1,55 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, ActivityIndicator, ScrollView, AppState, TouchableOpacity } from "react-native";
+import { View, Text, ActivityIndicator, AppState, TouchableOpacity } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { userApi } from "../utils/api";
-import AnnouncementCard, { type AnnouncementItem } from "./AnnouncementCard";
+import {
+  fetchAnnouncementRows,
+  getCustomerPushRows,
+  mergeInboxRows,
+  type InboxRow,
+} from "../utils/customerInbox";
+import HomeInboxStrip from "./HomeInboxStrip";
 
 /**
- * Fetches and shows announcements for the logged-in user.
- * Shown regardless of push notification permission — announcements are always visible in-app.
- * Rendered at the bottom of the Home screen in a horizontal scroll strip.
+ * Full inbox on Home (server announcements + local push), same merge as Notifications — not limited to 24h.
+ * "Last 24 hours" above shows the recent window; this section shows everything.
  */
 export default function AnnouncementsSection() {
   const navigation = useNavigation<any>();
-  const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([]);
+  const [items, setItems] = useState<InboxRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAnnouncements = useCallback(async (showLoading = false) => {
-    if (showLoading) setLoading(true);
+  const load = useCallback(async (showSpinner: boolean) => {
+    if (showSpinner) setLoading(true);
     setError(null);
     try {
-      const res = await userApi.get<{ success: boolean; announcements?: AnnouncementItem[] }>(
-        "/api/users/me/announcements"
-      );
-      if (res.data.success && Array.isArray(res.data.announcements)) {
-        const seen = new Set<string>();
-        const list = res.data.announcements.filter((a: AnnouncementItem) => {
-          if (seen.has(a.id)) return false;
-          seen.add(a.id);
-          return true;
-        });
-        setAnnouncements(list);
-      } else {
-        setAnnouncements([]);
-      }
+      const [ann, push] = await Promise.all([fetchAnnouncementRows(), getCustomerPushRows()]);
+      setItems(mergeInboxRows(ann, push));
     } catch (err: any) {
-      setAnnouncements([]);
+      setItems([]);
       const status = err?.response?.status;
-      setError(status === 401 ? "Session invalid. Try logging in again." : "Couldn't load announcements.");
+      setError(status === 401 ? "Session invalid. Try logging in again." : "Couldn't load notifications.");
     } finally {
-      if (showLoading) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchAnnouncements(true);
-  }, [fetchAnnouncements]);
+    void load(true);
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchAnnouncements(false);
-    }, [fetchAnnouncements])
+      void load(false);
+    }, [load])
   );
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") fetchAnnouncements(false);
+      if (state === "active") void load(false);
     });
     return () => sub.remove();
-  }, [fetchAnnouncements]);
+  }, [load]);
 
   if (loading) {
     return (
@@ -73,7 +65,7 @@ export default function AnnouncementsSection() {
         <View className="bg-amber-50 rounded-2xl p-4 border border-amber-200">
           <Text className="text-amber-800 text-center">{error}</Text>
           <TouchableOpacity
-            onPress={() => fetchAnnouncements(true)}
+            onPress={() => void load(true)}
             className="mt-3 py-2 bg-amber-200 rounded-xl"
           >
             <Text className="text-amber-900 font-semibold text-center">Retry</Text>
@@ -83,37 +75,13 @@ export default function AnnouncementsSection() {
     );
   }
 
-  if (announcements.length === 0) {
-    return null;
-  }
-
   return (
-    <View className="mt-6 mb-6">
-      <View className="px-4 mb-3">
-        <Text className="text-xl font-bold text-slate-800">Announcements</Text>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingRight: 20 }}
-      >
-        {announcements.map((a, i) => (
-          <TouchableOpacity
-            key={`${a.id}-${i}`}
-            activeOpacity={0.9}
-            onPress={() =>
-              navigation.navigate("InboxDetail", {
-                title: a.title,
-                body: a.body,
-                sentAt: a.sentAt || new Date().toISOString(),
-                kind: "announcement",
-              })
-            }
-          >
-            <AnnouncementCard announcement={a} horizontal />
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
+    <HomeInboxStrip
+      items={items}
+      title="Announcements"
+      titleClassName="text-xl font-bold text-slate-800"
+      wrapperClassName="mt-6 mb-6"
+      navigation={navigation}
+    />
   );
 }

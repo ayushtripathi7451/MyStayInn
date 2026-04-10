@@ -74,11 +74,10 @@ export function normalizeRawToStays(raw: any): any[] {
 export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null {
   if (!currentStay?.booking) return null;
   const b = currentStay.booking;
-  const statusStr = String(b.status || '');
-  const isEnrollmentPending =
-    statusStr === 'enrollment_pending' ||
-    statusStr === 'enrollment_pay_pending' ||
-    statusStr === 'enrollment_requested';
+  const statusStr = String(b.status || '').toLowerCase();
+  const isBookingRequestedOnly = statusStr === 'enrollment_requested';
+  const isPendingEnrollment =
+    statusStr === 'enrollment_pending' || statusStr === 'enrollment_pay_pending';
   const p = currentStay.property;
   const r = currentStay.room || {
     id: b.roomId,
@@ -97,11 +96,13 @@ export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty 
     ? 'Move-out requested'
     : serverMoveOutStatus === 'accepted'
       ? 'Move-out accepted'
-      : isEnrollmentPending
-    ? 'Pending enrollment'
-    : isSecurityPaid
-      ? 'Approved'
-      : 'Pending Payment';
+      : isBookingRequestedOnly
+        ? 'Booking requested'
+        : isPendingEnrollment
+          ? 'Pending enrollment'
+          : isSecurityPaid
+            ? 'Approved'
+            : 'Pending Payment';
   return {
     id: b.id,
     bookingId: b.id,
@@ -127,6 +128,9 @@ export function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty 
     currentDue: b.currentDue != null ? Number(b.currentDue) : 0,
     securityDeposit: b.securityDeposit != null ? Number(b.securityDeposit as unknown as number) : 0,
     rules: p?.rules ?? undefined,
+    ...(Array.isArray(b.bedNumbers) && b.bedNumbers.length > 0
+      ? { bedNumbers: b.bedNumbers as (string | number)[] }
+      : {}),
     ...(() => {
       const phone = pickAdminPhoneFromStay(p, b);
       return phone
@@ -315,15 +319,15 @@ export function* refreshCurrentStaySaga(
           const rawBookingStatus = String(
             list.find((s: any) => String(s?.booking?.id) === stayBookingId)?.booking?.status || ''
           ).toLowerCase();
-          const isEnrollmentPending =
-            rawBookingStatus === 'enrollment_pending' ||
-            rawBookingStatus === 'enrollment_pay_pending' ||
-            rawBookingStatus === 'enrollment_requested';
-          const fallbackStatus = isEnrollmentPending
-            ? 'Pending enrollment'
-            : stay.isSecurityPaid
-              ? 'Approved'
-              : 'Pending Payment';
+          const fallbackStatus =
+            rawBookingStatus === 'enrollment_requested'
+              ? 'Booking requested'
+              : rawBookingStatus === 'enrollment_pay_pending' ||
+                  rawBookingStatus === 'enrollment_pending'
+                ? 'Pending enrollment'
+                : stay.isSecurityPaid
+                  ? 'Approved'
+                  : 'Pending Payment';
           return { ...stay, moveOutStatus: undefined, status: fallbackStatus };
         });
       }

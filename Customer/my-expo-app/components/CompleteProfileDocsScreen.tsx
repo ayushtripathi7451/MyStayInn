@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -10,9 +10,9 @@ import {
   KeyboardAvoidingView,
   Pressable,
   Dimensions,
-  Alert,
+  Animated,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -26,10 +26,53 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 export default function CompleteProfileDocsScreen({ navigation, route }: any) {
   const { theme } = useTheme();
   const { profileData } = route.params || {};
+  const insets = useSafeAreaInsets();
 
-  const primaryBg = theme === "female" ? "bg-pink-500" : "bg-[#6400CD]";
-  const disabledBg = theme === "female" ? "bg-pink-300" : "bg-[#A88DD5]";
-  const iconColor = theme === "female" ? "#EC4899" : "#6400CD";
+  const primaryBg = theme === "female" ? "bg-pink-500" : "bg-indigo-600";
+  const disabledBg = theme === "female" ? "bg-pink-300" : "bg-indigo-300";
+  const iconColor = theme === "female" ? "#EC4899" : "#4F46E5";
+
+  const bannerAnim = useRef(new Animated.Value(0)).current;
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bannerError, setBannerError] = useState<string | null>(null);
+
+  const showBannerError = (message: string) => {
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    setBannerError(message);
+    bannerAnim.setValue(0);
+    Animated.spring(bannerAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 12,
+    }).start();
+    bannerTimerRef.current = setTimeout(() => hideBannerError(), 5000);
+  };
+
+  const hideBannerError = () => {
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+    Animated.timing(bannerAnim, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setBannerError(null);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    };
+  }, []);
+
+  const bannerTranslateY = bannerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [100, 0],
+  });
 
   /* ---------------- STATES ---------------- */
   const [contactName, setContactName] = useState("");
@@ -67,8 +110,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (status !== "granted") {
-        Alert.alert(
-          "Permission Required",
+        showBannerError(
           "Please grant camera roll permissions to upload documents."
         );
         return;
@@ -88,7 +130,7 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       }
     } catch (error) {
       console.error("Error picking image:", error);
-      Alert.alert("Error", "Failed to pick image. Please try again.");
+      showBannerError("Failed to pick image. Please try again.");
     }
   };
 
@@ -246,12 +288,34 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
     try {
       const token = await AsyncStorage.getItem("USER_TOKEN");
       if (!token) {
-        Alert.alert("Error", "Authentication token not found. Please login again.");
+        showBannerError("Authentication expired. Please log in again.");
         return;
       }
 
       const rawProfileImage = (profileData?.profileImage as string | null) || null;
-      const { profileImage: _profileImageOmit, ...profileDataWithoutImage } = profileData || {};
+      const {
+        profileImage: _profileImageOmit,
+        fullName: fullNameParam,
+        firstName: _omitFirst,
+        lastName: _omitLast,
+        ...profileDataWithoutImage
+      } = profileData || {};
+
+      const splitFullName = (full: string) => {
+        const normalized = full.trim().replace(/\s+/g, " ");
+        const parts = normalized.split(" ").filter(Boolean);
+        return {
+          firstName: parts[0] ?? "",
+          lastName: parts.slice(1).join(" "),
+        };
+      };
+      const nameFromRoute =
+        typeof fullNameParam === "string" && fullNameParam.trim()
+          ? splitFullName(fullNameParam)
+          : {
+              firstName: String(profileData?.firstName ?? "").trim(),
+              lastName: String(profileData?.lastName ?? "").trim(),
+            };
 
       const aadharFrontUrl = await uploadImageIfLocal(aadharFront, "aadharFront");
       const aadharBackUrl = await uploadImageIfLocal(aadharBack, "aadharBack");
@@ -259,22 +323,24 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       const idBackUrl = requiresExtraId ? await uploadImageIfLocal(idBack, "idBack") : null;
 
       if (!aadharFrontUrl || !aadharBackUrl) {
-        Alert.alert("Error", "Could not upload Aadhaar images. Please try again.");
+        showBannerError("Could not upload Aadhaar images. Please try again.");
         return;
       }
       if (requiresExtraId && (!idFrontUrl || !idBackUrl)) {
-        Alert.alert("Error", "Could not upload ID images. Please try again.");
+        showBannerError("Could not upload ID images. Please try again.");
         return;
       }
 
       const profileImageUrl = await resolveProfileImageToUrl(rawProfileImage);
       if (String(rawProfileImage || "").trim() && !profileImageUrl) {
-        Alert.alert("Error", "Could not upload profile photo. Please try again.");
+        showBannerError("Could not upload profile photo. Please try again.");
         return;
       }
 
       const payload = {
         ...profileDataWithoutImage,
+        firstName: nameFromRoute.firstName,
+        lastName: nameFromRoute.lastName,
         emergencyContactName: contactName,
         emergencyContactPhone: `${countryCode}${contactNumber}`,
         profession,
@@ -293,24 +359,17 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       console.log('[CompleteProfileDocsScreen] Response:', response.data);
 
       if (response.data.success) {
-        Alert.alert(
-          "Success",
-          "Profile completed successfully!",
-          [
-            {
-              text: "OK",
-              onPress: () => navigation.navigate("Home"),
-            },
-          ]
-        );
+        navigation.navigate("Home");
       } else {
-        Alert.alert("Error", response.data.message || "Failed to complete profile");
+        showBannerError(
+          response.data.message || "Failed to complete profile"
+        );
       }
     } catch (error: any) {
       console.error("Profile completion error:", error);
-      Alert.alert(
-        "Error",
-        error.response?.data?.message || "Failed to complete profile. Please try again."
+      showBannerError(
+        error.response?.data?.message ||
+          "Failed to complete profile. Please try again."
       );
     }
   };
@@ -569,6 +628,34 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
           )}
         </Pressable>
       </KeyboardAvoidingView>
+
+      {bannerError != null && (
+        <Animated.View
+          pointerEvents="box-none"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            paddingBottom: Math.max(insets.bottom, 12),
+            transform: [{ translateY: bannerTranslateY }],
+          }}
+        >
+          <View className="mx-4 rounded-2xl bg-slate-900 px-4 py-3 shadow-lg">
+            <View className="flex-row items-start justify-between gap-3">
+              <Text className="flex-1 text-sm leading-5 text-white">
+                {bannerError}
+              </Text>
+              <TouchableOpacity
+                onPress={hideBannerError}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }

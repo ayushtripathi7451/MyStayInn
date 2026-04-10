@@ -66,6 +66,7 @@ import ReloginMobileScreen from './components/ReloginMobileScreen';
 import CreateNewMPIN from 'components/CreateNewMPIN';
 import PaymentDueScreen from 'components/PaymentDueScreen';
 import DepositCheckoutScreen from 'components/DepositCheckoutScreen';
+import PaymentCompleteScreen from 'components/PaymentCompleteScreen';
 import PropertyDetailsScreen from 'components/PropertyDetailsScreen';
 import PropertyListScreen from 'components/PropertyListScreen';
 
@@ -276,6 +277,7 @@ export default function App() {
               <Stack.Screen name="ReloginMobileScreen" component={ReloginMobileScreen} />
               <Stack.Screen name="PaymentDueScreen" component={PaymentDueScreen} />
               <Stack.Screen name="DepositCheckoutScreen" component={DepositCheckoutScreen} />
+              <Stack.Screen name="PaymentComplete" component={PaymentCompleteScreen} />
               <Stack.Screen name="CreateNewMPIN" component={CreateNewMPIN} />
               <Stack.Screen name="PropertyDetailsScreen" component={PropertyDetailsScreen} />
               <Stack.Screen name="PropertyListScreen" component={PropertyListScreen} />

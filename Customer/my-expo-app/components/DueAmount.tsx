@@ -34,7 +34,7 @@ export type DueGroup = {
   propertyName: string;
   propertyId?: string;
   /** Enrollment flow vs allocated active booking (rent due after move-in). */
-  dueContext: "enrollment" | "active_booking";
+  dueContext: "booking_requested" | "enrollment" | "active_booking";
   items: DueItem[];
   total: number;
 };
@@ -128,6 +128,13 @@ export function isEnrollmentBookingStatus(status: string): boolean {
   return s.startsWith("enrollment");
 }
 
+export function dueContextForBookingStatus(status: string): DueGroup["dueContext"] {
+  const s = String(status || "").toLowerCase().trim();
+  if (s === "enrollment_requested") return "booking_requested";
+  if (s.startsWith("enrollment")) return "enrollment";
+  return "active_booking";
+}
+
 /** Dues grouped per property/stay — use for Home + Payments UI (no cross-property mixing). */
 export function deriveDueItemsGrouped(raw: any): DueGroup[] {
   const stays = stayListFromRaw(raw);
@@ -136,16 +143,31 @@ export function deriveDueItemsGrouped(raw: any): DueGroup[] {
     const stay = stays[idx];
     const b = stay?.booking;
     if (!b) continue;
-    const items = deriveDueItemsForOneStay(stay, `${b.id ?? idx}_`);
-    if (items.length === 0) continue;
-    const st = String(b.status || "");
+    const statusStr = String(b.status || "");
     const propertyName = stay.property?.name || stay.room?.propertyName || "Property";
     const prop = propertyForDue(stay);
+    const ctx = dueContextForBookingStatus(statusStr);
+
+    if (ctx === "booking_requested") {
+      groups.push({
+        key: `${String(b.id ?? idx)}-${propertyName}-${idx}`,
+        propertyName,
+        propertyId: prop?.id,
+        dueContext: "booking_requested",
+        items: [],
+        total: 0,
+      });
+      continue;
+    }
+
+    const items = deriveDueItemsForOneStay(stay, `${b.id ?? idx}_`);
+    if (items.length === 0) continue;
+
     groups.push({
       key: `${String(b.id ?? idx)}-${propertyName}-${idx}`,
       propertyName,
       propertyId: prop?.id,
-      dueContext: isEnrollmentBookingStatus(st) ? "enrollment" : "active_booking",
+      dueContext: ctx === "enrollment" ? "enrollment" : "active_booking",
       items,
       total: items.reduce((s, i) => s + (Number(i.amount) || 0), 0),
     });
@@ -169,6 +191,10 @@ function deriveDueItemsForOneStay(raw: any, idPrefix: string): DueItem[] {
   const bookingId = String(booking.id ?? '');
   const rentPeriod = String(booking.rentPeriod || 'month').toLowerCase();
   const isDailyRent = rentPeriod === 'day';
+
+  if (String(bookingStatus).toLowerCase().trim() === "enrollment_requested") {
+    return [];
+  }
 
   console.log(`[deriveDueItemsForOneStay] Processing stay:`, {
     bookingId,
@@ -539,10 +565,19 @@ export default function DueAmount() {
   /** Per-property groups — payment links stay scoped to that property’s booking. */
   const dueGroups = useMemo(() => deriveDueItemsGrouped(raw), [raw]);
 
-  const totalDue = useMemo(
-    () => dueGroups.reduce((sum, g) => sum + g.total, 0),
+  /** Home: hide dues UI while waiting on admin — no payment rows yet. */
+  const displayGroups = useMemo(
+    () => dueGroups.filter((g) => g.dueContext !== "booking_requested"),
     [dueGroups]
   );
+
+  const totalDue = useMemo(
+    () => displayGroups.reduce((sum, g) => sum + g.total, 0),
+    [displayGroups]
+  );
+
+  const hideDueAmountSection =
+    !loading && dueGroups.length > 0 && displayGroups.length === 0;
 
   const isFemale = theme === "female";
   const gradientColors: [string, string] = isFemale ? ["#FF5CA8", "#FF1E7A"] : ["#646DFF", "#0815FF"];
@@ -591,11 +626,13 @@ export default function DueAmount() {
   const formatAmount = (n: number | undefined) =>
     (n != null && !Number.isNaN(n) ? n : 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
+  if (hideDueAmountSection) return null;
+
   return (
     <View className="px-4 mt-6">
       <View className="flex-row justify-between items-end mb-4">
         <Text className="text-xl font-bold text-slate-800">Due Amount</Text>
-        {dueGroups.length > 0 && (
+        {displayGroups.length > 0 && (
           <Text className="text-sm text-slate-600">
             Total: ₹{formatAmount(totalDue)}
           </Text>
@@ -616,7 +653,7 @@ export default function DueAmount() {
             </View>
           </LinearGradient>
         </View>
-      ) : dueGroups.length === 0 ? (
+      ) : displayGroups.length === 0 ? (
         <View className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20">
           <LinearGradient
             colors={gradientColors}
@@ -639,7 +676,7 @@ export default function DueAmount() {
         </View>
       ) : (
         <View className="gap-4">
-          {dueGroups.map((group) => (
+          {displayGroups.map((group) => (
             <View
               key={group.key}
               className="rounded-[30px] overflow-hidden shadow-xl shadow-black/20"
@@ -657,13 +694,17 @@ export default function DueAmount() {
                   <View className="flex-row items-center mt-2 gap-2 flex-wrap">
                     <View
                       className={`px-2.5 py-1 rounded-full ${
-                        group.dueContext === "enrollment" ? "bg-amber-400/25" : "bg-white/15"
+                        group.dueContext === "enrollment" || group.dueContext === "booking_requested"
+                          ? "bg-amber-400/25"
+                          : "bg-white/15"
                       }`}
                     >
                       <Text className="text-white text-[11px] font-bold uppercase tracking-wide">
-                        {group.dueContext === "enrollment"
-                          ? "Pending enrollment"
-                          : "Rent & deposit"}
+                        {group.dueContext === "booking_requested"
+                          ? "Booking requested"
+                          : group.dueContext === "enrollment"
+                            ? "Pending enrollment"
+                            : "Rent & deposit"}
                       </Text>
                     </View>
                     <Text className="text-white/90 text-sm font-semibold">

@@ -261,7 +261,7 @@ export default function VerifyEmailScreen({ navigation, route }) {
           onPress={() =>
             navigation.reset({ index: 0, routes: [{ name: "Signup" }] })
           }
-          className="bg-purple-600 py-4 rounded-xl"
+          className="bg-indigo-600 py-4 rounded-xl"
         >
           <Text className="text-center text-white font-semibold">Back to sign up</Text>
         </TouchableOpacity>
@@ -305,8 +305,8 @@ export default function VerifyEmailScreen({ navigation, route }) {
 
             {/* PROGRESS BAR */}
             <View className="flex-row justify-center mt-3">
-              <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+              <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+              <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
               <View className="w-6 h-1.5 bg-gray-300 rounded-full mx-1" />
             </View>
 
@@ -327,7 +327,7 @@ export default function VerifyEmailScreen({ navigation, route }) {
                   maxLength={1}
                   onChangeText={(t) => handleChange(t, i)}
                   onKeyPress={(e) => handleKeyPress(e, i)}
-                  className="w-12 h-14 border border-gray-300 rounded-lg text-center text-xl font-semibold focus:border-purple-600"
+                  className="w-12 h-14 border border-gray-300 rounded-lg text-center text-xl font-semibold focus:border-indigo-600"
                 />
               ))}
             </View>
@@ -349,13 +349,13 @@ export default function VerifyEmailScreen({ navigation, route }) {
               {!canResend ? (
                 <Text className="text-gray-500">
                   Resend OTP in{" "}
-                  <Text className="font-semibold text-purple-700">
+                  <Text className="font-semibold text-indigo-700">
                     00:{timer < 10 ? `0${timer}` : timer}
                   </Text>
                 </Text>
               ) : (
                 <TouchableOpacity onPress={resendOTP} disabled={loading}>
-                  <Text className="text-purple-700 font-semibold">
+                  <Text className="text-indigo-700 font-semibold">
                     Resend OTP
                   </Text>
                 </TouchableOpacity>
@@ -367,7 +367,7 @@ export default function VerifyEmailScreen({ navigation, route }) {
               disabled={!isValid || loading}
               onPress={verifyOTP}
               className={`py-4 rounded-xl flex-row justify-center items-center ${
-                isValid && !loading ? "bg-purple-600" : "bg-purple-300"
+                isValid && !loading ? "bg-indigo-600" : "bg-indigo-300"
               }`}
             >
               {loading && <ActivityIndicator color="white" className="mr-2" />}
@@ -380,7 +380,7 @@ export default function VerifyEmailScreen({ navigation, route }) {
             {/* <Text className="text-center text-base mt-4">
               To update Mobile Number.{" "}
               <Text
-                className="font-semibold text-purple-700"
+                className="font-semibold text-indigo-700"
                 onPress={() => {
                   navigation.reset({
                     index: 0,

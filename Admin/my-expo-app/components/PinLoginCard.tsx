@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, propertyApi, getAuthBearerToken } from '../utils/api';
+import { hasUsableProperties } from '../utils/propertyGate';
 
 export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinFocus }: any) {
   const [pin, setPin] = useState('');
@@ -71,14 +72,15 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
         // Check if user has properties
         try {
           const propertiesResponse = await propertyApi.get('/api/properties');
-          
-          if (propertiesResponse.data.success && propertiesResponse.data.properties.length > 0) {
-            // User has properties - store first property and navigate to Home
-            const firstProperty = propertiesResponse.data.properties[0];
+          const list = propertiesResponse.data?.properties;
+
+          if (propertiesResponse.data?.success && hasUsableProperties(list)) {
+            const arr = list as unknown[];
+            const firstProperty =
+              arr.find((p) => p != null && typeof p === "object") ?? arr[0];
             await AsyncStorage.setItem('currentProperty', JSON.stringify(firstProperty));
             navigation.replace('Home');
           } else {
-            // No properties - navigate to ProfileSetup to add first property
             navigation.replace('ProfileSetup');
           }
         } catch (propertyError) {

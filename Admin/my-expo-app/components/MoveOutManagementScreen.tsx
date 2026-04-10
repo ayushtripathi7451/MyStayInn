@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { MoveOutService } from "../services/moveOutService";
 import { MoveOutRequest } from "../types/moveout";
 import { useProperty } from "../contexts/PropertyContext";
+import { moveOutRequestMatchesProperty } from "../utils/moveOutPropertyFilter";
 
 interface MoveOutManagementScreenProps {
   navigation: any;
@@ -23,6 +24,7 @@ interface MoveOutManagementScreenProps {
 export default function MoveOutManagementScreen({ navigation, route }: MoveOutManagementScreenProps) {
   const { currentProperty } = useProperty();
   const propertyId = currentProperty?.id;
+  const propertyUniqueId = currentProperty?.uniqueId ?? currentProperty?.id;
   const openTabParam = route?.params?.openTab;
   const [activeTab, setActiveTab] = useState<'requested' | 'accepted'>(openTabParam ?? 'accepted');
   const [pendingRequests, setPendingRequests] = useState<MoveOutRequest[]>([]);
@@ -47,17 +49,26 @@ export default function MoveOutManagementScreen({ navigation, route }: MoveOutMa
   const loadData = async () => {
     setLoading(true);
     try {
-      // Load without propertyId so list matches home count (home shows total across all properties)
+      // Same scope as Home move-out badge: current property + tenant-requested only
       const [requestsRes, scheduledRes] = await Promise.all([
-        MoveOutService.getMoveOutRequests(undefined, 'pending'),
-        MoveOutService.getScheduledMoveOuts(),
+        MoveOutService.getMoveOutRequests(undefined, "pending", propertyId),
+        MoveOutService.getScheduledMoveOuts(propertyId),
       ]);
       if (requestsRes.success && requestsRes.data?.requests) {
-        // Requested tab: only tenant-requested (from customer app), not admin-initiated
         const tenantRequestedOnly = requestsRes.data.requests.filter(
-          (r: MoveOutRequest) => r.type !== 'admin_initiated'
+          (r: MoveOutRequest) => r.type !== "admin_initiated"
         );
-        setPendingRequests(tenantRequestedOnly);
+        const scoped =
+          propertyId || currentProperty?.name || propertyUniqueId
+            ? tenantRequestedOnly.filter((r) =>
+                moveOutRequestMatchesProperty(r, {
+                  propertyId,
+                  propertyName: currentProperty?.name,
+                  propertyUniqueId,
+                })
+              )
+            : tenantRequestedOnly;
+        setPendingRequests(scoped);
       } else {
         setPendingRequests([]);
       }

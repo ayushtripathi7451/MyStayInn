@@ -75,6 +75,8 @@ interface DueItem {
   dueKind: DueKind;
   date: string;
   monthLabel?: string;
+  /** Canonical `YYYY-MM` for monthly rent — send when marking cash paid */
+  yearMonth?: string;
   isMovedOut?: boolean;
   paymentDate?: string; // For daily payments
   /** DB row id for `dailyPayment` when marking cash paid (booking-service `mark-rent-cash-paid`) */
@@ -100,6 +102,17 @@ interface TransactionItem {
 // Helper function for year-month formatting
 function yearMonth(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Align with booking-service `normalizeRentYearMonth` (e.g. 2026-4 → 2026-04). */
+function normalizeYearMonthKey(raw: string): string | null {
+  const t = String(raw || "").trim();
+  const m = t.match(/^(\d{4})-(\d{1,2})$/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  if (!Number.isFinite(y) || mo < 1 || mo > 12) return null;
+  return `${y}-${String(mo).padStart(2, "0")}`;
 }
 
 export default function PaymentManagementScreen({ route }: any) {
@@ -430,9 +443,12 @@ export default function PaymentManagementScreen({ route }: any) {
     const monthlyRent = b.scheduledOnlineRent || Number(b.rentAmount) || 0;
     const paidMonthsStr = b.rentOnlinePaidYearMonth || "";
 
-    // ✅ Parse comma-separated list of paid months into a Set for fast lookup
+    // ✅ Parse comma-separated list of paid months into a Set for fast lookup (normalize legacy keys)
     const paidMonths = new Set(
-      paidMonthsStr.split(",").map((m: string) => m.trim()).filter(Boolean)
+      paidMonthsStr
+        .split(",")
+        .map((m: string) => normalizeYearMonthKey(m.trim()))
+        .filter((x): x is string => Boolean(x))
     );
 
     if (monthlyRent <= 0) return items;
@@ -481,6 +497,7 @@ export default function PaymentManagementScreen({ route }: any) {
         dueKind: "rent_online",
         date: b.moveInDate,
         monthLabel,
+        yearMonth: monthKey,
         isMovedOut: b.status === "completed",
       });
 
@@ -500,9 +517,12 @@ export default function PaymentManagementScreen({ route }: any) {
     const monthlyCashRent = b.scheduledCashRent || 0;
     const paidMonthsStr = b.rentCashPaidYearMonth || "";
 
-    // ✅ Parse comma-separated list of paid months into a Set for fast lookup
+    // ✅ Parse comma-separated list of paid months into a Set for fast lookup (normalize legacy keys)
     const paidMonths = new Set(
-      paidMonthsStr.split(",").map((m: string) => m.trim()).filter(Boolean)
+      paidMonthsStr
+        .split(",")
+        .map((m: string) => normalizeYearMonthKey(m.trim()))
+        .filter((x): x is string => Boolean(x))
     );
 
     if (monthlyCashRent <= 0) return items;
@@ -551,6 +571,7 @@ export default function PaymentManagementScreen({ route }: any) {
         dueKind: "rent_cash",
         date: b.moveInDate,
         monthLabel,
+        yearMonth: monthKey,
         isMovedOut: b.status === "completed",
       });
 
@@ -1084,23 +1105,33 @@ export default function PaymentManagementScreen({ route }: any) {
   }
 };
 
-  const handleMarkRentCashPaid = async (bookingId: string, monthLabel?: string) => {
+  const handleMarkRentCashPaid = async (
+    bookingId: string,
+    yearMonthKey?: string,
+    monthLabel?: string
+  ) => {
   try {
     setMarkingPaidBookingId(bookingId);
 
-    // Extract year-month from monthLabel (e.g., "Mar 2026" -> "2026-03")
-    let yearMonth: string | undefined;
-    if (monthLabel) {
+    const fromKey = yearMonthKey ? normalizeYearMonthKey(yearMonthKey) : null;
+    let resolvedYm = fromKey;
+    if (!resolvedYm && monthLabel) {
       const match = monthLabel.match(/(\w+)\s+(\d{4})/);
       if (match) {
         const [, monthName, year] = match;
-        const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth() + 1;
-        yearMonth = `${year}-${String(monthIndex).padStart(2, "0")}`;
+        const d = new Date(`${monthName} 1, ${year}`);
+        if (!isNaN(d.getTime())) {
+          resolvedYm = `${year}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        }
       }
+    }
+    if (!resolvedYm) {
+      Alert.alert("Error", "Could not determine which month to mark. Please refresh and try again.");
+      return;
     }
 
     await bookingApi.patch(`/api/bookings/${bookingId}/mark-rent-cash-paid`, {
-      yearMonth,
+      yearMonth: resolvedYm,
     });
     await fetchBookings();
     Alert.alert("Success", "Cash rent marked as paid");
@@ -1242,7 +1273,7 @@ export default function PaymentManagementScreen({ route }: any) {
                     item.dailyPaymentId
                   );
                 } else if (isRentCash) {
-                  handleMarkRentCashPaid(item.bookingId, item.monthLabel);
+                  handleMarkRentCashPaid(item.bookingId, item.yearMonth, item.monthLabel);
                 }
               }}
               disabled={isMarking}

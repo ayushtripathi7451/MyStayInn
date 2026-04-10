@@ -6,7 +6,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch } from "react-redux";
@@ -30,14 +29,33 @@ function normalizeHttpUrl(url: string): string {
   return `https://${u}`;
 }
 
-async function openPaymentLink(url: string): Promise<boolean> {
-  const u = String(url || "").trim();
-  if (!u) return false;
-  const safeUrl = u.replace(/\s/g, "");
+/**
+ * Must match transaction-service `PAYMENT_RETURN_URL` / Cashfree link `return_url`
+ * (default in code: mystay://payment-success).
+ */
+const PAYMENT_RETURN_URL = "mystay://payment-success";
+
+type PaymentOpenResult = "success" | "cancel" | "error";
+
+/**
+ * Opens Cashfree in an auth session so when the gateway redirects to our app scheme,
+ * the browser closes and we can show the success screen.
+ */
+async function openPaymentLink(url: string): Promise<PaymentOpenResult> {
+  const safeUrl = normalizeHttpUrl(url).replace(/\s/g, "");
+  if (!safeUrl) return "error";
+
+  WebBrowser.maybeCompleteAuthSession();
 
   try {
-    await Linking.openURL(safeUrl);
-    return true;
+    const result = await WebBrowser.openAuthSessionAsync(safeUrl, PAYMENT_RETURN_URL);
+    if (result.type === "success") {
+      return "success";
+    }
+    if (result.type === "cancel" || result.type === "dismiss") {
+      return "cancel";
+    }
+    return "cancel";
   } catch {
     try {
       const wb = await WebBrowser.openBrowserAsync(safeUrl, {
@@ -45,9 +63,9 @@ async function openPaymentLink(url: string): Promise<boolean> {
         showTitle: true,
         enableBarCollapsing: true,
       });
-      return wb.type !== "cancel";
+      return wb.type === "cancel" ? "cancel" : "cancel";
     } catch {
-      return false;
+      return "error";
     }
   }
 }
@@ -222,6 +240,9 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
           details.paymentType === "rent_online"
             ? "first_rent"
             : "security_deposit",
+        ...(bookingIdParam && /^\d+$/.test(String(bookingIdParam).trim()) && {
+          bookingId: String(bookingIdParam).trim(),
+        }),
         ...(details.paymentType === "rent_online" && {
           yearMonth: details.yearMonth,
         }),
@@ -241,21 +262,24 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
       });
 
       const url = normalizeHttpUrl(resp.data?.link_url);
-      const opened = await openPaymentLink(url);
+      const outcome = await openPaymentLink(url);
 
       setSubmitting(false);
+      dispatch(refreshCurrentStay({ force: true }));
 
-      if (opened) {
-        // ✅ Rely on webhook for all payments (recommended architecture)
-        // Frontend just opens the link, webhook handles the rest
-        dispatch(refreshCurrentStay({ force: true }));
-        
-        Alert.alert(
-          "Payment Link Opened",
-          "Complete the payment in your browser. Your payment status will update automatically.",
-          [{ text: "OK", onPress: () => navigation.goBack() }]
-        );
+      if (outcome === "success") {
+        navigation.replace("PaymentComplete");
+        return;
       }
+      if (outcome === "error") {
+        Alert.alert("Error", "Could not open the payment page. Please try again.");
+        return;
+      }
+      Alert.alert(
+        "Payment",
+        "Complete the payment in the browser. When finished, return here — your status updates automatically.",
+        [{ text: "OK" }]
+      );
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Payment failed");
     } finally {

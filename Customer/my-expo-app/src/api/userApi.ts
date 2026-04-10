@@ -20,5 +20,8 @@ export interface CurrentStayResponse {
 export const userApi = {
   getMe: () => client.get<UserMe>('/api/users/me'),
   getCurrentStay: () => client.get<CurrentStayResponse>('/api/users/me/current-stay'),
-  getAnnouncements: () => client.get('/api/users/me/announcements').catch(() => ({ data: [] })),
+  getAnnouncements: () =>
+    client
+      .get('/api/users/me/announcements', { params: { allProperties: '1' } })
+      .catch(() => ({ data: { success: true, announcements: [] } })),
 };

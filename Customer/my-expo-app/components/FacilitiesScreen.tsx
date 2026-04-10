@@ -46,7 +46,7 @@ export default function FacilitiesScreen({ navigation }: any) {
               <TouchableOpacity
                 onPress={() => toggleSelect(index, "left")}
                 className={`w-[48%] p-4 mt-4 rounded-xl ${
-                  row[0] ? "bg-purple-200" : "bg-gray-100"
+                  row[0] ? "bg-indigo-200" : "bg-gray-100"
                 }`} 
               >
                 <Ionicons
@@ -56,7 +56,7 @@ export default function FacilitiesScreen({ navigation }: any) {
                 />
                 <Text
                   className={`mt-2 font-semibold ${
-                    row[0] ? "text-purple-900" : "text-gray-700"
+                    row[0] ? "text-indigo-900" : "text-gray-700"
                   }`}
                 >
                   Smart TV
@@ -68,7 +68,7 @@ export default function FacilitiesScreen({ navigation }: any) {
               <TouchableOpacity
                 onPress={() => toggleSelect(index, "right")}
                 className={`w-[48%] p-4 mt-4 rounded-xl ${
-                  row[1] ? "bg-purple-200" : "bg-gray-100"
+                  row[1] ? "bg-indigo-200" : "bg-gray-100"
                 }`}
               >
                 <Ionicons
@@ -78,7 +78,7 @@ export default function FacilitiesScreen({ navigation }: any) {
                 />
                 <Text
                   className={`mt-2 font-semibold ${
-                    row[1] ? "text-purple-900" : "text-gray-700"
+                    row[1] ? "text-indigo-900" : "text-gray-700"
                   }`}
                 >
                   Air Purifier

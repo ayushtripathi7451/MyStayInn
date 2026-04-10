@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -108,6 +108,41 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
 
   const adminPhoneRaw = pickAdminPhoneFromDetailParam(property as unknown as Record<string, unknown>);
   const adminTel = dialableHref(adminPhoneRaw ?? null);
+
+  const displayName = property.name ?? "Property";
+  const rulesItems = useMemo(() => {
+    const r = property?.rules;
+    if (!r || typeof r !== "object") return [];
+    const items = (r as { items?: unknown }).items;
+    return Array.isArray(items)
+      ? (items as unknown[]).map((x) => String(x)).filter((x) => x.trim())
+      : [];
+  }, [property?.rules]);
+  const foodMenuDays = useMemo(() => {
+    const r = property?.rules;
+    if (!r || typeof r !== "object") return null;
+    const days = (r as { foodMenu?: { days?: unknown } }).foodMenu?.days;
+    return days && typeof days === "object"
+      ? (days as Record<string, Record<string, { enabled?: boolean; menu?: string; startTime?: string; endTime?: string }>>)
+      : null;
+  }, [property?.rules]);
+  const hasFoodMenu = useMemo(() => {
+    if (!foodMenuDays) return false;
+    const sections = ["breakfast", "lunch", "snack", "dinner"];
+    return Object.keys(foodMenuDays).some((d) =>
+      sections.some(
+        (s) =>
+          foodMenuDays[d]?.[s]?.enabled &&
+          String(foodMenuDays[d]?.[s]?.menu || "").trim()
+      )
+    );
+  }, [foodMenuDays]);
+
+  const bedsDisplay = useMemo(() => {
+    const beds = property.bedNumbers;
+    if (!Array.isArray(beds) || beds.length === 0) return "—";
+    return beds.map((b) => String(b).trim()).filter(Boolean).join(", ");
+  }, [property.bedNumbers]);
 
   const lat = (property as any).latitude ?? (property as any).coordinates?.latitude;
   const lng = (property as any).longitude ?? (property as any).coordinates?.longitude;
@@ -281,6 +316,12 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
               <Text className="text-gray-600">Room Number</Text>
               <Text className="font-semibold text-slate-900">{property.roomNumber}</Text>
             </View>
+            <View className="flex-row justify-between items-center p-3 bg-gray-50 rounded-xl">
+              <Text className="text-gray-600">Allocated bed(s)</Text>
+              <Text className="font-semibold text-slate-900 text-right flex-1 ml-3">
+                {bedsDisplay}
+              </Text>
+            </View>
             {property.roomType && (
               <View className="flex-row justify-between items-center p-3 bg-gray-50 rounded-xl">
                 <Text className="text-gray-600">Room Type</Text>
@@ -337,64 +378,50 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
           </View>
         </View>
 
-        {/* Property Rules (property-specific, from admin) */}
-        {(property as any).rules && typeof (property as any).rules === "object" && Array.isArray((property as any).rules.items) && (property as any).rules.items.length > 0 && (
+        {(rulesItems.length > 0 || hasFoodMenu) && (
           <View className="bg-white rounded-2xl p-4 mb-4 shadow-sm border border-gray-100">
             <Text className="text-[18px] font-semibold text-black mb-3">
-              Property Rules
+              Property Information
             </Text>
-            <View className="gap-2">
-              {((property as any).rules.items as string[]).map((item: string, index: number) => (
-                <View key={index} className="flex-row items-start">
-                  <Text className="text-slate-500 mr-2" style={{ minWidth: 20 }}>{index + 1}.</Text>
-                  <Text className="flex-1 text-gray-700 text-sm">{item}</Text>
-                </View>
-              ))}
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.navigate("PropertyRulesViewScreen", {
+                    propertyName: displayName,
+                    rules: rulesItems,
+                  })
+                }
+                className="flex-1 py-3 rounded-xl border border-slate-200 bg-slate-50"
+                disabled={rulesItems.length === 0}
+              >
+                <Text
+                  className={`text-center font-semibold ${
+                    rulesItems.length > 0 ? "text-slate-800" : "text-slate-400"
+                  }`}
+                >
+                  Rules
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.navigate("PropertyFoodMenuViewScreen", {
+                    propertyName: displayName,
+                    foodMenuDays: foodMenuDays || {},
+                  })
+                }
+                className="flex-1 py-3 rounded-xl border border-slate-200 bg-slate-50"
+                disabled={!hasFoodMenu}
+              >
+                <Text
+                  className={`text-center font-semibold ${
+                    hasFoodMenu ? "text-slate-800" : "text-slate-400"
+                  }`}
+                >
+                  Food Menu
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
-        )}
-
-        {/* Food Menu (property-specific, from admin) */}
-        {(property as any).rules?.foodMenu?.days && typeof (property as any).rules.foodMenu.days === "object" && (
-          (() => {
-            const days = (property as any).rules.foodMenu.days as Record<string, Record<string, { enabled?: boolean; menu?: string; startTime?: string; endTime?: string }>>;
-            const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-            const sections = [{ key: "breakfast", label: "Breakfast" }, { key: "lunch", label: "Lunch" }, { key: "snack", label: "Snack" }, { key: "dinner", label: "Dinner" }];
-            const hasAnyMenu = Object.keys(days).some((d) => sections.some((s) => days[d]?.[s.key]?.enabled && (days[d][s.key]?.menu || "").trim()));
-            if (!hasAnyMenu) return null;
-            return (
-              <View className="bg-white rounded-2xl p-4 mb-4 shadow-sm border border-gray-100">
-                <Text className="text-[18px] font-semibold text-black mb-3">
-                  Food Menu & Timings
-                </Text>
-                <View className="gap-4">
-                  {dayNames.map((dayName, dayIndex) => {
-                    const d = days[String(dayIndex)];
-                    if (!d) return null;
-                    const daySections = sections.filter((s) => d[s.key]?.enabled && (d[s.key]?.menu || "").trim());
-                    if (daySections.length === 0) return null;
-                    return (
-                      <View key={dayIndex} className="p-3 bg-gray-50 rounded-xl">
-                        <Text className="font-semibold text-gray-800 mb-2">{dayName}</Text>
-                        {daySections.map((s) => {
-                          const sec = d[s.key];
-                          const start = sec?.startTime ? new Date(sec.startTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
-                          const end = sec?.endTime ? new Date(sec.endTime).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
-                          const timeStr = start && end ? ` (${start} – ${end})` : "";
-                          return (
-                            <View key={s.key} className="mb-1">
-                              <Text className="text-gray-600 text-xs font-medium">{s.label}{timeStr}</Text>
-                              <Text className="text-gray-800 text-sm">{sec?.menu || "—"}</Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    );
-                  })}
-                </View>
-              </View>
-            );
-          })()
         )}
 
         {/* Property Facilities — same labels as Admin preview */}
@@ -436,7 +463,6 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
             <Text className="text-[15px] font-semibold text-slate-800">
               Contact property admin
             </Text>
-            //
           </View>
           <TouchableOpacity
             onPress={() => {

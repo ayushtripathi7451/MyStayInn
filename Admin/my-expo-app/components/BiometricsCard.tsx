@@ -4,6 +4,7 @@ import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getAuthBearerToken, propertyApi } from "../utils/api";
+import { hasUsableProperties } from "../utils/propertyGate";
 
 export default function BiometricsCard({ navigation }: any) {
   const [bioType, setBioType] = useState<"fingerprint" | "face">("fingerprint");
@@ -50,8 +51,11 @@ export default function BiometricsCard({ navigation }: any) {
     }
     try {
       const propertiesResponse = await propertyApi.get("/api/properties");
-      if (propertiesResponse.data.success && propertiesResponse.data.properties?.length > 0) {
-        const firstProperty = propertiesResponse.data.properties[0];
+      const list = propertiesResponse.data?.properties;
+      if (propertiesResponse.data?.success && hasUsableProperties(list)) {
+        const arr = list as unknown[];
+        const firstProperty =
+          arr.find((p) => p != null && typeof p === "object") ?? arr[0];
         await AsyncStorage.setItem("currentProperty", JSON.stringify(firstProperty));
         navigation.replace("Home");
       } else {

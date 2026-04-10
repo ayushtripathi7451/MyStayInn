@@ -138,9 +138,9 @@ export default function CreateMPINScreen({ navigation }: any) {
 
             {/* PROGRESS */}
             <View className="flex-row justify-center mt-3 mb-8">
-              <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+              <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+              <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+              <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
             </View>
 
             {/* ENTER MPIN */}
@@ -212,7 +212,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               <View
                 className={`w-5 h-5 rounded border mr-3 ${
                   isChecked
-                    ? "bg-purple-600 border-purple-600"
+                    ? "bg-indigo-600 border-indigo-600"
                     : "border-gray-400"
                 } items-center justify-center`}
               >
@@ -223,7 +223,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               <Text className="text-gray-700">
                 I agree to the{" "}
                 <Text
-                  className="font-semibold text-purple-600"
+                  className="font-semibold text-indigo-600"
                   onPress={() => setShowTerms(true)}
                 >
                   Terms & Conditions
@@ -236,7 +236,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               disabled={!isValid || loading}
               onPress={handleSaveMPIN}
               className={`w-full py-4 rounded-xl mt-10 flex-row justify-center items-center ${
-                isValid && !loading ? "bg-purple-600" : "bg-purple-300"
+                isValid && !loading ? "bg-indigo-600" : "bg-indigo-300"
               }`}
             >
               {loading && <ActivityIndicator color="white" className="mr-2" />}
@@ -278,7 +278,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               </ScrollView>
               <TouchableOpacity
                 onPress={() => { setIsChecked(true); setShowTerms(false); }}
-                className="bg-purple-600 py-4 rounded-xl mt-4 items-center"
+                className="bg-indigo-600 py-4 rounded-xl mt-4 items-center"
               >
                 <Text className="text-white font-semibold text-base">I Agree</Text>
               </TouchableOpacity>

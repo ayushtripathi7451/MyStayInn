@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
@@ -15,6 +15,7 @@ import {
   Linking,
   StyleSheet,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,6 +30,9 @@ import {
   formatOccupancySharingFromRooms,
   extractPropertyAudience,
 } from "../utils/roomSharing";
+import { formatLocalYMD } from "../utils/dateCalendar";
+import { useDispatch } from "react-redux";
+import { refreshCurrentStay } from "../src/store/actions";
 
 type Admin = {
   id: string;
@@ -86,6 +90,10 @@ function extractSecurityDepositFromRules(rules: any): number | null {
 export default function AdminDetailsScreen({ route, navigation }: any) {
   const { admin, property, fullProperty } = route.params || {};
   const { theme } = useTheme();
+  const dispatch = useDispatch();
+  const [submitting, setSubmitting] = useState(false);
+  const [showSuccessSplash, setShowSuccessSplash] = useState(false);
+  const submitGuardRef = useRef(false);
 
   const primaryBg = theme === "female" ? "#EC4899" : "#1E33FF";
   const softBg = theme === "female" ? "#FCE7F3" : "#EEF2FF";
@@ -356,18 +364,34 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
       : `${Math.round(diff)} day(s)`;
   }, [checkIn, checkOut]);
 
+  useEffect(() => {
+    if (!showSuccessSplash) return;
+    dispatch(refreshCurrentStay({ force: true }));
+    const t = setTimeout(() => {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Home" }],
+      });
+    }, 2200);
+    return () => clearTimeout(t);
+  }, [showSuccessSplash, dispatch, navigation]);
+
   const submitReservation = async () => {
+    if (submitGuardRef.current) return;
     const propertyId = fullProperty?.id ?? property?.id;
     if (!propertyId) {
       Alert.alert("Error", "Property not found");
       return;
     }
+    submitGuardRef.current = true;
+    setSubmitting(true);
+    let succeeded = false;
     try {
       const { bookingApi } = await import("../utils/api");
       const payload = {
         propertyId,
-        moveInDate: checkIn?.toISOString?.()?.split("T")[0],
-        moveOutDate: checkOut ? checkOut.toISOString?.()?.split("T")[0] : null,
+        moveInDate: checkIn ? formatLocalYMD(checkIn) : undefined,
+        moveOutDate: checkOut ? formatLocalYMD(checkOut) : null,
         securityDeposit:
           securityDepositAmount != null && !Number.isNaN(securityDepositAmount)
             ? Number(securityDepositAmount)
@@ -384,11 +408,9 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
         Alert.alert("Error", data?.message || "Failed to submit request");
         return;
       }
-      Alert.alert(
-        "Reservation submitted",
-        "Your reservation request has been sent. After the admin allocates a room, your security deposit payment link will appear in the Due Amount section on your home screen."
-      );
-      navigation.goBack();
+      succeeded = true;
+      Keyboard.dismiss();
+      setShowSuccessSplash(true);
     } catch (e: any) {
       console.error(e);
       const status = e?.response?.status;
@@ -397,15 +419,21 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
           ? "Session expired or invalid. Please log in again."
           : e?.response?.data?.message || "Failed to submit request. Please try again.";
       Alert.alert("Error", msg);
+    } finally {
+      if (!succeeded) {
+        submitGuardRef.current = false;
+        setSubmitting(false);
+      }
     }
   };
 
   const handleSubmit = () => {
+    if (submitting || submitGuardRef.current) return;
     if (!checkIn) {
       Alert.alert("Required", "Move-in date is required");
       return;
     }
-    submitReservation();
+    void submitReservation();
   };
 
   return (
@@ -906,15 +934,42 @@ export default function AdminDetailsScreen({ route, navigation }: any) {
           {/* SUBMIT */}
           <TouchableOpacity
             onPress={handleSubmit}
+            disabled={submitting}
             className="h-[52px] rounded-xl items-center justify-center mt-6"
-            style={{ backgroundColor: primaryBg }}
+            style={{
+              backgroundColor: primaryBg,
+              opacity: submitting ? 0.65 : 1,
+            }}
           >
-            <Text className="text-white font-semibold text-[16px]">
-              Reserve
-            </Text>
+            {submitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text className="text-white font-semibold text-[16px]">
+                Reserve
+              </Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal visible={showSuccessSplash} animationType="fade" transparent={false}>
+        <View
+          className="flex-1 justify-center items-center px-8"
+          style={{ backgroundColor: primaryBg }}
+        >
+          <Ionicons name="checkmark-circle" size={88} color="#FFFFFF" />
+          <Text className="text-white text-[22px] font-semibold mt-6 text-center">
+            Reservation submitted
+          </Text>
+          <Text
+            className="text-[15px] mt-4 text-center leading-[22px]"
+            style={{ color: "rgba(255,255,255,0.92)" }}
+          >
+            Your reservation request has been sent. After the admin allocates a room, your security
+            deposit payment link will appear in the Due Amount section on your home screen.
+          </Text>
+        </View>
+      </Modal>
     </View>
   );
 }

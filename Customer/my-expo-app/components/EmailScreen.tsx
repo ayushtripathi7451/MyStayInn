@@ -59,7 +59,7 @@ export default function EmailScreen({ navigation }: any) {
 
           {/* PROGRESS BAR */}
           <View className="flex-row justify-center mt-3 mb-10">
-            <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+            <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
             <View className="w-6 h-1.5 bg-gray-300 rounded-full mx-1" />
             <View className="w-6 h-1.5 bg-gray-300 rounded-full mx-1" />
           </View>
@@ -89,7 +89,7 @@ export default function EmailScreen({ navigation }: any) {
             disabled={!isValid}
             onPress={onNext}
             className={`w-full py-4 rounded-xl mt-8 ${
-              isValid ? "bg-purple-500" : "bg-purple-300"
+              isValid ? "bg-indigo-500" : "bg-indigo-300"
             }`}
           >
             <Text className="text-center text-white font-semibold text-lg">

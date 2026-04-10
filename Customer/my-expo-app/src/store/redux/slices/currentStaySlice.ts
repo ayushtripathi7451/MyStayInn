@@ -27,6 +27,8 @@ export interface CurrentStayProperty {
   securityDeposit?: number;
   /** Property rules & food menu (saved by admin), for Property Details screen */
   rules?: Record<string, unknown> | null;
+  /** Bed label/number(s) allocated to this booking in the room */
+  bedNumbers?: (string | number)[];
   /** Property owner / admin phone (from current-stay API) for dialer */
   adminPhone?: string;
   /** Same as booking.propertyAdminPhone when merged onto card payload */

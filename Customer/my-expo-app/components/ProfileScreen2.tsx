@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   TextInput,
   Keyboard,
   Linking,
+  Modal,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
@@ -28,7 +29,9 @@ import {
   parseDateOnly,
   resolveFinalKycVerified,
 } from "../utils/kyc";
+import { formatLocalYMD } from "../utils/dateCalendar";
 import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
+import ScrollableDatePicker from "./ScrollableDatePicker";
 
 const isAadhaarVerificationExpired = (expiresAt?: string | null) => {
   if (!expiresAt) return true;
@@ -143,6 +146,8 @@ export default function ProfileScreen2({ navigation }: any) {
   const [aadhaarCheckoutVisible, setAadhaarCheckoutVisible] = useState(false);
   const [verifyingAadhaar, setVerifyingAadhaar] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [kycResetModalVisible, setKycResetModalVisible] = useState(false);
+  const kycResetResolveRef = useRef<((ok: boolean) => void) | null>(null);
 
   /* 🎨 THEME COLORS */
   const isFemale = theme === "female";
@@ -399,26 +404,26 @@ const refreshData = async () => {
       await run();
       return;
     }
-    await new Promise<void>((resolve, reject) => {
-      Alert.alert(
-        "KYC will be reset",
-        "If you change your name, date of birth, or gender, your saved KYC data will be removed and you will need to verify your Aadhaar again.",
-        [
-          { text: "Cancel", style: "cancel", onPress: () => reject(new Error("CANCELLED")) },
-          {
-            text: "OK",
-            onPress: async () => {
-              try {
-                await run();
-                resolve();
-              } catch (e) {
-                reject(e);
-              }
-            },
-          },
-        ]
-      );
+    const ok = await new Promise<boolean>((resolve) => {
+      kycResetResolveRef.current = resolve;
+      setKycResetModalVisible(true);
     });
+    if (!ok) throw new Error("CANCELLED");
+    await run();
+  };
+
+  const onKycResetModalConfirm = async () => {
+    setKycResetModalVisible(false);
+    const r = kycResetResolveRef.current;
+    kycResetResolveRef.current = null;
+    r?.(true);
+  };
+
+  const onKycResetModalCancel = () => {
+    setKycResetModalVisible(false);
+    const r = kycResetResolveRef.current;
+    kycResetResolveRef.current = null;
+    r?.(false);
   };
 
   const mergeKycDetails = (data: any) => ({
@@ -921,6 +926,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
             value={profileExtras.dob || ""}
             placeholder="e.g. DD/MM/YYYY"
             accentColor={primaryColor}
+            fieldType="date"
             onSave={async (v) => {
               try {
                 const next = v.trim();
@@ -943,6 +949,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
             }
             placeholder="e.g. Male, Female"
             accentColor={primaryColor}
+            fieldType="gender"
             onSave={async (v) => {
               try {
                 const next = v.trim();
@@ -1116,6 +1123,10 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
               
               
               {!shouldHideVerifyButton ? (
+                <>
+                  <Text className="text-[12px] text-amber-900 mb-3 leading-5">
+                    Note: Keep your Aadhaar number ready, then tap Verify Aadhaar with DigiLocker.
+                  </Text>
                 <TouchableOpacity
                   className="self-start px-4 py-2 rounded-xl bg-indigo-600 flex-row items-center gap-2"
                   activeOpacity={0.85}
@@ -1126,9 +1137,10 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                     <ActivityIndicator size="small" color="#fff" />
                   ) : null}
                   <Text className="text-white text-xs font-semibold">
-                    {verifyingAadhaar ? "Opening verification…" : "Verify Aadhaar / Complete KYC"}
+                    {verifyingAadhaar ? "Opening verification…" : "Verify Aadhaar "}
                   </Text>
                 </TouchableOpacity>
+                </>
               ) : (
                 <Text className="text-[11px] text-amber-700">
                   Aadhaar is already verified. KYC remains unverified because profile details do not match.
@@ -1228,6 +1240,42 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
         </View>
       </ScrollView>
 
+      <Modal visible={kycResetModalVisible} transparent animationType="slide">
+        <View className="flex-1 bg-black/50 justify-end">
+          <View className="bg-white rounded-t-[24px] p-6 pb-8">
+            <Text className="text-xl font-black text-slate-900 mb-4">KYC will be reset</Text>
+
+            <View className="bg-amber-50 rounded-xl p-4 mb-4 border border-amber-100">
+              <Text className="font-bold text-amber-900 mb-2">Summary</Text>
+              <Text className="text-amber-900 text-sm leading-5">
+                If you change your name, date of birth, or gender, your saved KYC data will be removed and you
+                will need to verify your Aadhaar again.
+              </Text>
+            </View>
+
+            <Text className="text-slate-600 text-sm mb-5">
+              You can start verification again anytime from this profile screen.
+            </Text>
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 bg-slate-100 py-4 rounded-xl"
+                onPress={onKycResetModalCancel}
+              >
+                <Text className="text-center font-bold text-slate-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 py-4 rounded-xl"
+                style={{ backgroundColor: primaryColor }}
+                onPress={onKycResetModalConfirm}
+              >
+                <Text className="text-center font-bold text-white">Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <BottomNav />
     </View>
   );
@@ -1277,6 +1325,30 @@ function Divider() {
   return <View className="h-[1px] bg-gray-200 mx-5" />;
 }
 
+function dobStringToDate(s: string): Date {
+  const iso = parseDateOnly(s);
+  if (iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? new Date(2000, 0, 1) : d;
+}
+
+function formatDobForDisplay(s: string): string {
+  if (!String(s).trim()) return "Not provided";
+  const iso = parseDateOnly(s);
+  if (!iso) return String(s).trim();
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const GENDER_OPTIONS = ["Male", "Female"] as const;
+
 function InlineEditableRow({
   label,
   value,
@@ -1285,6 +1357,7 @@ function InlineEditableRow({
   multiline = false,
   keyboardType = "default",
   accentColor,
+  fieldType = "default",
 }: {
   label: string;
   value: string;
@@ -1292,25 +1365,36 @@ function InlineEditableRow({
   multiline?: boolean;
   keyboardType?: "default" | "email-address" | "phone-pad" | "numeric";
   accentColor: string;
+  fieldType?: "default" | "date" | "gender";
   onSave: (next: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const [genderModalVisible, setGenderModalVisible] = useState(false);
 
   useEffect(() => {
-    if (!editing) {
+    if (!editing && fieldType !== "gender") {
       setDraft(value);
     }
-  }, [value, editing]);
+    if (!genderModalVisible && fieldType === "gender") {
+      setDraft(value);
+    }
+  }, [value, editing, genderModalVisible, fieldType]);
 
-  const displayValue = value.trim() ? value : "Not provided";
+  const displayValue =
+    fieldType === "date"
+      ? formatDobForDisplay(value)
+      : value.trim()
+        ? value
+        : "Not provided";
 
   const handleSave = async () => {
     setSaving(true);
     try {
       Keyboard.dismiss();
-      await onSave(draft.trim());
+      const out = fieldType === "date" ? (parseDateOnly(draft.trim()) || draft.trim()) : draft.trim();
+      await onSave(out);
       setEditing(false);
     } catch {
       // Parent shows Alert
@@ -1325,52 +1409,153 @@ function InlineEditableRow({
     setEditing(false);
   };
 
+  const startEdit = () => {
+    if (fieldType === "gender") {
+      setGenderModalVisible(true);
+      return;
+    }
+    if (fieldType === "date") {
+      const iso = parseDateOnly(value);
+      setDraft(iso || value);
+    } else {
+      setDraft(value);
+    }
+    setEditing(true);
+  };
+
+  const pickGender = async (g: string) => {
+    setGenderModalVisible(false);
+    setSaving(true);
+    try {
+      await onSave(g);
+    } catch {
+      // Parent shows Alert
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <View className="mb-4 pb-4 border-b border-gray-100 last:border-0 last:mb-0 last:pb-0">
       <View className="flex-row justify-between items-start">
         <Text className="text-gray-500 text-sm flex-1 pr-2">{label}</Text>
-        {!editing && (
+        {!editing && fieldType !== "gender" && (
           <TouchableOpacity
-            onPress={() => setEditing(true)}
+            onPress={startEdit}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="create-outline" size={20} color={accentColor} />
+          </TouchableOpacity>
+        )}
+        {fieldType === "gender" && (
+          <TouchableOpacity
+            onPress={() => setGenderModalVisible(true)}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons name="create-outline" size={20} color={accentColor} />
           </TouchableOpacity>
         )}
       </View>
-      {editing ? (
+      {fieldType === "gender" ? (
+        <>
+          <Text className="text-base font-medium text-gray-900 mt-1">{displayValue}</Text>
+          <Modal visible={genderModalVisible} transparent animationType="slide">
+            <View className="flex-1 bg-black/50 justify-end">
+              <View className="bg-white rounded-t-[24px] p-6 pb-10">
+                <Text className="text-lg font-black text-slate-900 mb-4">Select gender</Text>
+                {GENDER_OPTIONS.map((opt) => (
+                  <TouchableOpacity
+                    key={opt}
+                    className="py-4 border-b border-gray-100 flex-row justify-between items-center"
+                    disabled={saving}
+                    onPress={() => pickGender(opt)}
+                  >
+                    <Text className="text-base font-semibold text-gray-900">{opt}</Text>
+                    {value.trim().toLowerCase() === opt.toLowerCase() ? (
+                      <Ionicons name="checkmark-circle" size={22} color={accentColor} />
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  className="mt-4 bg-slate-100 py-4 rounded-xl"
+                  onPress={() => setGenderModalVisible(false)}
+                  disabled={saving}
+                >
+                  <Text className="text-center font-bold text-slate-700">Close</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+        </>
+      ) : editing ? (
         <View className="mt-2">
-          <TextInput
-            className="border border-gray-200 rounded-xl px-3 py-2 text-base text-gray-900 bg-white"
-            style={multiline ? { minHeight: 88, textAlignVertical: "top" } : undefined}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={placeholder}
-            placeholderTextColor="#9CA3AF"
-            multiline={multiline}
-            keyboardType={keyboardType}
-          />
-          <View className="flex-row mt-3 gap-3">
-            <TouchableOpacity
-              onPress={handleSave}
-              disabled={saving}
-              className="px-4 py-2 rounded-xl min-w-[72px] items-center justify-center"
-              style={{ backgroundColor: accentColor }}
-            >
-              {saving ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text className="text-white font-semibold text-sm">Save</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={saving}
-              className="px-4 py-2 rounded-xl border border-gray-200 bg-white"
-            >
-              <Text className="text-gray-700 font-semibold text-sm">Cancel</Text>
-            </TouchableOpacity>
-          </View>
+          {fieldType === "date" ? (
+            <View>
+              <ScrollableDatePicker
+                selectedDate={dobStringToDate(draft || value)}
+                onDateChange={(d) => setDraft(formatLocalYMD(d))}
+                mode="date"
+                maximumDate={new Date()}
+                minimumDate={new Date(1930, 0, 1)}
+                placeholder="Select date of birth"
+              />
+              <View className="flex-row mt-3 gap-3">
+                <TouchableOpacity
+                  onPress={handleSave}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl min-w-[72px] items-center justify-center"
+                  style={{ backgroundColor: accentColor }}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text className="text-white font-semibold text-sm">Save</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleCancel}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl border border-gray-200 bg-white"
+                >
+                  <Text className="text-gray-700 font-semibold text-sm">Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              <TextInput
+                className="border border-gray-200 rounded-xl px-3 py-2 text-base text-gray-900 bg-white"
+                style={multiline ? { minHeight: 88, textAlignVertical: "top" } : undefined}
+                value={draft}
+                onChangeText={setDraft}
+                placeholder={placeholder}
+                placeholderTextColor="#9CA3AF"
+                multiline={multiline}
+                keyboardType={keyboardType}
+              />
+              <View className="flex-row mt-3 gap-3">
+                <TouchableOpacity
+                  onPress={handleSave}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl min-w-[72px] items-center justify-center"
+                  style={{ backgroundColor: accentColor }}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text className="text-white font-semibold text-sm">Save</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleCancel}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-xl border border-gray-200 bg-white"
+                >
+                  <Text className="text-gray-700 font-semibold text-sm">Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       ) : (
         <Text
