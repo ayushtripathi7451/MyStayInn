@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -6,12 +6,12 @@ import {
   TouchableOpacity,
   StatusBar,
   TextInput,
-  Alert,
   Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import ScrollableDatePicker from "./ScrollableDatePicker";
 import { moveOutApi } from "../utils/api";
 import { useDispatch } from "react-redux";
 import { refreshCurrentStay } from "../src/store/actions";
@@ -34,34 +34,40 @@ interface BookingDetails {
 
 export default function MoveOutRequestScreen({ navigation, route }: MoveOutRequestScreenProps) {
   const dispatch = useDispatch();
+  const scrollRef = useRef<any>(null);
   const [bookingDetails, setBookingDetails] = useState<BookingDetails | null>(null);
   /** Multiple active properties — user picks which booking to move out from. */
   const [stayChoices, setStayChoices] = useState<BookingDetails[]>([]);
   const [moveOutDate, setMoveOutDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [comments, setComments] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isWithinNotice, setIsWithinNotice] = useState(false);
   const [penaltyAmount, setPenaltyAmount] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadBookingDetails();
-  }, []);
+  /** Booking to pre-select when navigating from Property Details / My Properties (matches move-out API ?bookingId=). */
+  const preferredBookingId = useMemo(() => {
+    const p = route?.params?.property as { bookingId?: string | number; id?: string | number } | undefined;
+    if (!p) return undefined;
+    const raw = p.bookingId ?? p.id;
+    if (raw == null) return undefined;
+    const s = String(raw).trim();
+    return s !== "" ? s : undefined;
+  }, [route?.params?.property]);
 
-  useEffect(() => {
-    validateNoticeRequirement();
-  }, [moveOutDate, bookingDetails]);
-
-  const loadBookingDetails = async () => {
+  const loadBookingDetails = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await moveOutApi.get("/api/move-out/booking-details", {
         timeout: 15000,
+        ...(preferredBookingId ? { params: { bookingId: preferredBookingId } } : {}),
       });
       if (!res.data?.success || !res.data.data) {
-        Alert.alert("Error", res.data?.message || "Failed to load booking details");
+        setLoadError(res.data?.message || "Failed to load booking details");
         setBookingDetails(null);
         return;
       }
@@ -100,14 +106,18 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
         error?.response?.data?.message ||
         error.message ||
         "Failed to load booking details";
-      Alert.alert("Error", msg);
+      setLoadError(msg);
       setBookingDetails(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [preferredBookingId]);
 
-  const validateNoticeRequirement = async () => {
+  useEffect(() => {
+    loadBookingDetails();
+  }, [loadBookingDetails]);
+
+  const validateNoticeRequirement = useCallback(async () => {
     if (!bookingDetails) return;
     try {
       const res = await moveOutApi.post("/api/move-out/validate-date", {
@@ -125,32 +135,39 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
     } catch (error) {
       console.error("Error validating move-out date:", error);
     }
-  };
+  }, [moveOutDate, bookingDetails]);
 
-  const handleDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setMoveOutDate(selectedDate);
-    }
-  };
+  useEffect(() => {
+    validateNoticeRequirement();
+  }, [validateNoticeRequirement]);
 
-  const validateForm = () => {
-    if (!comments.trim()) {
-      Alert.alert('Error', 'Please provide additional comments');
-      return false;
-    }
+  /** Start of today — earliest selectable move-out day (matches ScrollableDatePicker minimumDate). */
+  const minimumMoveOutDate = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return t;
+  }, []);
 
-    const today = new Date();
-    if (moveOutDate <= today) {
-      Alert.alert('Error', 'Move-out date must be in the future');
-      return false;
-    }
-
-    return true;
+  /** True if move-out date is strictly before today (calendar), not including today. */
+  const isMoveOutDateInPast = (d: Date) => {
+    const startToday = new Date();
+    startToday.setHours(0, 0, 0, 0);
+    const pick = new Date(d);
+    pick.setHours(0, 0, 0, 0);
+    return pick.getTime() < startToday.getTime();
   };
 
   const submitMoveOutRequest = async () => {
-    if (!validateForm() || !bookingDetails) return;
+    setSubmitError(null);
+    if (!comments.trim()) {
+      setSubmitError("Please provide additional comments.");
+      return;
+    }
+    if (isMoveOutDateInPast(moveOutDate)) {
+      setSubmitError("Move-out date cannot be in the past.");
+      return;
+    }
+    if (!bookingDetails) return;
 
     setSubmitting(true);
     try {
@@ -168,33 +185,21 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
 
       const requestId = res.data.data.requestId;
 
-      Alert.alert(
-        "Success",
-        "Your move-out request has been submitted successfully. You will be notified once the admin reviews your request.",
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              dispatch(refreshCurrentStay({ force: true }));
-              navigation.navigate("MoveOutStatusScreen", {
-                requestId,
-                property: bookingDetails,
-              });
-            },
-          },
-        ]
-      );
-      setSubmitting(false);
       setShowConfirmModal(false);
+      setSubmitting(false);
+      dispatch(refreshCurrentStay({ force: true }));
+      navigation.navigate("MoveOutStatusScreen", {
+        requestId,
+        property: bookingDetails,
+      });
     } catch (error: any) {
       console.error("Error submitting move-out request:", error);
       const msg =
         error?.response?.data?.message ||
         error.message ||
         "Failed to submit move-out request";
-      Alert.alert("Error", msg);
+      setSubmitError(msg);
       setSubmitting(false);
-      setShowConfirmModal(false);
     }
   };
 
@@ -211,9 +216,13 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
 
   const calculateNoticeDays = () => {
     if (!bookingDetails) return 0;
-    const today = new Date();
-    const diffTime = moveOutDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const startToday = new Date();
+    startToday.setHours(0, 0, 0, 0);
+    const startMove = new Date(moveOutDate);
+    startMove.setHours(0, 0, 0, 0);
+    const diffDays = Math.round(
+      (startMove.getTime() - startToday.getTime()) / (1000 * 60 * 60 * 24)
+    );
     return Math.max(0, diffDays);
   };
 
@@ -239,10 +248,10 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
       <SafeAreaView className="flex-1 bg-[#F1F5F9] justify-center items-center px-6">
         <Ionicons name="home-outline" size={64} color="#94A3B8" />
         <Text className="text-slate-500 font-bold text-center mt-4 text-lg">
-          No Active Booking
+          {loadError ? "Could not load booking" : "No Active Booking"}
         </Text>
         <Text className="text-slate-400 text-center mt-2">
-          You don't have an active booking to request move-out
+          {loadError || "You don't have an active booking to request move-out"}
         </Text>
         <TouchableOpacity
           className="mt-6 bg-[#1E33FF] px-6 py-3 rounded-xl"
@@ -268,7 +277,16 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
         </Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="px-5">
+      <KeyboardAwareScrollView
+        ref={scrollRef}
+        className="flex-1"
+        contentContainerStyle={{ paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        extraScrollHeight={100}
+        enableOnAndroid={true}
+        keyboardShouldPersistTaps="handled"
+      >
+      <View className="px-5">
         {stayChoices.length > 1 ? (
           <View className="mt-4">
             <Text className="text-sm font-semibold text-slate-600 mb-2">Select property</Text>
@@ -336,13 +354,16 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
             Preferred Move-Out Date
           </Text>
 
-          <TouchableOpacity
-            className="flex-row items-center justify-between bg-slate-50 rounded-xl p-4 mb-4"
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Text className="text-slate-900 font-medium">{formatDate(moveOutDate)}</Text>
-            <Ionicons name="calendar-outline" size={20} color="#64748B" />
-          </TouchableOpacity>
+          <View className="mb-4">
+            <ScrollableDatePicker
+              mode="date"
+              selectedDate={moveOutDate}
+              onDateChange={setMoveOutDate}
+              minimumDate={minimumMoveOutDate}
+              placeholder="Select move-out date"
+              containerStyle="bg-slate-50 border-slate-200 py-1"
+            />
+          </View>
 
           {/* Notice Period Warning */}
           <View className={`p-4 rounded-xl ${isWithinNotice ? 'bg-orange-50' : 'bg-green-50'}`}>
@@ -377,40 +398,38 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
           </Text>
 
           <TextInput
-            className="border border-slate-200 rounded-xl p-4 text-slate-900"
+            className="border border-slate-200 rounded-xl p-4 text-slate-900 min-h-[100px]"
             placeholder="Please provide additional information for the admin (required)..."
             value={comments}
             onChangeText={setComments}
             multiline
-            numberOfLines={3}
+            numberOfLines={4}
+            textAlignVertical="top"
           />
         </View>
 
         
-        {/* Submit Button */}
+        {/* Submit Button — disabled until additional comments are filled */}
         <TouchableOpacity
-          className="bg-[#1E33FF] py-4 rounded-xl mt-6"
-          onPress={() => setShowConfirmModal(true)}
+          className={`py-4 rounded-xl mt-6 ${comments.trim() ? "bg-[#1E33FF]" : "bg-slate-300"}`}
+          onPress={() => {
+            if (!comments.trim()) return;
+            setSubmitError(null);
+            setShowConfirmModal(true);
+          }}
           disabled={!comments.trim()}
+          activeOpacity={comments.trim() ? 0.85 : 1}
         >
-          <Text className="text-center font-bold text-white text-lg">
+          <Text
+            className={`text-center font-bold text-lg ${comments.trim() ? "text-white" : "text-slate-500"}`}
+          >
             Submit Move-Out Request
           </Text>
         </TouchableOpacity>
 
         <View className="h-20" />
-      </ScrollView>
-
-      {/* Date Picker */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={moveOutDate}
-          mode="date"
-          display="default"
-          onChange={handleDateChange}
-          minimumDate={new Date()}
-        />
-      )}
+      </View>
+      </KeyboardAwareScrollView>
 
       {/* Confirmation Modal */}
       <Modal visible={showConfirmModal} transparent animationType="slide">
@@ -443,20 +462,30 @@ export default function MoveOutRequestScreen({ navigation, route }: MoveOutReque
               You cannot modify the request after submission.
             </Text>
 
+            {submitError ? (
+              <Text className="text-red-600 text-sm mb-3">{submitError}</Text>
+            ) : null}
+
             <View className="flex-row space-x-3">
               <TouchableOpacity
                 className="flex-1 bg-slate-100 py-4 rounded-xl"
-                onPress={() => setShowConfirmModal(false)}
+                onPress={() => {
+                  setSubmitError(null);
+                  setShowConfirmModal(false);
+                }}
               >
                 <Text className="text-center font-bold text-slate-700">Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                className="flex-1 bg-[#1E33FF] py-4 rounded-xl"
+                className={`flex-1 py-4 rounded-xl ${comments.trim() && !submitting ? "bg-[#1E33FF]" : "bg-slate-300"}`}
                 onPress={submitMoveOutRequest}
-                disabled={submitting}
+                disabled={!comments.trim() || submitting}
+                activeOpacity={comments.trim() && !submitting ? 0.85 : 1}
               >
-                <Text className="text-center font-bold text-white">
-                  {submitting ? 'Submitting...' : 'Confirm & Submit'}
+                <Text
+                  className={`text-center font-bold ${comments.trim() ? "text-white" : "text-slate-500"}`}
+                >
+                  {submitting ? "Submitting..." : "Confirm & Submit"}
                 </Text>
               </TouchableOpacity>
             </View>

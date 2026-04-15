@@ -5,11 +5,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { useDispatch } from "react-redux";
 import { refreshCurrentStay } from "../src/store/actions";
+import { resetStackToHome } from "../utils/navigationRef";
 
 /**
  * Shown after Cashfree redirects to mystay://payment-success (see DepositCheckoutScreen + PAYMENT_RETURN_URL).
  */
-export default function PaymentCompleteScreen({ navigation }: { navigation: any }) {
+export default function PaymentCompleteScreen() {
   const { theme } = useTheme();
   const dispatch = useDispatch();
   const accent = theme === "female" ? "#EC4899" : "#1E33FF";
@@ -18,13 +19,11 @@ export default function PaymentCompleteScreen({ navigation }: { navigation: any 
   useEffect(() => {
     dispatch(refreshCurrentStay({ force: true }));
     const t = setTimeout(() => {
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Home" }],
-      });
+      // Root ref: returning from the browser can unmount this screen before reset runs.
+      resetStackToHome();
     }, 2200);
     return () => clearTimeout(t);
-  }, [dispatch, navigation]);
+  }, [dispatch]);
 
   return (
     <SafeAreaView className="flex-1 justify-center items-center px-8" style={{ backgroundColor: bg }}>

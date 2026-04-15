@@ -7,7 +7,6 @@ import {
   ScrollView,
   FlatList,
   Image,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -193,6 +192,7 @@ export default function AdminCustomerModule({ navigation }: any) {
   const [bookings, setBookings] = useState<any[]>([]);
   const [inactiveTenants, setInactiveTenants] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchBanner, setFetchBanner] = useState<string | null>(null);
 
   // Fetch data; refetch when selected property changes so tenants are property-scoped
   useEffect(() => {
@@ -202,6 +202,7 @@ export default function AdminCustomerModule({ navigation }: any) {
   const fetchAllData = async () => {
     try {
       setLoading(true);
+      setFetchBanner(null);
       console.log("[SearchScreen] Fetching data for property:", propertyId ?? "all");
 
       const params = propertyId ? { propertyId } : {};
@@ -248,7 +249,7 @@ export default function AdminCustomerModule({ navigation }: any) {
       setInactiveTenants(merged);
     } catch (error: any) {
       console.error("[SearchScreen] Error fetching data:", error);
-      Alert.alert("Error", "Failed to load data. Please check backend connections.");
+      setFetchBanner("Failed to load data. Please check backend connections.");
     } finally {
       setLoading(false);
     }
@@ -597,6 +598,11 @@ const customers = useMemo(() => {
       </SafeAreaView>
 
       <View className="flex-1 bg-[#F6F8FF] rounded-t-[40px] -mt-8 px-6 pt-6">
+        {fetchBanner ? (
+          <View className="mb-4 bg-rose-50 border border-rose-200 rounded-xl p-3">
+            <Text className="text-rose-800 text-sm">{fetchBanner}</Text>
+          </View>
+        ) : null}
         {/* Search Bar */}
         <View className="flex-row items-center bg-white rounded-xl px-4 h-12 mb-4 border border-gray-200">
           <Ionicons name="search" size={20} color="#999" />

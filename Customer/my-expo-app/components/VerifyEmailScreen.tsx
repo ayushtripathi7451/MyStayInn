@@ -95,6 +95,7 @@ export default function VerifyEmailScreen({ navigation, route }) {
   };
 
   const isValid = otp.every((digit) => digit !== "");
+  const buttonFilled = isValid || loading;
 
   // Timer logic for Resend OTP
   useEffect(() => {
@@ -216,7 +217,7 @@ export default function VerifyEmailScreen({ navigation, route }) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       // Send new OTP
-      const newConfirmation = await auth().signInWithPhoneNumber(mobile);
+      const newConfirmation = await auth().signInWithPhoneNumber(mobile, true);
       
       // Store new confirmation
       const { setConfirmation } = require("../utils/firebaseConfirmation");
@@ -366,12 +367,19 @@ export default function VerifyEmailScreen({ navigation, route }) {
             <TouchableOpacity
               disabled={!isValid || loading}
               onPress={verifyOTP}
-              className={`py-4 rounded-xl flex-row justify-center items-center ${
-                isValid && !loading ? "bg-indigo-600" : "bg-indigo-300"
+              className={`py-4 rounded-xl flex-row justify-center items-center border-2 ${
+                buttonFilled
+                  ? "bg-indigo-600 border-indigo-600"
+                  : "bg-indigo-100 border-indigo-200"
               }`}
+              accessibilityState={{ disabled: !isValid || loading }}
             >
-              {loading && <ActivityIndicator color="white" className="mr-2" />}
-              <Text className="text-center text-white font-semibold text-lg">
+              {loading && <ActivityIndicator color="#FFFFFF" className="mr-2" />}
+              <Text
+                className={`text-center font-semibold text-lg ${
+                  buttonFilled ? "text-white" : "text-indigo-800"
+                }`}
+              >
                 {loading ? "Verifying..." : "Verify OTP"}
               </Text>
             </TouchableOpacity>

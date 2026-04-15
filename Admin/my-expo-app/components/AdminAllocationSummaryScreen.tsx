@@ -8,7 +8,6 @@ import {
   StatusBar,
   Modal,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +18,7 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [isAllocating, setIsAllocating] = useState(false);
+  const [allocationError, setAllocationError] = useState<string | null>(null);
 
   // Get data from route params (propertyId = current property so tenant is assigned only to it)
   const allocationData = route?.params?.data;
@@ -75,6 +75,7 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
   const handleConfirmAllocation = async () => {
     try {
       setIsAllocating(true);
+      setAllocationError(null);
 
       const customerName = FINAL_SUMMARY.customer.name;
       const roomNumber = FINAL_SUMMARY.allocation.room;
@@ -158,7 +159,7 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
         error.response?.data?.error ||
         error.message ||
         "Failed to allocate room. Please try again.";
-      Alert.alert("Allocation Failed", msg);
+      setAllocationError(msg);
     }
   };
 
@@ -210,6 +211,12 @@ export default function AdminAllocationSummaryScreen({ navigation, route }: any)
           Review & Confirm
         </Text>
       </View>
+
+      {allocationError ? (
+        <View className="mx-5 mt-3 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          <Text className="text-rose-800 text-sm">{allocationError}</Text>
+        </View>
+      ) : null}
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
 

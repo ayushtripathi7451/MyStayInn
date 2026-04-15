@@ -398,8 +398,8 @@ export default function CreateRequestScreen({ navigation }: any) {
             size={90}
             color="#22c55e"
           />
-          <Text className="mt-4 text-lg font-semibold">
-            Enter Details
+          <Text className="mt-4 text-lg font-semibold text-slate-900">
+            New ticket created
           </Text>
         </Animated.View>
       )}

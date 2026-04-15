@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, ScrollView, TouchableOpacity, Platform, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Platform, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ProfileHeader from "./SetupHeader";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,6 +17,7 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
   } = route.params || {};
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [submitBanner, setSubmitBanner] = React.useState<{ text: string; error: boolean } | null>(null);
 
   // Use React Navigation's focus effect to refresh data when returning from edit screens
   React.useEffect(() => {
@@ -143,13 +144,18 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
 
     try {
       setIsSubmitting(true);
+      setSubmitBanner(null);
 
       // Debug: Check if token exists
       const tokenDebug = await debugToken();
       console.log("Token debug before API call:", tokenDebug);
       
       if (!tokenDebug.hasToken) {
-        Alert.alert("Error", "No authentication token found. Please login again.");
+        setSubmitBanner({
+          error: true,
+          text: "No authentication token found. Please login again.",
+        });
+        setIsSubmitting(false);
         return;
       }
 
@@ -254,17 +260,19 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
 
       if (response.data.success) {
         const propertyId = response.data.property.uniqueId || generateID();
-        Alert.alert("Success", "Property created successfully!");
         navigation.navigate("PropertySuccess", { id: propertyId });
       } else {
         throw new Error(response.data.message || "Failed to create property");
       }
     } catch (error: any) {
       console.error("Error creating property:", error);
-      Alert.alert(
-        "Error", 
-        error.response?.data?.message || error.message || "Failed to create property. Please try again."
-      );
+      setSubmitBanner({
+        error: true,
+        text:
+          error.response?.data?.message ||
+          error.message ||
+          "Failed to create property. Please try again.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -279,6 +287,18 @@ export default function PropertyPreviewScreen({ navigation, route }: any) {
   return (
     <SafeAreaView className="flex-1 bg-[#F9FAFB]">
       <ProfileHeader activeTab={fromVerify ? "Verify" : "Preview"} />
+
+      {submitBanner ? (
+        <View
+          className={`mx-5 mt-2 rounded-xl p-3 border ${
+            submitBanner.error ? "bg-rose-50 border-rose-200" : "bg-emerald-50 border-emerald-200"
+          }`}
+        >
+          <Text className={`text-sm ${submitBanner.error ? "text-rose-800" : "text-emerald-800"}`}>
+            {submitBanner.text}
+          </Text>
+        </View>
+      ) : null}
 
       <ScrollView
         showsVerticalScrollIndicator={false}

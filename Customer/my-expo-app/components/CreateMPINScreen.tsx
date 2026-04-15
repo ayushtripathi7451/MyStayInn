@@ -64,6 +64,8 @@ export default function CreateMPINScreen({ navigation }: any) {
     mpin === confirm &&
     isChecked;
 
+  const buttonFilled = isValid || loading;
+
   const handleSaveMPIN = async () => {
     try {
       setLoading(true);
@@ -235,12 +237,19 @@ export default function CreateMPINScreen({ navigation }: any) {
             <TouchableOpacity
               disabled={!isValid || loading}
               onPress={handleSaveMPIN}
-              className={`w-full py-4 rounded-xl mt-10 flex-row justify-center items-center ${
-                isValid && !loading ? "bg-indigo-600" : "bg-indigo-300"
+              className={`w-full py-4 rounded-xl mt-10 flex-row justify-center items-center border-2 ${
+                buttonFilled
+                  ? "bg-indigo-600 border-indigo-600"
+                  : "bg-indigo-100 border-indigo-200"
               }`}
+              accessibilityState={{ disabled: !isValid || loading }}
             >
-              {loading && <ActivityIndicator color="white" className="mr-2" />}
-              <Text className="text-center text-white font-semibold text-lg">
+              {loading && <ActivityIndicator color="#FFFFFF" className="mr-2" />}
+              <Text
+                className={`text-center font-semibold text-lg ${
+                  buttonFilled ? "text-white" : "text-indigo-800"
+                }`}
+              >
                 {loading ? "Creating MPIN..." : "Continue"}
               </Text>
             </TouchableOpacity>
@@ -251,8 +260,8 @@ export default function CreateMPINScreen({ navigation }: any) {
         <View className="absolute bottom-4 left-0 right-0 items-center">
           <Text className="text-center text-gray-600 text-sm px-8 w-[300px]">
             By using MyStayInn, you agree to the{" "}
-            <Text className="font-semibold">Terms</Text> and{" "}
-            <Text className="font-semibold">Privacy Policy</Text>.
+            <Text className="font-semibold text-gray-700">Terms</Text> and{" "}
+            <Text className="font-semibold text-gray-700">Privacy Policy</Text>.
           </Text>
         </View>
 

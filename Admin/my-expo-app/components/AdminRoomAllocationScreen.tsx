@@ -9,7 +9,6 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -38,6 +37,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
   const [showRentPeriodPicker, setShowRentPeriodPicker] = useState(false);
   const [splitPayment, setSplitPayment] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [screenNotice, setScreenNotice] = useState<{ text: string; variant: "error" | "warning" } | null>(null);
   const [availableRooms, setAvailableRooms] = useState<Room[]>([]);
   const [selectedBeds, setSelectedBeds] = useState<string[]>([]);
   const [occupiedBeds, setOccupiedBeds] = useState<string[]>([]);
@@ -72,7 +72,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
     roomPreference: customer?.roomPreference || "",
     comments: customer?.comments || "",
     selectedRoom: null as Room | null,
-    onlinePayment: "0",
+    onlinePayment: "",
     cashPayment: "",
   });
 
@@ -97,6 +97,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
     }
     try {
       setLoading(true);
+      setScreenNotice(null);
       const response = await propertyApi.get(`/api/properties/${encodeURIComponent(propertyId)}`);
       const prop = response.data?.property;
       if (!response.data?.success || !prop) {
@@ -121,7 +122,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
         roomType: getRoomTypeLabel(room.roomType),
         floor: room.floor || 0,
         capacity: room.capacity,
-        pricePerMonth: room.pricePerMonth?.toString?.() ?? "0",
+        pricePerMonth: room.pricePerMonth?.toString?.() ?? "",
         isAvailable: room.isAvailable !== false,
         beds: generateBedLabels(room.capacity),
       }));
@@ -154,17 +155,20 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
         setAllocationData((prev) => ({
           ...prev,
           selectedRoom: null,
-          onlinePayment: "0",
+          onlinePayment: "",
           cashPayment: "",
         }));
         setSelectedBeds([]);
         setSplitPayment(false);
       } else {
-        Alert.alert("No Rooms", "No rooms with available beds in this property.");
+        setScreenNotice({
+          text: "No rooms with available beds in this property.",
+          variant: "warning",
+        });
       }
     } catch (error) {
       console.error('Error fetching property data:', error);
-      Alert.alert("Error", "Failed to load property data. Please try again.");
+      setScreenNotice({ text: "Failed to load property data. Please try again.", variant: "error" });
       setAvailableRooms([]);
     } finally {
       setLoading(false);
@@ -183,7 +187,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
     let beds: string[] = [];
     if (Array.isArray(pa.bedNumbers)) beds = pa.bedNumbers.map((x: unknown) => String(x));
     else if (typeof pa.bedNumbers === "string" && pa.bedNumbers)
-      beds = pa.bedNumbers.split(",").map((s) => s.trim()).filter(Boolean);
+      beds = pa.bedNumbers.split(",").map((s: string) => s.trim()).filter(Boolean);
     setAllocationData((prev) => ({
       ...prev,
       selectedRoom: match,
@@ -313,9 +317,25 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
           <Ionicons name="arrow-back" size={28} color="#0F172A" />
         </TouchableOpacity>
         <Text className="ml-4 text-2xl font-black text-slate-900 tracking-tight">
-          Let's Allocate Room
+          Let&apos;s Allocate Room
         </Text>
       </View>
+
+      {screenNotice ? (
+        <View
+          className={`mx-5 mt-3 rounded-xl p-3 border ${
+            screenNotice.variant === "error"
+              ? "bg-rose-50 border-rose-200"
+              : "bg-amber-50 border-amber-200"
+          }`}
+        >
+          <Text
+            className={`text-sm ${screenNotice.variant === "error" ? "text-rose-800" : "text-amber-800"}`}
+          >
+            {screenNotice.text}
+          </Text>
+        </View>
+      ) : null}
 
       {loading ? (
         <View className="flex-1 items-center justify-center">
@@ -506,7 +526,7 @@ export default function AdminRoomAllocationScreen({ navigation, route }: any) {
             <View className="flex-1 mr-3">
               <Text className="text-[12px] font-black text-slate-900 uppercase tracking-[2px] mb-2">Rent Amount</Text>
               <TextInput
-                value={allocationData.selectedRoom?.pricePerMonth || "0"}
+                value={allocationData.selectedRoom?.pricePerMonth ?? ""}
                 onChangeText={updateRentAmount}
                 keyboardType="numeric"
                 placeholder="Enter rent amount"

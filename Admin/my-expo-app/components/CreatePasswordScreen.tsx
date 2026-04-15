@@ -27,6 +27,7 @@ export default function CreatePasswordScreen({ navigation }: any) {
   };
 
   const isValid = score === 3;
+  const buttonFilled = isValid;
 
   React.useEffect(() => {
   const percent = (score / 3) * 100;
@@ -71,9 +72,9 @@ const width = progress.interpolate({
 
           {/* PROGRESS BAR */}
           <View className="flex-row justify-center mt-3 mb-8">
-            <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-            <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-            <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+            <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+            <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+            <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
           </View>
 
           {/* PASSWORD LABEL */}
@@ -86,7 +87,9 @@ const width = progress.interpolate({
               onChangeText={setPassword}
               secureTextEntry={!show}
               placeholder="Enter password"
+              placeholderTextColor="#9CA3AF"
               className="flex-1 py-3"
+              style={{ color: "#000000" }}
             />
 
             <TouchableOpacity onPress={() => setShow(!show)} className="p-2">
@@ -159,11 +162,18 @@ const width = progress.interpolate({
           <TouchableOpacity
             disabled={!isValid}
             onPress={() => navigation.navigate("Success")}
-            className={`w-full py-4 rounded-xl mt-10 ${
-              isValid ? "bg-purple-500" : "bg-purple-300"
+            className={`w-full py-4 rounded-xl mt-10 border-2 ${
+              buttonFilled
+                ? "bg-indigo-600 border-indigo-600"
+                : "bg-indigo-100 border-indigo-200"
             }`}
+            accessibilityState={{ disabled: !isValid }}
           >
-            <Text className="text-center text-white font-semibold text-lg">
+            <Text
+              className={`text-center font-semibold text-lg ${
+                buttonFilled ? "text-white" : "text-indigo-800"
+              }`}
+            >
               Continue
             </Text>
           </TouchableOpacity>

@@ -1,6 +1,6 @@
 import './global.css';
 import React, { useEffect, useCallback, useState, useRef } from 'react';
-import { ScrollView, View, ActivityIndicator, TouchableOpacity, Text, RefreshControl } from 'react-native';
+import { ScrollView, View, ActivityIndicator, TouchableOpacity, Text, RefreshControl, BackHandler, Platform, ToastAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Provider, useDispatch, useSelector } from 'react-redux';
 import type { RootState } from './src/store/redux';
@@ -75,7 +75,6 @@ import MoveOutRequestScreen from './components/MoveOutRequestScreen';
 import MoveOutStatusScreen from './components/MoveOutStatusScreen';
 import GuestEnrollmentFormScreen from './components/GuestEnrollmentFormScreen';
 import { setupForegroundNotificationHandler, registerPushNotifications } from './utils/pushNotifications';
-import { bookingApi } from './utils/api';
 
 const Stack = createNativeStackNavigator();
 
@@ -86,8 +85,7 @@ function HomeScreen({ navigation }: any) {
   const currentStays = useSelector((state: RootState) => state.currentStay.stays);
   const currentStayLoading = useSelector((state: RootState) => state.currentStay.loading);
   const [refreshing, setRefreshing] = useState(false);
-  const lastAutoSignedBookingRef = useRef<string>("");
-  
+
   const getLocalYMD = () => {
     const d0 = new Date();
     const yyyy = d0.getFullYear();
@@ -138,56 +136,24 @@ function HomeScreen({ navigation }: any) {
     }, [])
   );
 
-  // Auto-submit enrollment form for current stay
+  // Android: double back to exit (avoids accidental quit when Home is the only screen after stack reset)
+  const lastBackPressRef = useRef(0);
   useFocusEffect(
     useCallback(() => {
-      let isActive = true;
-
-      const autoSignEnrollmentForm = async () => {
-        if (!currentStay) return;
-        try {
-          const res = await bookingApi.get('/api/bookings/guest-enrollment-form');
-          const form = res.data?.form;
-          if (!res.data?.success || !form) return;
-
-          const status = String(form.status || '').toLowerCase();
-          if (status === 'signed') return;
-
-          const bookingKey = String(form.bookingId || form.id || '');
-          if (bookingKey && bookingKey === lastAutoSignedBookingRef.current) return;
-
-          const parsedPrefilledData =
-            typeof form.prefilledData === 'string'
-              ? (() => {
-                  try {
-                    return JSON.parse(form.prefilledData);
-                  } catch {
-                    return null;
-                  }
-                })()
-              : form.prefilledData || null;
-
-          const candidateName = String(
-            parsedPrefilledData?.guestPersonal?.name || form.signatureName || 'Customer'
-          ).trim();
-          const signatureName = candidateName.length >= 2 ? candidateName : 'Customer';
-
-          await bookingApi.post('/api/bookings/guest-enrollment-form/sign', { signatureName });
-          if (isActive) {
-            lastAutoSignedBookingRef.current = bookingKey || 'signed';
-          }
-        } catch (e: any) {
-          if (e?.response?.status !== 404) {
-            console.warn('[Home] auto-sign enrollment failed:', e?.response?.data?.message || e?.message);
-          }
+      if (Platform.OS !== 'android') return undefined;
+      const onBack = () => {
+        const now = Date.now();
+        if (lastBackPressRef.current !== 0 && now - lastBackPressRef.current < 2200) {
+          lastBackPressRef.current = 0;
+          return false;
         }
+        lastBackPressRef.current = now;
+        ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT);
+        return true;
       };
-
-      autoSignEnrollmentForm();
-      return () => {
-        isActive = false;
-      };
-    }, [currentStay])
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+      return () => sub.remove();
+    }, [])
   );
 
   // Dynamic background based on theme

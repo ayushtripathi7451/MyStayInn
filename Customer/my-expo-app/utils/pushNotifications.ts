@@ -1,9 +1,15 @@
-import { Platform } from 'react-native';
+import {
+  Platform,
+  PermissionsAndroid,
+  Alert,
+  Linking,
+} from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import {
   getMessaging,
   getToken,
   requestPermission,
+  hasPermission,
   AuthorizationStatus,
   onMessage,
 } from '@react-native-firebase/messaging';
@@ -36,6 +42,43 @@ function isOwnerOnlyEnrollmentNotification(remoteMessage: any): boolean {
   return false;
 }
 
+/** Android 13+ runtime permission — required before notification banners work. */
+async function requestAndroidPostNotificationsIfNeeded(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const api = typeof Platform.Version === 'number' ? Platform.Version : 0;
+  if (api < 33) return true;
+  const perm =
+    (PermissionsAndroid.PERMISSIONS as { POST_NOTIFICATIONS?: string })
+      .POST_NOTIFICATIONS ?? 'android.permission.POST_NOTIFICATIONS';
+  try {
+    const r = await PermissionsAndroid.request(
+      perm as 'android.permission.POST_NOTIFICATIONS'
+    );
+    return r === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
+
+function isMessagingPermissionGranted(status: number): boolean {
+  return (
+    status === AuthorizationStatus.AUTHORIZED ||
+    status === AuthorizationStatus.PROVISIONAL
+  );
+}
+
+/** One prompt per JS session so we do not spam on every cold start. */
+let notificationSettingsPromptShown = false;
+
+function maybePromptOpenNotificationSettings(body: string): void {
+  if (notificationSettingsPromptShown) return;
+  notificationSettingsPromptShown = true;
+  Alert.alert('Turn on notifications', body, [
+    { text: 'Not now', style: 'cancel' },
+    { text: 'Open settings', onPress: () => void Linking.openSettings() },
+  ]);
+}
+
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
   if (isOwnerOnlyEnrollmentNotification(remoteMessage)) {
     return;
@@ -55,19 +98,27 @@ messaging().setBackgroundMessageHandler(async (remoteMessage) => {
 export async function registerPushNotifications(): Promise<void> {
   try {
     console.log('[PushNotifications] Starting registration...');
-    
+
+    const androidPostOk = await requestAndroidPostNotificationsIfNeeded();
+
     const messagingInstance = getMessaging();
-    console.log('[PushNotifications] Requesting permission...');
-    
-    const authStatus = await requestPermission(messagingInstance);
-    console.log('[PushNotifications] Permission status:', authStatus);
-    
-    const enabled =
-      authStatus === AuthorizationStatus.AUTHORIZED ||
-      authStatus === AuthorizationStatus.PROVISIONAL;
+    let authStatus = await hasPermission(messagingInstance);
+    console.log('[PushNotifications] Existing permission status:', authStatus);
+
+    if (!isMessagingPermissionGranted(authStatus)) {
+      console.log('[PushNotifications] Requesting permission...');
+      authStatus = await requestPermission(messagingInstance);
+      console.log('[PushNotifications] Permission status after request:', authStatus);
+    }
+
+    const messagingOk = isMessagingPermissionGranted(authStatus);
+    const enabled = messagingOk && androidPostOk;
 
     if (!enabled) {
       console.log('[PushNotifications] Permission not granted, skipping registration');
+      maybePromptOpenNotificationSettings(
+        'To get updates about your stay, tickets, and announcements, allow notifications. You can turn them on in Settings.'
+      );
       return;
     }
 

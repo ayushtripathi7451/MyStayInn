@@ -17,9 +17,10 @@ export interface Property {
 interface PropertyContextType {
   properties: Property[];
   currentProperty: Property | null;
-  setCurrentProperty: (property: Property) => void;
+  setCurrentProperty: (property: Property) => Promise<void>;
   loading: boolean;
-  refresh: () => Promise<void>;
+  /** Re-fetch properties. Pass `selectPropertyId` (e.g. after creating a property) to select that listing. */
+  refresh: (options?: { selectPropertyId?: string }) => Promise<void>;
 }
 
 const PropertyContext = createContext<PropertyContextType | undefined>(undefined);
@@ -31,7 +32,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
   const [currentProperty, setCurrentPropertyState] = useState<Property | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProperties = async () => {
+  const fetchProperties = async (options?: { selectPropertyId?: string }) => {
     try {
       setLoading(true);
       const res = await propertyApi.get('/api/properties/list');
@@ -49,18 +50,34 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
         }));
         setProperties(fetched);
 
-        // Restore previously selected property or default to first
-        const saved = await AsyncStorage.getItem(CURRENT_PROPERTY_KEY);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            const match = fetched.find(p => p.id === parsed.id);
-            setCurrentPropertyState(match || fetched[0] || null);
-          } catch {
-            setCurrentPropertyState(fetched[0] || null);
-          }
+        let next: Property | null = null;
+        const selectId = options?.selectPropertyId?.trim();
+        if (selectId && fetched.length > 0) {
+          next =
+            fetched.find(
+              (p) => p.id === selectId || p.uniqueId === selectId || String(p.uniqueId) === selectId
+            ) || fetched[0] || null;
         } else {
-          setCurrentPropertyState(fetched[0] || null);
+          const saved = await AsyncStorage.getItem(CURRENT_PROPERTY_KEY);
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              const match = fetched.find((p) => p.id === parsed.id);
+              next = match || fetched[0] || null;
+            } catch {
+              next = fetched[0] || null;
+            }
+          } else {
+            next = fetched[0] || null;
+          }
+        }
+        setCurrentPropertyState(next);
+        if (next) {
+          try {
+            await AsyncStorage.setItem(CURRENT_PROPERTY_KEY, JSON.stringify(next));
+          } catch {
+            // ignore
+          }
         }
       }
     } catch (e) {

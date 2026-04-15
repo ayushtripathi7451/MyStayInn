@@ -30,6 +30,7 @@ export default function EmailScreen({ navigation }: any) {
   };
 
   const isValid = email.trim().length > 0;
+  const buttonFilled = isValid;
 
   return (
     <SafeAreaView className="flex-1 bg-white px-6">
@@ -59,7 +60,7 @@ export default function EmailScreen({ navigation }: any) {
 
           {/* PROGRESS BAR */}
           <View className="flex-row justify-center mt-3 mb-10">
-            <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+            <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
             <View className="w-6 h-1.5 bg-gray-300 rounded-full mx-1" />
             <View className="w-6 h-1.5 bg-gray-300 rounded-full mx-1" />
           </View>
@@ -69,6 +70,7 @@ export default function EmailScreen({ navigation }: any) {
 
           <TextInput
             placeholder="example@example"
+            placeholderTextColor="#9CA3AF"
             value={email}
             onChangeText={(t) => {
               setEmail(t);
@@ -77,6 +79,7 @@ export default function EmailScreen({ navigation }: any) {
             className="border border-gray-300 rounded-lg px-4 py-3"
             keyboardType="email-address"
             autoCapitalize="none"
+            style={{ color: "#000000" }}
           />
 
           {/* ERROR MESSAGE */}
@@ -88,11 +91,18 @@ export default function EmailScreen({ navigation }: any) {
           <TouchableOpacity
             disabled={!isValid}
             onPress={onNext}
-            className={`w-full py-4 rounded-xl mt-8 ${
-              isValid ? "bg-purple-500" : "bg-purple-300"
+            className={`w-full py-4 rounded-xl mt-8 border-2 ${
+              buttonFilled
+                ? "bg-indigo-600 border-indigo-600"
+                : "bg-indigo-100 border-indigo-200"
             }`}
+            accessibilityState={{ disabled: !isValid }}
           >
-            <Text className="text-center text-white font-semibold text-lg">
+            <Text
+              className={`text-center font-semibold text-lg ${
+                buttonFilled ? "text-white" : "text-indigo-800"
+              }`}
+            >
               Next
             </Text>
           </TouchableOpacity>

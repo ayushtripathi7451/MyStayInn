@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StatusBar,
   TextInput,
-  Alert,
   Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -47,6 +46,8 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [screenBanner, setScreenBanner] = useState<{ type: "error" | "info"; text: string } | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   // Handle pre-selected tenant from route params
   useEffect(() => {
@@ -71,8 +72,9 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
   }, [route?.params]);
 
   const searchTenants = async () => {
+    setScreenBanner(null);
     if (!searchQuery.trim()) {
-      Alert.alert('Error', 'Please enter a search term');
+      setScreenBanner({ type: "error", text: "Please enter a search term." });
       return;
     }
 
@@ -85,13 +87,18 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
 
       if (response.success && response.data) {
         setSearchResults(response.data);
+        if (!response.data.length) {
+          setScreenBanner({ type: "info", text: "No tenants found matching your search." });
+        } else {
+          setScreenBanner(null);
+        }
       } else {
         setSearchResults([]);
-        Alert.alert('No Results', 'No tenants found matching your search');
+        setScreenBanner({ type: "info", text: "No tenants found matching your search." });
       }
     } catch (error) {
       console.error('Error searching tenants:', error);
-      Alert.alert('Error', 'Failed to search tenants');
+      setScreenBanner({ type: "error", text: "Failed to search tenants." });
     } finally {
       setSearching(false);
     }
@@ -110,50 +117,32 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
     }
   };
 
-  const validateMoveOut = () => {
-    if (!selectedTenant) {
-      Alert.alert('Error', 'Please select a tenant');
-      return false;
-    }
-
-    if (!reason.trim()) {
-      Alert.alert('Error', 'Please provide a reason for move-out');
-      return false;
-    }
-
+  const validateMoveOut = (): string | null => {
+    if (!selectedTenant) return "Please select a tenant.";
+    if (!reason.trim()) return "Please provide a reason for move-out.";
     const today = new Date();
-    if (moveOutDate < today) {
-      Alert.alert('Error', 'Move-out date cannot be in the past');
-      return false;
-    }
-
-    if (!securityDepositReturned.trim()) {
-      Alert.alert('Error', 'Please enter security deposit amount returned');
-      return false;
-    }
-
+    today.setHours(0, 0, 0, 0);
+    const mov = new Date(moveOutDate);
+    mov.setHours(0, 0, 0, 0);
+    if (mov < today) return "Move-out date cannot be in the past.";
+    if (!securityDepositReturned.trim()) return "Please enter security deposit amount returned.";
     const returned = parseFloat(securityDepositReturned);
-    if (isNaN(returned) || returned < 0) {
-      Alert.alert('Error', 'Please enter a valid security deposit amount');
-      return false;
-    }
-
-    if (returned > selectedTenant.securityDeposit) {
-      Alert.alert('Error', 'Returned amount cannot exceed security deposit');
-      return false;
-    }
-
-    if (!adminComments.trim()) {
-      Alert.alert('Error', 'Please add admin comments');
-      return false;
-    }
-
-    return true;
+    if (isNaN(returned) || returned < 0) return "Please enter a valid security deposit amount.";
+    if (returned > selectedTenant.securityDeposit) return "Returned amount cannot exceed security deposit.";
+    if (!adminComments.trim()) return "Please add admin comments.";
+    return null;
   };
 
   const initiateMoveOut = async () => {
-    if (!validateMoveOut() || !selectedTenant) return;
+    const err = validateMoveOut();
+    if (err) {
+      setScreenBanner({ type: "error", text: err });
+      setShowConfirmModal(false);
+      return;
+    }
+    if (!selectedTenant) return;
 
+    setConfirmError(null);
     setLoading(true);
     try {
       const response = await MoveOutService.initiateMoveOut({
@@ -168,20 +157,16 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
       });
 
       if (response.success) {
-        Alert.alert(
-          'Success',
-          `Move-out approved successfully!\n\nSecurity Deposit Returned: ₹${parseFloat(securityDepositReturned).toLocaleString()}\n\nThe tenant will be marked as inactive and bed will be empty after ${formatDate(moveOutDate)}.`,
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        setShowConfirmModal(false);
+        setTimeout(() => navigation.goBack(), 0);
       } else {
-        Alert.alert('Error', response.error || 'Failed to initiate move-out');
+        setConfirmError(response.error || "Failed to initiate move-out.");
       }
     } catch (error) {
       console.error('Error initiating move-out:', error);
-      Alert.alert('Error', 'Failed to initiate move-out process');
+      setConfirmError("Failed to initiate move-out process.");
     } finally {
       setLoading(false);
-      setShowConfirmModal(false);
     }
   };
 
@@ -215,6 +200,24 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
+        {screenBanner ? (
+          <View
+            className={`mt-4 p-4 rounded-xl border ${
+              screenBanner.type === "error"
+                ? "bg-red-50 border-red-100"
+                : "bg-slate-50 border-slate-200"
+            }`}
+          >
+            <Text
+              className={`text-sm leading-5 ${
+                screenBanner.type === "error" ? "text-red-700" : "text-slate-700"
+              }`}
+            >
+              {screenBanner.text}
+            </Text>
+          </View>
+        ) : null}
+
         {/* Search Section - Only show if no tenant pre-selected */}
         {!selectedTenant && (
           <View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
@@ -408,7 +411,16 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
             {/* Approve Move-Out Button */}
             <TouchableOpacity
               className="bg-[#1E33FF] py-4 rounded-xl"
-              onPress={() => setShowConfirmModal(true)}
+              onPress={() => {
+                setScreenBanner(null);
+                const v = validateMoveOut();
+                if (v) {
+                  setScreenBanner({ type: "error", text: v });
+                  return;
+                }
+                setConfirmError(null);
+                setShowConfirmModal(true);
+              }}
               disabled={!selectedTenant || !reason || !securityDepositReturned || !adminComments}
             >
               <Text className="text-center font-bold text-white text-lg">
@@ -476,10 +488,17 @@ export default function InitiateMoveOutScreen({ navigation, route }: InitiateMov
               This will immediately approve the move-out. The tenant will be marked as inactive and the bed will be empty after the move-out date.
             </Text>
 
+            {confirmError ? (
+              <Text className="text-red-600 text-sm mb-3">{confirmError}</Text>
+            ) : null}
+
             <View className="flex-row space-x-3">
               <TouchableOpacity
                 className="flex-1 bg-slate-100 py-4 rounded-xl"
-                onPress={() => setShowConfirmModal(false)}
+                onPress={() => {
+                  setConfirmError(null);
+                  setShowConfirmModal(false);
+                }}
               >
                 <Text className="text-center font-bold text-slate-700">Cancel</Text>
               </TouchableOpacity>

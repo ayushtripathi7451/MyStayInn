@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import SuccessIcon from "./SuccessIcon";
+import SuccessBrandMark from "./SuccessBrandMark";
 
 export default function SuccessScreen({ navigation, route }: any) {
   const uniqueId = route?.params?.uniqueId || "—";
@@ -14,9 +14,9 @@ export default function SuccessScreen({ navigation, route }: any) {
         {/* ✅ TOP CONTENT */}
         <View className="mt-20 px-4 items-center">
 
-          {/* SVG ICON */}
+          {/* Splash-style logo on blue gradient */}
           <View className="mb-10">
-            <SuccessIcon />
+            <SuccessBrandMark />
           </View>
 
           {/* TITLE */}
@@ -30,17 +30,14 @@ export default function SuccessScreen({ navigation, route }: any) {
             <Text className="font-bold text-gray-700">{uniqueId}</Text>
           </Text>
 
-          {/* ✅✅ FULL WIDTH BUTTON FIX */}
-          <View className="w-full mt-10">
-            <TouchableOpacity
-              onPress={() => navigation.navigate("CompleteProfile")}
-              className="bg-indigo-600 py-4 rounded-xl items-center w-full"
-            >
-              <Text className="text-white font-semibold text-md">
-                Continue
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={() => navigation.replace("CompleteProfile")}
+            className="bg-indigo-600 py-4 rounded-xl items-center w-80 mt-10"
+          >
+            <Text className="text-white font-semibold text-md">
+              Continue
+            </Text>
+          </TouchableOpacity>
 
         </View>
 

@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
   StyleSheet,
   Linking,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
@@ -78,8 +77,15 @@ export default function ProfileSetupScreen({ navigation, route }: any) {
   const [loading, setLoading] = useState({ states: false, cities: false });
 
   const [errors, setErrors] = useState<any>({});
+  const [locationHint, setLocationHint] = useState<string | null>(null);
   const [isStateModalVisible, setStateModalVisible] = useState(false);
   const [isCityModalVisible, setCityModalVisible] = useState(false);
+
+  useEffect(() => {
+    if (!locationHint) return;
+    const t = setTimeout(() => setLocationHint(null), 6000);
+    return () => clearTimeout(t);
+  }, [locationHint]);
 
   /* -------------------- GEOCODE (search address → map zooms to location) -------------------- */
   const searchAddressOnMap = async () => {
@@ -131,11 +137,12 @@ export default function ProfileSetupScreen({ navigation, route }: any) {
   };
 
   const useCurrentLocation = async () => {
+    setLocationHint(null);
     setGettingCurrentLocation(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert("Permission needed", "Location permission is required to use your current position.");
+        setLocationHint("Location permission is required to use your current position.");
         return;
       }
       const position = await Location.getCurrentPositionAsync({
@@ -145,7 +152,7 @@ export default function ProfileSetupScreen({ navigation, route }: any) {
       setPinAt(latitude, longitude);
     } catch (e) {
       console.warn("Current location error:", e);
-      Alert.alert("Location unavailable", "Could not get your location. Try searching by address instead.");
+      setLocationHint("Could not get your location. Try searching by address instead.");
     } finally {
       setGettingCurrentLocation(false);
     }
@@ -306,6 +313,11 @@ export default function ProfileSetupScreen({ navigation, route }: any) {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ProfileHeader activeTab="Property" />
+      {locationHint ? (
+        <View className="mx-6 mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+          <Text className="text-amber-800 text-sm">{locationHint}</Text>
+        </View>
+      ) : null}
       {renderStatePicker()}
       {renderCityPicker()}
 

@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StatusBar,
   TextInput,
-  Alert,
   Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -28,8 +27,10 @@ export default function ProcessMoveOutScreen(props: any) {
   const [deductionAmount, setDeductionAmount] = useState("");
   const [deductionDescription, setDeductionDescription] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [formNotice, setFormNotice] = useState<{ text: string; variant: "error" | "success" } | null>(null);
 
   const loadMoveOutData = useCallback(async () => {
     if (!requestId) {
@@ -259,13 +260,13 @@ export default function ProcessMoveOutScreen(props: any) {
 
   const addDeduction = () => {
     if (!deductionType || !deductionAmount || !deductionDescription) {
-      Alert.alert('Error', 'Please fill all deduction fields');
+      setFormNotice({ variant: "error", text: "Please fill all deduction fields" });
       return;
     }
 
     const amount = parseFloat(deductionAmount);
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+      setFormNotice({ variant: "error", text: "Please enter a valid amount" });
       return;
     }
 
@@ -289,18 +290,18 @@ export default function ProcessMoveOutScreen(props: any) {
 
   const validateForm = () => {
     if (!securityDepositReturned) {
-      Alert.alert('Error', 'Please enter security deposit amount returned');
+      setFormNotice({ variant: "error", text: "Please enter security deposit amount returned" });
       return false;
     }
 
     const returned = parseFloat(securityDepositReturned);
     if (isNaN(returned) || returned < 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+      setFormNotice({ variant: "error", text: "Please enter a valid amount" });
       return false;
     }
 
     if (returned > moveOutData.securityDeposit) {
-      Alert.alert('Error', 'Returned amount cannot exceed security deposit');
+      setFormNotice({ variant: "error", text: "Returned amount cannot exceed security deposit" });
       return false;
     }
 
@@ -312,9 +313,14 @@ export default function ProcessMoveOutScreen(props: any) {
     setShowConfirmModal(true);
   };
 
+  const handleRejectMoveOut = () => {
+    setShowRejectModal(true);
+  };
+
   const confirmMoveOut = async () => {
     if (!requestId || !moveOutData) return;
     setLoading(true);
+    setFormNotice(null);
     try {
       const res = await MoveOutService.approveRequest(requestId, {
         currentDue: parseFloat(currentDue || "0") || 0,
@@ -357,16 +363,39 @@ export default function ProcessMoveOutScreen(props: any) {
           moveOutRequestId: requestId,
           status: "inactive",
         });
-        Alert.alert(
-          "Success",
-          "Move-out processed successfully. Tenant marked as moved out and notification sent.",
-          [{ text: "OK", onPress: () => navigation.goBack() }]
-        );
+        setFormNotice({
+          variant: "success",
+          text: "Move-out processed. Tenant marked as moved out and notification sent.",
+        });
+        setTimeout(() => navigation.goBack(), 900);
       } else {
-        Alert.alert("Error", res.error || "Failed to complete move-out");
+        setFormNotice({ variant: "error", text: res.error || "Failed to complete move-out" });
       }
     } catch {
-      Alert.alert("Error", "Failed to complete move-out");
+      setFormNotice({ variant: "error", text: "Failed to complete move-out" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmRejectMoveOut = async () => {
+    if (!requestId || !moveOutData) return;
+    setLoading(true);
+    setFormNotice(null);
+    try {
+      const res = await MoveOutService.rejectRequest(requestId);
+      setShowRejectModal(false);
+      if (res.success) {
+        setFormNotice({
+          variant: "success",
+          text: `Move out request will be rejected. ${moveOutData.customerName} will continue his/her stay.`,
+        });
+        setTimeout(() => navigation.goBack(), 900);
+      } else {
+        setFormNotice({ variant: "error", text: res.error || "Failed to reject move-out request" });
+      }
+    } catch {
+      setFormNotice({ variant: "error", text: "Failed to reject move-out request" });
     } finally {
       setLoading(false);
     }
@@ -405,6 +434,22 @@ export default function ProcessMoveOutScreen(props: any) {
           Process Move-Out
         </Text>
       </View>
+
+      {formNotice ? (
+        <View
+          className={`mx-5 mt-3 rounded-xl p-3 border ${
+            formNotice.variant === "error"
+              ? "bg-rose-50 border-rose-200"
+              : "bg-emerald-50 border-emerald-200"
+          }`}
+        >
+          <Text
+            className={`text-sm ${formNotice.variant === "error" ? "text-rose-800" : "text-emerald-800"}`}
+          >
+            {formNotice.text}
+          </Text>
+        </View>
+      ) : null}
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
         {/* Move-Out Alert */}
@@ -493,7 +538,7 @@ export default function ProcessMoveOutScreen(props: any) {
                 />
               </View>
               <Text className="text-slate-400 text-xs mt-2">
-                Enter total unpaid rent amount (from tenant's current stay card)
+                Enter total unpaid rent amount (from tenant&apos;s current stay card)
               </Text>
             </View>
 
@@ -641,16 +686,23 @@ export default function ProcessMoveOutScreen(props: any) {
           })()}
         </View>
 
-        {/* Confirm Button */}
-        <TouchableOpacity
-          className="bg-[#1E33FF] py-4 rounded-xl mt-6"
-          onPress={handleConfirmMoveOut}
-          disabled={!securityDepositReturned}
-        >
-          <Text className="text-center font-bold text-white text-lg">
-            Confirm Move-Out & Update Status
-          </Text>
-        </TouchableOpacity>
+        {/* Action Buttons */}
+        <View className="flex-row mt-6">
+          <TouchableOpacity
+            className="flex-1 bg-red-500 py-4 rounded-xl mr-2"
+            onPress={handleRejectMoveOut}
+            disabled={loading}
+          >
+            <Text className="text-center font-bold text-white text-lg">Reject</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            className="flex-1 bg-[#1E33FF] py-4 rounded-xl ml-2"
+            onPress={handleConfirmMoveOut}
+            disabled={!securityDepositReturned || loading}
+          >
+            <Text className="text-center font-bold text-white text-lg">Approve</Text>
+          </TouchableOpacity>
+        </View>
 
         <View className="h-20" />
       </ScrollView>
@@ -783,6 +835,40 @@ export default function ProcessMoveOutScreen(props: any) {
               >
                 <Text className="text-center font-bold text-white">
                   {loading ? 'Processing...' : 'Confirm'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Reject Confirmation Modal */}
+      <Modal visible={showRejectModal} transparent animationType="slide">
+        <View className="flex-1 bg-black/50 justify-end">
+          <View className="bg-white rounded-t-[24px] p-6">
+            <Text className="text-xl font-black text-slate-900 mb-4">
+              Confirm Rejection
+            </Text>
+
+            <Text className="text-slate-600 text-sm mb-6">
+              Move out request will be rejected. {moveOutData.customerName} will continue his/her stay.
+            </Text>
+
+            <View className="flex-row space-x-3">
+              <TouchableOpacity
+                className="flex-1 bg-slate-100 py-4 rounded-xl"
+                onPress={() => setShowRejectModal(false)}
+                disabled={loading}
+              >
+                <Text className="text-center font-bold text-slate-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 bg-red-500 py-4 rounded-xl"
+                onPress={confirmRejectMoveOut}
+                disabled={loading}
+              >
+                <Text className="text-center font-bold text-white">
+                  {loading ? "Processing..." : "Confirm"}
                 </Text>
               </TouchableOpacity>
             </View>

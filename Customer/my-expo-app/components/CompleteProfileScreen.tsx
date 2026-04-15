@@ -9,13 +9,13 @@ import {
   Platform,
   KeyboardAvoidingView,
   Image,
-  Alert,
   ActivityIndicator,
   Linking,
   Modal,
   FlatList,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -33,6 +33,8 @@ import { isCustomerProfileCompleteForHome } from "../utils/profileCompletion";
 import { AadhaarKycCheckoutModal } from "./AadhaarKycCheckoutModal";
 import ScrollableDatePicker from "./ScrollableDatePicker";
 
+WebBrowser.maybeCompleteAuthSession();
+
 const isAadhaarVerificationExpired = (expiresAt?: string | null) => {
   if (!expiresAt) return true;
   const timestamp = new Date(expiresAt).getTime();
@@ -45,6 +47,96 @@ const formatExpiryDate = (expiresAt?: string | null) => {
   if (Number.isNaN(d.getTime())) return "Not available";
   return d.toLocaleDateString();
 };
+
+const norm = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/** Cashfree / DigiLocker may return M, F, MALE, FEMALE, etc. UI uses "Male" / "Female". */
+const normalizeAadhaarGender = (raw: unknown): string => {
+  const x = String(raw ?? "")
+    .trim()
+    .toUpperCase();
+  if (x === "M" || x === "MALE" || x === "1") return "Male";
+  if (x === "F" || x === "FEMALE" || x === "2") return "Female";
+  return "";
+};
+
+/** Same calendar date regardless of formatting (YYYY-MM-DD vs DD/MM/YYYY, etc.). */
+const parseDateOnly = (value: string): string | null => {
+  const v = (value || "").trim();
+  if (!v) return null;
+
+  const nums = v.match(/\d+/g);
+  if (!nums || nums.length < 3) {
+    const dIso = new Date(v);
+    if (!Number.isNaN(dIso.getTime())) {
+      return dIso.toISOString().slice(0, 10);
+    }
+    return null;
+  }
+
+  let year: string | undefined;
+  const rest: string[] = [];
+  for (const n of nums) {
+    if (!year && n.length === 4) {
+      year = n;
+    } else {
+      rest.push(n);
+    }
+  }
+  if (!year || rest.length < 2) {
+    const dIso = new Date(v);
+    if (!Number.isNaN(dIso.getTime())) {
+      return dIso.toISOString().slice(0, 10);
+    }
+    return null;
+  }
+
+  const [a, b] = rest;
+  const n1 = parseInt(a, 10);
+  const n2 = parseInt(b, 10);
+  let day: number;
+  let month: number;
+  if (n1 >= 1 && n1 <= 12 && !(n2 >= 1 && n2 <= 12)) {
+    month = n1;
+    day = n2;
+  } else if (n2 >= 1 && n2 <= 12 && !(n1 >= 1 && n1 <= 12)) {
+    month = n2;
+    day = n1;
+  } else {
+    day = n1;
+    month = n2;
+  }
+
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  const isoCandidate = `${year}-${mm}-${dd}`;
+  const d = new Date(isoCandidate);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toISOString().slice(0, 10);
+  }
+  return null;
+};
+
+function parseQueryString(url: string): Record<string, string> {
+  const q = url.split("?")[1];
+  if (!q) return {};
+  const out: Record<string, string> = {};
+  for (const pair of q.split("&")) {
+    const eq = pair.indexOf("=");
+    const k = decodeURIComponent(eq >= 0 ? pair.slice(0, eq) : pair).trim();
+    const v = decodeURIComponent(eq >= 0 ? pair.slice(eq + 1) : "").trim();
+    if (k) out[k] = v;
+  }
+  return out;
+}
+
+function mergeAadhaarStatusRow(data: any) {
+  return {
+    ...(data?.aadhaarDetails || {}),
+    validUntil: data?.validUntil || data?.aadhaarDetails?.validUntil,
+    verifiedAt: data?.verifiedAt || data?.aadhaarDetails?.verifiedAt,
+  };
+}
 
 // Using country-state-city library for state and city data
 
@@ -145,36 +237,37 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------------- DEEP LINK LISTENER FOR DIGILOCKER CALLBACK ---------------- */
+  /* ---------------- DEEP LINK LISTENER (Cashfree → app: kyc-success or kyc-status?status=success) ---------------- */
   useEffect(() => {
-    // Listen for deep link from DigiLocker callback
     const subscription = Linking.addEventListener("url", async ({ url }) => {
       console.log("Deep link received:", url);
-      
-      if (url.includes("kyc-success")) {
-        // Check verification status from backend
+      const lower = url.toLowerCase();
+      const qp = parseQueryString(url);
+      const statusOk = String(qp.status || "")
+        .trim()
+        .toLowerCase() === "success";
+      const isKycSuccessReturn =
+        lower.includes("kyc-success") || (lower.includes("kyc-status") && statusOk);
+
+      if (isKycSuccessReturn) {
         try {
           const response = await api.get("/api/kyc/digilocker/status");
           if (response.data.verified) {
+            const details = mergeAadhaarStatusRow(response.data);
             setAadhaarVerified(true);
-            // Merge top-level validUntil and verifiedAt into aadhaarDetails
-            const details = {
-              ...(response.data.aadhaarDetails || {}),
-              validUntil: response.data.validUntil || response.data.aadhaarDetails?.validUntil,
-              verifiedAt: response.data.verifiedAt || response.data.aadhaarDetails?.verifiedAt,
-            };
             setAadhaarDetails(details);
             setFullKycResponse(response.data);
-            Alert.alert("Success", "Aadhaar verified successfully via DigiLocker!");
           } else {
-            Alert.alert("Verification Pending", "Please wait while we verify your Aadhaar.");
+            void pollKycStatus();
           }
         } catch (error) {
           console.error("Status check error:", error);
-          Alert.alert("Error", "Failed to check verification status");
         }
-      } else if (url.includes("kyc-failed")) {
-        Alert.alert("Verification Failed", "Aadhaar verification failed. Please try again.");
+        return;
+      }
+
+      if (lower.includes("kyc-failed") || String(qp.status || "").toLowerCase() === "failed") {
+        console.warn("KYC return URL indicated failure");
       }
     });
 
@@ -228,7 +321,9 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
         // Check if profile is already completed (incl. documents — avoid Home when setup unfinished)
         const extras = user.profileExtras || {};
         if (isCustomerProfileCompleteForHome(extras)) {
-          navigation.replace("Home");
+          navigation.dispatch(
+            CommonActions.reset({ index: 0, routes: [{ name: "Home" }] })
+          );
           return;
         }
 
@@ -296,16 +391,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
       
       // Handle unauthorized - redirect to login
       if (error.response?.status === 401) {
-        Alert.alert(
-          "Session Expired",
-          "Please login again to continue.",
-          [
-            {
-              text: "OK",
-              onPress: () => navigation.replace("BasicInfo"),
-            },
-          ]
-        );
+        navigation.replace("BasicInfo");
       }
     } finally {
       setLoadingProfile(false);
@@ -316,15 +402,10 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
     try {
       const response = await api.get("/api/kyc/digilocker/status");
       console.log("KYC Status Response:", JSON.stringify(response.data, null, 2));
-      
+
       if (response.data.verified) {
         setAadhaarVerified(true);
-        // Merge top-level validUntil and verifiedAt into aadhaarDetails
-        const details = {
-          ...(response.data.aadhaarDetails || {}),
-          validUntil: response.data.validUntil || response.data.aadhaarDetails?.validUntil,
-          verifiedAt: response.data.verifiedAt || response.data.aadhaarDetails?.verifiedAt,
-        };
+        const details = mergeAadhaarStatusRow(response.data);
         setAadhaarDetails(details);
         setFullKycResponse(response.data);
       }
@@ -368,11 +449,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
 
       if (!response.data.success) {
         if (response.data.shouldCheckStatus) {
-          Alert.alert(
-            "Verification In Progress",
-            "A verification is already in progress. Checking status...",
-            [{ text: "OK", onPress: () => checkKycStatus() }]
-          );
+          void checkKycStatus();
           return;
         }
         // Backend says Aadhaar is already verified – fetch status to get stored details
@@ -392,17 +469,16 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
             setAadhaarVerified(true);
             setFullKycResponse(statusRes?.data || { success: true, verified: true, message: "Aadhaar already verified" });
           }
-          Alert.alert("Already verified", "Your Aadhaar is already verified. Details are shown below.");
           return;
         }
-        Alert.alert("Error", response.data.message || "Failed to start verification");
+        console.warn("KYC start failed:", response.data.message || "Failed to start verification");
         return;
       }
 
       const consentUrl = response.data.consentUrl;
 
       if (!consentUrl) {
-        Alert.alert("Error", "Verification URL not received");
+        console.warn("KYC: verification URL not received");
         return;
       }
 
@@ -416,9 +492,9 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
 
       console.log("WebBrowser result:", result);
 
-      // Start polling after browser closes
-      if (result.type === "success" || result.type === "cancel") {
-        pollKycStatus();
+      // After Cashfree / in-app browser returns, load KYC and compare with name / DOB / gender on this screen.
+      if (result.type === "success" || result.type === "cancel" || result.type === "dismiss") {
+        void pollKycStatus();
       }
     } catch (error: any) {
       console.error("KYC ERROR:", error?.response?.data || error.message);
@@ -440,58 +516,44 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           setAadhaarVerified(true);
           setFullKycResponse(statusRes?.data || { success: true, verified: true, message: "Aadhaar already verified" });
         }
-        Alert.alert("Already verified", "Your Aadhaar is already verified. Details are shown below.");
         return;
       }
       if (msg.includes("ack id")) {
-        Alert.alert(
-          "Link Already Used",
-          "This verification link was already used. Please click 'Verify Aadhaar' again to get a new link.",
-          [{ text: "OK" }]
-        );
+        console.warn("KYC: link already used — start verification again");
       } else {
-        Alert.alert("Error", msg || "Failed to start verification");
+        console.warn("KYC error:", msg || "Failed to start verification");
       }
     } finally {
       setVerifyingAadhaar(false);
     }
   };
 
-  /* ---------------- POLL KYC STATUS ---------------- */
-  const pollKycStatus = async () => {
+  /* ---------------- POLL KYC STATUS (after Cashfree redirect) ---------------- */
+  async function pollKycStatus() {
     let attempts = 0;
-    const maxAttempts = 20; // Poll for ~2 minutes (20 * 6 seconds)
-    
-    const checkStatus = async () => {
+    const maxAttempts = 20;
+
+    const checkStatus = async (): Promise<boolean> => {
       try {
         const response = await api.get("/api/kyc/digilocker/status");
         console.log("Poll Status Response:", JSON.stringify(response.data, null, 2));
-        
+
         if (response.data.verified) {
+          const details = mergeAadhaarStatusRow(response.data);
           setAadhaarVerified(true);
-          // Merge top-level validUntil and verifiedAt into aadhaarDetails
-          const details = {
-            ...(response.data.aadhaarDetails || {}),
-            validUntil: response.data.validUntil || response.data.aadhaarDetails?.validUntil,
-            verifiedAt: response.data.verifiedAt || response.data.aadhaarDetails?.verifiedAt,
-          };
           setAadhaarDetails(details);
           setFullKycResponse(response.data);
-          Alert.alert("Success", "Aadhaar verified successfully! Check the response below and compare with your entered details.");
           return true;
         }
-        
-        // Handle different status codes from Cashfree
+
         if (response.data.status === "CONSENT_DENIED") {
-          Alert.alert("Consent Denied", "You denied document access. Please try again if you want to verify.");
           return true;
         }
-        
+
         if (response.data.status === "EXPIRED") {
-          Alert.alert("Expired", "Verification link expired. Please start verification again.");
           return true;
         }
-        
+
         return false;
       } catch (error) {
         console.error("Status check error:", error);
@@ -499,28 +561,25 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
       }
     };
 
+    const doneImmediately = await checkStatus();
+    if (doneImmediately) return;
+
     const interval = setInterval(async () => {
-      attempts++;
-      
+      attempts += 1;
       const completed = await checkStatus();
-      
       if (completed || attempts >= maxAttempts) {
         clearInterval(interval);
         if (!completed && attempts >= maxAttempts) {
-          Alert.alert(
-            "Verification Pending",
-            "Verification is taking longer than expected. Please check back later."
-          );
+          console.warn("KYC status poll: max attempts reached");
         }
       }
-    }, 6000); // Check every 6 seconds
-  };
+    }, 6000);
+  }
 
   /* ---------------- AADHAAR MATCH (tick marks) ---------------- */
-  const norm = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
   const aadhaarName = (aadhaarDetails?.name || "").trim();
   const aadhaarDob = (aadhaarDetails?.dob || "").trim();
-  const aadhaarGender = aadhaarDetails?.gender === "M" ? "Male" : aadhaarDetails?.gender === "F" ? "Female" : "";
+  const aadhaarGender = normalizeAadhaarGender(aadhaarDetails?.gender);
   const aadhaarAddress = (aadhaarDetails?.address || "").trim();
   const aadhaarExpiry =
     fullKycResponse?.validUntil ||
@@ -537,67 +596,6 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
   const matchFullName = Boolean(
     aadhaarVerified && aadhaarName && norm(fullName) === norm(aadhaarName)
   );
-  // Compare DOBs by actual calendar date (ignore formatting like YYYY-MM-DD vs DD/MM/YYYY vs strings with extra text)
-  const parseDateOnly = (value: string): string | null => {
-    const v = (value || "").trim();
-    if (!v) return null;
-
-    // Extract all number groups
-    const nums = v.match(/\d+/g);
-    if (!nums || nums.length < 3) {
-      // Fallback to Date parse (in case it's a plain ISO string)
-      const dIso = new Date(v);
-      if (!Number.isNaN(dIso.getTime())) {
-        return dIso.toISOString().slice(0, 10);
-      }
-      return null;
-    }
-
-    // Identify year as the 4-digit group; remaining two are day & month
-    let year: string | undefined;
-    const rest: string[] = [];
-    for (const n of nums) {
-      if (!year && n.length === 4) {
-        year = n;
-      } else {
-        rest.push(n);
-      }
-    }
-    if (!year || rest.length < 2) {
-      const dIso = new Date(v);
-      if (!Number.isNaN(dIso.getTime())) {
-        return dIso.toISOString().slice(0, 10);
-      }
-      return null;
-    }
-
-    const [a, b] = rest;
-    // Heuristic: month is between 1 and 12; day is the other
-    const n1 = parseInt(a, 10);
-    const n2 = parseInt(b, 10);
-    let day: number;
-    let month: number;
-    if (n1 >= 1 && n1 <= 12 && !(n2 >= 1 && n2 <= 12)) {
-      month = n1;
-      day = n2;
-    } else if (n2 >= 1 && n2 <= 12 && !(n1 >= 1 && n1 <= 12)) {
-      month = n2;
-      day = n1;
-    } else {
-      // Ambiguous, assume first is day, second is month (DD/MM)
-      day = n1;
-      month = n2;
-    }
-
-    const mm = String(month).padStart(2, "0");
-    const dd = String(day).padStart(2, "0");
-    const isoCandidate = `${year}-${mm}-${dd}`;
-    const d = new Date(isoCandidate);
-    if (!Number.isNaN(d.getTime())) {
-      return d.toISOString().slice(0, 10);
-    }
-    return null;
-  };
 
   const userDobKey = parseDateOnly(dob);
   const aadhaarDobKey = parseDateOnly(aadhaarDob);
@@ -681,26 +679,20 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
     addressAsPerAadhaar.pincode?.trim().length === 6 &&
     (sameAsAadhar || (currentAddress.line1?.trim() && currentAddress.state && currentAddress.city && currentAddress.pincode?.trim().length === 6));
 
-  /* ---------------- IMAGE PICKER WITH CROPPER ---------------- */
+  /* ---------------- IMAGE PICKER (no crop — full image as selected) ---------------- */
   const pickImage = async () => {
     try {
       // Request permissions
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (status !== "granted") {
-        Alert.alert(
-          "Permission Required",
-          "Please grant camera roll permissions to upload a photo."
-        );
         return;
       }
 
-      // Launch image picker with cropping
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -723,12 +715,10 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
           reader.readAsDataURL(blob);
         } catch (conversionError) {
           console.error("Error converting image to base64:", conversionError);
-          Alert.alert("Error", "Failed to process image. Please try again.");
         }
       }
     } catch (error) {
       console.error("Error picking image:", error);
-      Alert.alert("Error", "Failed to pick image. Please try again.");
     }
   };
 
@@ -819,7 +809,7 @@ export default function CompleteProfileScreen({ navigation, route }: any) {
                 <Image
                   source={{ uri: profileImage }}
                   style={{ width: 80, height: 80 }}
-                  resizeMode="cover"
+                  resizeMode="contain"
                 />
               ) : (
                 <Ionicons name="person" size={40} color="#777" />

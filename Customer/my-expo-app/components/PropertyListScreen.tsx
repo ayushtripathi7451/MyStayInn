@@ -65,6 +65,7 @@ function mapCurrentStayToProperty(currentStay: any): CurrentStayProperty | null 
       const phone = pickAdminPhoneFromStay(p, b);
       return phone ? { adminPhone: phone, propertyAdminPhone: phone } : {};
     })(),
+    ...(serverMoveOutStatus ? { moveOutStatus: serverMoveOutStatus } : {}),
   };
 }
 
@@ -176,12 +177,15 @@ export default function PropertyListScreen() {
                   >
                     <Text className="text-center font-bold text-slate-700">View Details</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    className="flex-1 bg-red-500 py-3 rounded-xl"
-                    onPress={() => navigation.navigate("MoveOutRequestScreen", { property })}
-                  >
-                    <Text className="text-center font-bold text-white">Move Out</Text>
-                  </TouchableOpacity>
+                  {property.moveOutStatus !== "requested" &&
+                    property.moveOutStatus !== "accepted" && (
+                    <TouchableOpacity
+                      className="flex-1 bg-red-500 py-3 rounded-xl"
+                      onPress={() => navigation.navigate("MoveOutRequestScreen", { property })}
+                    >
+                      <Text className="text-center font-bold text-white">Move Out</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             ))

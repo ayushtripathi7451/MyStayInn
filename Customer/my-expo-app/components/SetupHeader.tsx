@@ -30,7 +30,7 @@ export default function SetupHeader({ activeTab }: any) {
   return (
     <>
       {/* TOP HEADER BOX */}
-      <View className="bg-[#F7F3FF] px-5 py-6 rounded-[24px] mt-2">
+      <View className="bg-[#EEF2FF] px-5 py-6 rounded-[24px] mt-2">
         <Text className="text-[22px] font-bold">Profile setup</Text>
         <Text className="text-gray-600 mt-1">
           Complete steps to generate your property ID and go live.

@@ -17,7 +17,7 @@ type NotificationItem = {
 };
 
 export default function NotificationScreen({ navigation }: any) {
-  const [tab, setTab] = useState<"recent" | "past">("recent");
+  const [tab] = useState<"recent" | "past">("recent");
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
@@ -92,41 +92,7 @@ export default function NotificationScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
-        {/* TAB SWITCH */}
-        <View className="flex-row bg-[#EFF1F5] mx-6 rounded-full p-1 mt-4">
-          
-          {/* RECENT TAB */}
-          <TouchableOpacity
-            onPress={() => setTab("recent")}
-            className={`flex-1 py-2 rounded-full ${
-              tab === "recent" ? "bg-white shadow" : ""
-            }`}
-          >
-            <Text
-              className={`text-center font-semibold ${
-                tab === "recent" ? "text-purple-600" : "text-gray-500"
-              }`}
-            >
-              Recent
-            </Text>
-          </TouchableOpacity>
-
-          {/* PAST TAB */}
-          <TouchableOpacity
-            onPress={() => setTab("past")}
-            className={`flex-1 py-2 rounded-full ${
-              tab === "past" ? "bg-white shadow" : ""
-            }`}
-          >
-            <Text
-              className={`text-center font-semibold ${
-                tab === "past" ? "text-purple-600" : "text-gray-500"
-              }`}
-            >
-              Past History
-            </Text>
-          </TouchableOpacity>
-        </View>
+        
       </View>
 
       {/* ---------- NOTIFICATION LIST ---------- */}
@@ -150,12 +116,14 @@ export default function NotificationScreen({ navigation }: any) {
             key={n.id}
             className="flex-row justify-between items-center bg-white px-4 py-4 rounded-2xl mb-3 border border-gray-100 shadow-sm"
           >
-            <View>
-              <Text className="text-[16px] font-semibold text-gray-800">
+            <View className="flex-1 pr-3">
+              <Text className="text-[16px] font-semibold text-gray-800" numberOfLines={2}>
                 {n.title}
               </Text>
               {!!n.body && (
-                <Text className="text-gray-600 text-[13px] mt-1">{n.body}</Text>
+                <Text className="text-gray-600 text-[13px] mt-1" numberOfLines={3}>
+                  {n.body}
+                </Text>
               )}
               <Text className="text-gray-400 text-[12px] mt-1">{n.timeLabel}</Text>
             </View>

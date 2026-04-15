@@ -241,7 +241,7 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
         <View className="px-4 py-5">
           <View className="flex-row justify-between mb-4 items-start">
             <View className="flex-1">
-              <Text className="text-xs text-slate-600 mb-1">Date</Text>
+              <Text className="text-xs text-slate-600 mb-1">Move-in Date</Text>
               <View className="border-b border-slate-300 w-28 pb-0.5" style={{ borderStyle: "dotted" }}>
                 <Text className="text-sm text-slate-900">{toDisplayValue(room?.date) || " "}</Text>
               </View>
@@ -272,26 +272,22 @@ export default function AdminGuestEnrollmentFormScreen({ navigation, route }: an
               </Text>
             </View>
           </View>
-          {guest?.addressAsPerAadhaar ? (
-            <View className="mb-3">
-              <Text className="text-xs text-slate-600 font-medium mb-0.5">Address as per Aadhaar</Text>
-              <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
-                <Text className="text-sm text-slate-900" numberOfLines={2}>
-                  {guest.addressAsPerAadhaar}
-                </Text>
-              </View>
+          <View className="mb-3">
+            <Text className="text-xs text-slate-600 font-medium mb-0.5">Address as per Aadhaar</Text>
+            <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
+              <Text className="text-sm text-slate-900" numberOfLines={3}>
+                {guest?.addressAsPerAadhaar ? String(guest.addressAsPerAadhaar) : "—"}
+              </Text>
             </View>
-          ) : null}
-          {guest?.currentAddress && guest.currentAddress !== toDisplayValue(guest?.permanentAddress) ? (
-            <View className="mb-3">
-              <Text className="text-xs text-slate-600 font-medium mb-0.5">Current Address</Text>
-              <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
-                <Text className="text-sm text-slate-900" numberOfLines={2}>
-                  {guest.currentAddress}
-                </Text>
-              </View>
+          </View>
+          <View className="mb-3">
+            <Text className="text-xs text-slate-600 font-medium mb-0.5">Current Address</Text>
+            <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
+              <Text className="text-sm text-slate-900" numberOfLines={3}>
+                {guest?.currentAddress ? String(guest.currentAddress) : "—"}
+              </Text>
             </View>
-          ) : null}
+          </View>
           <FormRow label="E-Mail ID" value={guest?.email} />
           <FormRow label="ID Proof Details" value={identity?.idProofDetails} />
           <FormRow label="Aadhaar No #" value={identity?.aadhaarNumber} />

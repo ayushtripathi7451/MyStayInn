@@ -1,28 +1,18 @@
 import React, { useState } from "react";
-import { View, Text, Switch, TouchableOpacity, ScrollView, Alert } from "react-native";
+import { View, Text, Switch, TouchableOpacity, ScrollView, Alert, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { resetToWelcome } from "../utils/navigationRef";
+import { logoutAndResetToWelcome } from "../utils/navigationRef";
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavigationProp<any>>();
   const [pushNotifications, setPushNotifications] = useState(true);
+  const [logoutSheetVisible, setLogoutSheetVisible] = useState(false);
 
-  const handleLogout = () => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          const { logoutClearClientSession } = await import("../utils/sessionStorage");
-          await logoutClearClientSession();
-          resetToWelcome();
-        },
-      },
-    ]);
+  const confirmLogout = () => {
+    setLogoutSheetVisible(false);
+    void logoutAndResetToWelcome();
   };
 
   return (
@@ -71,13 +61,44 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <TouchableOpacity onPress={handleLogout} className="bg-red-50 rounded-[24px] p-5 mt-6 mb-4 flex-row items-center justify-center border-2 border-red-100" activeOpacity={0.8}>
+        <TouchableOpacity
+          onPress={() => setLogoutSheetVisible(true)}
+          className="bg-red-50 rounded-[24px] p-5 mt-6 mb-4 flex-row items-center justify-center border-2 border-red-100"
+          activeOpacity={0.8}
+        >
           <Ionicons name="log-out-outline" size={22} color="#EF4444" />
           <Text className="text-red-600 font-black text-lg ml-3">Logout</Text>
         </TouchableOpacity>
 
         <Text className="text-center text-slate-400 text-xs mt-4 mb-2">MyStayInn © 2026</Text>
       </ScrollView>
+
+      <Modal
+        visible={logoutSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLogoutSheetVisible(false)}
+      >
+        <View className="flex-1 bg-black/50 justify-end">
+          <View className="bg-white rounded-t-[24px] p-6 pb-8">
+            <Text className="text-xl font-black text-slate-900 mb-2">Logout</Text>
+            <Text className="text-slate-600 text-[15px] mb-6 leading-6">
+              Are you sure you want to logout? You will need to sign in again to access your account.
+            </Text>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 bg-slate-100 py-4 rounded-xl"
+                onPress={() => setLogoutSheetVisible(false)}
+              >
+                <Text className="text-center font-bold text-slate-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity className="flex-1 bg-red-500 py-4 rounded-xl" onPress={confirmLogout}>
+                <Text className="text-center font-bold text-white">Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

@@ -4,22 +4,23 @@ import { LinearGradient } from "expo-linear-gradient";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
+/* Bubble — same layout as Customer SignupScreen */
 const Bubble = ({ image, reverse = false, small = false }: any) => {
   const avatarSize = small ? "w-32 h-32" : "w-24 h-24";
-  const bubblePadding = small ? "px-5 py-3" : "px-5 py-3";
-  const line1Width = small ? "w-12 mr-8" : "w-12 mr-8";
-  const line2Width = small ? "w-8" : "w-8";
   const bubbleOffset = small ? "-ml-6 left-24" : "-ml-6 left-24";
 
   return (
     <View className={`flex-row items-center ${reverse ? "flex-row-reverse" : ""}`}>
-      <Image source={image} className={`${avatarSize} rounded-full bg-[#ABB0FB]`} />
+      <Image
+        source={image}
+        className={`${avatarSize} rounded-full bg-[#ABB0FB]`}
+      />
 
       <View
         className={`
           bg-white rounded-full flex-row items-center shadow-md absolute -top-2
           ${reverse ? "right-24 -mr-10 -top-6" : bubbleOffset}
-          ${bubblePadding}
+          px-5 py-3
         `}
       >
         <View className="w-6 h-6 bg-blue-600 rounded-full justify-center items-center mr-3">
@@ -27,8 +28,8 @@ const Bubble = ({ image, reverse = false, small = false }: any) => {
         </View>
 
         <View>
-          <View className={`${line1Width} h-[4px] bg-blue-400 rounded-full mb-1`} />
-          <View className={`${line2Width} h-[4px] bg-blue-400 rounded-full`} />
+          <View className="w-12 h-[4px] bg-blue-400 rounded-full mb-1" />
+          <View className="w-8 h-[4px] bg-blue-400 rounded-full" />
         </View>
       </View>
     </View>
@@ -42,9 +43,9 @@ export default function SignupScreen({ navigation }: any) {
       colors={["#6D7BFF", "#0040FF"]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      className="flex-1 px-6"
+      style={{ flex: 1 }}
     >
-
+      <View className="flex-1 px-6">
       {/* ===================== */}
       {/* BUBBLES + CIRCLES + HEXAGONS */}
       {/* ===================== */}
@@ -120,6 +121,7 @@ export default function SignupScreen({ navigation }: any) {
         </Text>
       </View>
 
+      </View>
     </LinearGradient>
   );
 }

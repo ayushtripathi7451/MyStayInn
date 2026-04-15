@@ -102,6 +102,9 @@ interface ScheduledMoveOut {
   customerId: string;
   customerName: string;
   mystayId: string;
+  /** Matches PropertyContext / move-out row — used to scope Accepted tab by property */
+  propertyId?: string;
+  propertyUniqueId?: string;
   propertyName: string;
   roomNumber: string;
   moveOutDate: Date;
@@ -550,10 +553,16 @@ export class MoveOutService {
           customerId: cid || (r.customerUniqueId != null ? String(r.customerUniqueId) : ""),
           customerName,
           mystayId,
+          propertyId: r.propertyId != null ? String(r.propertyId) : undefined,
+          propertyUniqueId:
+            r.propertyUniqueId != null ? String(r.propertyUniqueId) : undefined,
           propertyName: r.propertyName ?? r.property_name ?? "",
           roomNumber: r.roomNumber ?? r.room_number ?? "",
           moveOutDate: requestedDate,
-          type: r.type === "admin_initiated" ? "admin_initiated" : "customer_initiated",
+          type:
+            r.type === "admin_initiated" || r.requestedBy === "owner"
+              ? "admin_initiated"
+              : "customer_initiated",
           securityDepositAmount: r.securityDepositAmount ?? r.security_deposit_amount ?? 0,
           currentDue: r.currentDue ?? r.current_due ?? 0,
           status: "scheduled",
@@ -622,6 +631,21 @@ export class MoveOutService {
       return {
         success: false,
         error: error?.response?.data?.message || error?.message || "Failed to cancel request",
+      };
+    }
+  }
+
+  static async rejectRequest(requestId: string): Promise<ApiResponse<any>> {
+    try {
+      const res = await MoveOutService.putMoveOut(`/api/move-out/requests/${requestId}/reject`);
+      if (res?.data?.success === false) {
+        return { success: false, error: res?.data?.message || "Failed to reject" };
+      }
+      return { success: true, data: res?.data?.data ?? res?.data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error?.response?.data?.message || error?.message || "Failed to reject request",
       };
     }
   }

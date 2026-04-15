@@ -40,6 +40,25 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
     useRef<TextInput>(null),
   ];
 
+  // Match Customer: hardware back resets to Signup and clears Firebase session
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", async (e: any) => {
+      if (e.data.action.type === "GO_BACK") {
+        e.preventDefault();
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "Signup" }],
+        });
+      }
+      clearConfirmation();
+      const currentUser = auth().currentUser;
+      if (currentUser && (!currentUser.email || currentUser.isAnonymous)) {
+        await auth().signOut();
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   // Handle individual digit change
   const handleChange = (text: string, index: number) => {
     setOtpError("");
@@ -62,6 +81,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
   };
 
   const isValid = otp.every((digit) => digit !== "");
+  const buttonFilled = isValid || loading;
 
   // Timer logic for Resend OTP
   useEffect(() => {
@@ -189,7 +209,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
       await new Promise(resolve => setTimeout(resolve, 500));
       
       // Send new OTP
-      const newConfirmation = await auth().signInWithPhoneNumber(mobile);
+      const newConfirmation = await auth().signInWithPhoneNumber(mobile, true);
       
       // Store new confirmation
       const { setConfirmation } = require("../utils/firebaseConfirmation");
@@ -254,7 +274,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
           onPress={() =>
             navigation.reset({ index: 0, routes: [{ name: "Signup" }] })
           }
-          className="bg-purple-600 py-4 rounded-xl"
+          className="bg-indigo-600 py-4 rounded-xl"
         >
           <Text className="text-center text-white font-semibold">Back to sign up</Text>
         </TouchableOpacity>
@@ -290,12 +310,12 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
 
             {/* PROGRESS BAR */}
             <View className="flex-row justify-center mt-3">
-              <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+              <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+              <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
               <View className="w-6 h-1.5 bg-gray-300 rounded-full mx-1" />
             </View>
 
-            {/* INFO TEXT */}
+            {/* INFO TEXT — same copy as Customer app */}
             <Text className="text-gray-700 mt-8 mb-4">
               Enter 6-digit code sent to{" "}
               <Text className="font-semibold">{mobile}</Text>, enter it below:
@@ -312,7 +332,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
                   maxLength={1}
                   onChangeText={(t) => handleChange(t, i)}
                   onKeyPress={(e) => handleKeyPress(e, i)}
-                  className="w-12 h-14 border border-gray-300 rounded-lg text-center text-xl font-semibold focus:border-purple-600"
+                  className="w-12 h-14 border border-gray-300 rounded-lg text-center text-xl font-semibold focus:border-indigo-600"
                 />
               ))}
             </View>
@@ -334,13 +354,13 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
               {!canResend ? (
                 <Text className="text-gray-500">
                   Resend OTP in{" "}
-                  <Text className="font-semibold text-purple-700">
+                  <Text className="font-semibold text-indigo-700">
                     00:{timer < 10 ? `0${timer}` : timer}
                   </Text>
                 </Text>
               ) : (
                 <TouchableOpacity onPress={resendOTP} disabled={loading}>
-                  <Text className="text-purple-700 font-semibold">
+                  <Text className="text-indigo-700 font-semibold">
                     Resend OTP
                   </Text>
                 </TouchableOpacity>
@@ -351,12 +371,19 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
             <TouchableOpacity
               disabled={!isValid || loading}
               onPress={verifyOTP}
-              className={`py-4 rounded-xl flex-row justify-center items-center ${
-                isValid && !loading ? "bg-purple-600" : "bg-purple-300"
+              className={`py-4 rounded-xl flex-row justify-center items-center border-2 ${
+                buttonFilled
+                  ? "bg-indigo-600 border-indigo-600"
+                  : "bg-indigo-100 border-indigo-200"
               }`}
+              accessibilityState={{ disabled: !isValid || loading }}
             >
-              {loading && <ActivityIndicator color="white" className="mr-2" />}
-              <Text className="text-center text-white font-semibold text-lg">
+              {loading && <ActivityIndicator color="#FFFFFF" className="mr-2" />}
+              <Text
+                className={`text-center font-semibold text-lg ${
+                  buttonFilled ? "text-white" : "text-indigo-800"
+                }`}
+              >
                 {loading ? "Verifying..." : "Verify OTP"}
               </Text>
             </TouchableOpacity>
@@ -365,7 +392,7 @@ export default function VerifyEmailScreen({ navigation, route }: any) {
             {/* <Text className="text-center text-base mt-4">
               To update Mobile Number.{" "}
               <Text
-                className="font-semibold text-purple-700"
+                className="font-semibold text-indigo-700"
                 onPress={handleChangeNumber}
               >
                 Click here

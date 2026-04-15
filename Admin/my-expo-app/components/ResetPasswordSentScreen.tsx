@@ -46,7 +46,7 @@ export default function ResetPasswordSentScreen({ navigation }: any) {
           {/* BUTTON */}
           <TouchableOpacity
             onPress={() => navigation.navigate("LoginPin")}
-            className="bg-purple-600 py-4 rounded-xl mt-10"
+            className="bg-indigo-600 py-4 rounded-xl mt-10"
           >
             <Text className="text-center text-white font-semibold text-lg">
               Back to login

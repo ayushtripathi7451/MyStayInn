@@ -9,7 +9,6 @@ import {
   Modal,
   Linking,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -108,6 +107,7 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [profileBanner, setProfileBanner] = useState<string | null>(null);
   const [activeStay, setActiveStay] = useState<ActiveStay | null>(null);
   void activeStay;
 
@@ -121,13 +121,14 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
       fetchCustomerProfile(profileLookupId);
     } else {
       setLoading(false);
-      Alert.alert("Error", "Customer ID not found");
+      setProfileBanner("Customer ID not found");
     }
   }, [profileLookupId]);
 
   const fetchCustomerProfile = async (uniqueId: string) => {
     try {
       setLoading(true);
+      setProfileBanner(null);
       const response = await userApi.get(`/api/users/${uniqueId}/profile`);
 
       if (response.data.success) {
@@ -194,7 +195,7 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
           profileExtras: (fromRoute.profileExtras || {}) as any,
         } as CustomerProfile);
       } else {
-        Alert.alert("Error", "Failed to load customer profile");
+        setProfileBanner("Failed to load customer profile");
       }
     } finally {
       setLoading(false);
@@ -215,7 +216,7 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
       <SafeAreaView className="flex-1 bg-[#F1F5F9] items-center justify-center px-6">
         <Ionicons name="person-outline" size={64} color="#94A3B8" />
         <Text className="text-slate-500 font-bold text-center mt-4 text-lg">
-          Customer Profile Not Found
+          {profileBanner || "Customer Profile Not Found"}
         </Text>
         <TouchableOpacity
           className="mt-6 bg-indigo-600 px-6 py-3 rounded-xl"
@@ -346,6 +347,12 @@ export default function AdminCustomerDetailScreen({ navigation, route }: any) {
           Verify Details
         </Text>
       </View>
+
+      {profileBanner ? (
+        <View className="mx-5 mt-3 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          <Text className="text-rose-800 text-sm">{profileBanner}</Text>
+        </View>
+      ) : null}
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
         

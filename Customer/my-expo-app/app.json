@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "my-expo-app",
-    "slug": "my-expo-app",
-    "owner": "its.ayushhhhh",  
+    "name": "MyStayInn",
+    "slug": "mystayinn",
+    "owner": "its.ayushh",  
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/my-stay-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#002DCC"
     },
     "experiments": {
       "tsconfigPaths": true
@@ -25,12 +25,13 @@
       },
       "googleServicesFile": "./google-services.json",
       "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/logo-my-stay.png",
+        "backgroundColor": "#002DCC"
       }
     },
     "ios": {
@@ -61,7 +62,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "5252b5b9-f010-46e0-844b-225ad2f455a3"
+        "projectId": "138fea48-dadf-40b0-8c21-5d65fe477936"
       }
     }
   }

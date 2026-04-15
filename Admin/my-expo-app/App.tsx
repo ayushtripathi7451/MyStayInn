@@ -1,5 +1,5 @@
 import "./global.css";
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   View,
   ScrollView,
@@ -7,6 +7,9 @@ import {
   TouchableOpacity,
   Dimensions,
   RefreshControl,
+  BackHandler,
+  Platform,
+  ToastAndroid,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
@@ -200,6 +203,26 @@ function HomeScreen({ navigation }: any) {
   useFocusEffect(
     React.useCallback(() => {
       registerPushNotifications().catch(() => {});
+    }, [])
+  );
+
+  // Android: require double back to exit when Home is focused (avoids instant quit after stack reset).
+  const lastBackPressRef = useRef(0);
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "android") return undefined;
+      const onBack = () => {
+        const now = Date.now();
+        if (lastBackPressRef.current !== 0 && now - lastBackPressRef.current < 2200) {
+          lastBackPressRef.current = 0;
+          return false;
+        }
+        lastBackPressRef.current = now;
+        ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
+        return true;
+      };
+      const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+      return () => sub.remove();
     }, [])
   );
 
@@ -422,8 +445,8 @@ function HomeScreen({ navigation }: any) {
           <View className="px-4 mt-4">
             <View className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
               <View className="p-4 border-b border-slate-50 flex-row items-center">
-                <View className="bg-violet-100 p-2 rounded-xl">
-                  <MaterialCommunityIcons name="file-document-edit-outline" size={22} color="#6D28D9" />
+                <View className="bg-indigo-100 p-2 rounded-xl">
+                  <MaterialCommunityIcons name="file-document-edit-outline" size={22} color="#4F46E5" />
                 </View>
                 <View className="flex-1 ml-3">
                   <Text className="font-bold text-slate-800">Complete property setup</Text>
@@ -571,14 +594,14 @@ function HomeScreen({ navigation }: any) {
             className="flex-row items-center justify-between bg-white p-4 rounded-2xl border border-slate-100"
           >
             <View className="flex-row items-center gap-3">
-              <View className="bg-purple-100 p-2 rounded-xl">
-                <MaterialCommunityIcons name="cash-multiple" size={22} color="#7C3AED" />
+              <View className="bg-indigo-100 p-2 rounded-xl">
+                <MaterialCommunityIcons name="cash-multiple" size={22} color="#4F46E5" />
               </View>
               <Text className="font-bold text-slate-700">
                 Expense Management
               </Text>
             </View>
-            <Text className="text-lg font-black text-purple-600">Manage</Text>
+            <Text className="text-lg font-black text-indigo-600">Manage</Text>
           </TouchableOpacity>
         </View>
 

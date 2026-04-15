@@ -4,6 +4,7 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -585,6 +586,13 @@ export default function DueAmount() {
   const handlePayNow = async (item: DueItem) => {
     if (item.paid || !item.propertyId) return;
     if (item.type === "rent_cash") return;
+    if (!String(item.bookingId ?? "").trim()) {
+      Alert.alert(
+        "Cannot start payment",
+        "Missing booking reference for this due. Pull to refresh on Home, then try again."
+      );
+      return;
+    }
 
     setPayingId(item.id);
     try {

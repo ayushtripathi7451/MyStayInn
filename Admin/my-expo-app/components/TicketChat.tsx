@@ -5,7 +5,7 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Alert,
+  Modal,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -53,7 +53,9 @@ export default function UserTicketChat({ navigation, route }: any) {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [openDropdown, setOpenDropdown] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  
+  const [ticketBanner, setTicketBanner] = useState<string | null>(null);
+  const [closeConfirmVisible, setCloseConfirmVisible] = useState(false);
+
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -115,14 +117,8 @@ export default function UserTicketChat({ navigation, route }: any) {
       return;
     }
     if (newStatus === "closed") {
-      Alert.alert(
-        "Close Ticket?",
-        "You won't be able to add new comments after closing.",
-        [
-          { text: "Cancel", style: "cancel", onPress: () => setOpenDropdown(false) },
-          { text: "Yes, Close", onPress: () => doUpdateStatus("closed") },
-        ]
-      );
+      setOpenDropdown(false);
+      setCloseConfirmVisible(true);
     } else {
       doUpdateStatus(newStatus);
     }
@@ -136,7 +132,7 @@ export default function UserTicketChat({ navigation, route }: any) {
       const res = await ticketApi.patch(`/api/tickets/${ticketId}`, { status });
       if (res.data.success && res.data.ticket) setTicket(res.data.ticket);
     } catch (e: any) {
-      Alert.alert("Error", e?.response?.data?.message || "Failed to update status");
+      setTicketBanner(e?.response?.data?.message || "Failed to update status");
     } finally {
       setUpdatingStatus(false);
     }
@@ -157,7 +153,7 @@ export default function UserTicketChat({ navigation, route }: any) {
         }, 100);
       }
     } catch (e: any) {
-      Alert.alert("Error", e?.response?.data?.message || "Failed to add comment");
+      setTicketBanner(e?.response?.data?.message || "Failed to add comment");
     } finally {
       setSendingComment(false);
     }
@@ -181,6 +177,12 @@ export default function UserTicketChat({ navigation, route }: any) {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
+      {ticketBanner ? (
+        <View className="mx-5 mt-2 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          <Text className="text-rose-800 text-sm">{ticketBanner}</Text>
+        </View>
+      ) : null}
+
       {/* Header with back button and status */}
       <View className="flex-row items-center justify-between px-5 py-4 bg-white border-b border-gray-100 shadow-sm" style={{ zIndex: 100 }}>
         <View className="flex-row items-center">
@@ -424,6 +426,34 @@ export default function UserTicketChat({ navigation, route }: any) {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+
+      <Modal visible={closeConfirmVisible} transparent animationType="fade">
+        <View className="flex-1 bg-black/50 justify-center px-6">
+          <View className="bg-white rounded-2xl p-6">
+            <Text className="text-lg font-black text-slate-900 mb-2">Close ticket?</Text>
+            <Text className="text-slate-600 text-[15px] mb-6">
+              You will not be able to add new comments after closing.
+            </Text>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 bg-slate-100 py-4 rounded-xl"
+                onPress={() => setCloseConfirmVisible(false)}
+              >
+                <Text className="text-center font-bold text-slate-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 bg-[#4361FF] py-4 rounded-xl"
+                onPress={() => {
+                  setCloseConfirmVisible(false);
+                  doUpdateStatus("closed");
+                }}
+              >
+                <Text className="text-center font-bold text-white">Close ticket</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

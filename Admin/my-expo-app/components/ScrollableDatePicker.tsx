@@ -11,6 +11,8 @@ interface ScrollableDatePickerProps {
   placeholder?: string;
   disabled?: boolean;
   containerStyle?: string;
+  /** Day-of-month 1–31 only (e.g. recurring monthly due). Parent reads `date.getDate()`. */
+  dueDayOnly?: boolean;
 }
  
 function toDate(value: Date | string | number | undefined): Date {
@@ -23,7 +25,16 @@ function toDate(value: Date | string | number | undefined): Date {
 const ITEM_HEIGHT = 50;
 const VISIBLE_ITEMS = 3;
 const SCROLL_VIEW_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS; // 150px
- 
+
+function ordinalDayLabel(n: number): string {
+  if (n >= 11 && n <= 13) return `${n}th`;
+  const d = n % 10;
+  if (d === 1) return `${n}st`;
+  if (d === 2) return `${n}nd`;
+  if (d === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
 export default function ScrollableDatePicker({
   selectedDate,
   onDateChange,
@@ -33,6 +44,7 @@ export default function ScrollableDatePicker({
   placeholder = "Select date",
   disabled = false,
   containerStyle = "",
+  dueDayOnly = false,
 }: ScrollableDatePickerProps) {
   const safeDate = toDate(selectedDate);
   const [isVisible, setIsVisible] = useState(false);
@@ -66,19 +78,30 @@ export default function ScrollableDatePicker({
   const minuteScrollRef = useRef<ScrollView>(null);
  
   useEffect(() => {
+    if (dueDayOnly && (selectedDate == null || selectedDate === undefined)) {
+      setSelectedYear(2020);
+      setSelectedMonth(0);
+      setSelectedDay(1);
+      setSelectedHour(0);
+      setSelectedMinute(0);
+      return;
+    }
     const d = toDate(selectedDate);
     setSelectedYear(d.getFullYear());
     setSelectedMonth(d.getMonth());
     setSelectedDay(d.getDate());
     setSelectedHour(d.getHours());
     setSelectedMinute(d.getMinutes());
-  }, [selectedDate]);
+  }, [selectedDate, dueDayOnly]);
  
   const hasSelectedDate = !!selectedDate;
  
   const formatDisplayDate = () => {
     if (!hasSelectedDate) return placeholder;
     const d = toDate(selectedDate);
+    if (dueDayOnly && mode === "date") {
+      return `${ordinalDayLabel(d.getDate())} of each month`;
+    }
     if (mode === "time")
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     if (mode === "datetime") {
@@ -106,6 +129,10 @@ export default function ScrollableDatePicker({
   };
  
   const scrollAllToSelected = (delay = 150) => {
+    if (dueDayOnly) {
+      scrollToIndex(dayScrollRef, selectedDay - 1, delay);
+      return;
+    }
     if (mode !== "time") {
       scrollToIndex(yearScrollRef, years.indexOf(selectedYear), delay);
       scrollToIndex(monthScrollRef, selectedMonth, delay);
@@ -138,6 +165,8 @@ export default function ScrollableDatePicker({
     if (mode === "time") {
       newDate = new Date(base);
       newDate.setHours(selectedHour, selectedMinute);
+    } else if (dueDayOnly) {
+      newDate = new Date(2020, 0, selectedDay, 0, 0, 0, 0);
     } else {
       newDate = new Date(
         selectedYear,
@@ -147,15 +176,24 @@ export default function ScrollableDatePicker({
         selectedMinute
       );
     }
- 
-    if (minimumDate && newDate < minimumDate) newDate = toDate(minimumDate);
-    if (maximumDate && newDate > maximumDate) newDate = toDate(maximumDate);
- 
+
+    if (!dueDayOnly) {
+      if (minimumDate && newDate < minimumDate) newDate = toDate(minimumDate);
+      if (maximumDate && newDate > maximumDate) newDate = toDate(maximumDate);
+    }
+
     onDateChange(newDate);
     setIsVisible(false);
   };
  
   const handleCancel = () => {
+    if (dueDayOnly && (selectedDate == null || selectedDate === undefined)) {
+      setSelectedYear(2020);
+      setSelectedMonth(0);
+      setSelectedDay(1);
+      setIsVisible(false);
+      return;
+    }
     const d = toDate(selectedDate);
     setSelectedYear(d.getFullYear());
     setSelectedMonth(d.getMonth());
@@ -229,11 +267,14 @@ export default function ScrollableDatePicker({
   );
  
   const daysInSelectedMonth = getDaysInMonth(selectedYear, selectedMonth);
-  const days = Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
- 
+  const days = dueDayOnly
+    ? Array.from({ length: 31 }, (_, i) => i + 1)
+    : Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1);
+
   useEffect(() => {
+    if (dueDayOnly) return;
     if (selectedDay > daysInSelectedMonth) setSelectedDay(daysInSelectedMonth);
-  }, [selectedYear, selectedMonth, selectedDay, daysInSelectedMonth]);
+  }, [dueDayOnly, selectedYear, selectedMonth, selectedDay, daysInSelectedMonth]);
  
   return (
     <>
@@ -275,11 +316,13 @@ export default function ScrollableDatePicker({
                 <Text className="text-blue-600 font-semibold text-lg">Cancel</Text>
               </TouchableOpacity>
               <Text className="text-lg font-bold text-gray-900">
-                {mode === "time"
-                  ? "Select Time"
-                  : mode === "datetime"
-                  ? "Select Date & Time"
-                  : "Select Date"}
+                {dueDayOnly
+                  ? "Due day (each month)"
+                  : mode === "time"
+                    ? "Select Time"
+                    : mode === "datetime"
+                      ? "Select Date & Time"
+                      : "Select Date"}
               </Text>
               <TouchableOpacity onPress={handleConfirm}>
                 <Text className="text-blue-600 font-semibold text-lg">Done</Text>
@@ -290,19 +333,23 @@ export default function ScrollableDatePicker({
             <View className="flex-row">
               {mode !== "time" && (
                 <>
-                  {renderScrollableColumn(
-                    years,
-                    selectedYear,
-                    setSelectedYear,
-                    yearScrollRef,
-                    "Year"
-                  )}
-                  {renderScrollableColumn(
-                    months,
-                    selectedMonth,
-                    setSelectedMonth,
-                    monthScrollRef,
-                    "Month"
+                  {!dueDayOnly && (
+                    <>
+                      {renderScrollableColumn(
+                        years,
+                        selectedYear,
+                        setSelectedYear,
+                        yearScrollRef,
+                        "Year"
+                      )}
+                      {renderScrollableColumn(
+                        months,
+                        selectedMonth,
+                        setSelectedMonth,
+                        monthScrollRef,
+                        "Month"
+                      )}
+                    </>
                   )}
                   {renderScrollableColumn(
                     days,

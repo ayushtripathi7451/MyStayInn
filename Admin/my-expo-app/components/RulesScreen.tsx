@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -47,6 +46,7 @@ export default function RulesScreen({ navigation, route }: any) {
   const [exitFeeAmount, setExitFeeAmount] = useState("");
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [customRules, setCustomRules] = useState<string[]>(["", "", "", "", ""]);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     loadRules();
@@ -118,19 +118,18 @@ export default function RulesScreen({ navigation, route }: any) {
   };
 
   const handleSave = async () => {
+    setSaveError(null);
     if (!propertyId) {
-      Alert.alert("Error", "No property selected.");
+      setSaveError("No property selected.");
       return;
     }
     setSaving(true);
     try {
       const payload = buildRulesPayload();
       await propertyApi.put(`/api/properties/${propertyId}`, { rules: payload });
-      Alert.alert("Saved", "Rules have been saved.", [
-        { text: "OK", onPress: () => navigation.goBack() },
-      ]);
+      setTimeout(() => navigation.goBack(), 0);
     } catch (e: any) {
-      Alert.alert("Error", e.response?.data?.message || e.message || "Failed to save rules.");
+      setSaveError(e.response?.data?.message || e.message || "Failed to save rules.");
     } finally {
       setSaving(false);
     }
@@ -139,7 +138,7 @@ export default function RulesScreen({ navigation, route }: any) {
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-white items-center justify-center">
-        <ActivityIndicator size="large" color="#6D28D9" />
+        <ActivityIndicator size="large" color="#4F46E5" />
       </SafeAreaView>
     );
   }
@@ -166,6 +165,12 @@ export default function RulesScreen({ navigation, route }: any) {
             <Text className="text-gray-500 mb-6">
               Select and edit rules for your property. Tenants will see these.
             </Text>
+
+            {saveError ? (
+              <View className="mb-4 p-3 rounded-xl border bg-red-50 border-red-100">
+                <Text className="text-sm text-red-700">{saveError}</Text>
+              </View>
+            ) : null}
 
             {/* Standard rules */}
             <View className="mt-8 p-5 bg-gray-50 rounded-3xl border border-gray-100">

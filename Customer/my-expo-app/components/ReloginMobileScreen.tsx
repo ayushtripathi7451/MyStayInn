@@ -16,7 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import auth from "@react-native-firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "../utils/api";
-import { setConfirmation } from "../utils/firebaseConfirmation";
+import { getConfirmation, setConfirmation } from "../utils/firebaseConfirmation";
 import * as Clipboard from "expo-clipboard";
 import { useUser } from "../src/hooks";
 
@@ -127,7 +127,8 @@ useEffect(() => {
       setOtpError("Enter the full 6-digit OTP.");
       return;
     }
-    if (!confirmation) {
+    const phoneConfirmation = confirmation ?? getConfirmation();
+    if (!phoneConfirmation) {
       setOtpError("Session expired. Request OTP again.");
       return;
     }
@@ -136,7 +137,7 @@ useEffect(() => {
       setLoading(true);
 
       // 1. Verify OTP with Firebase
-      const userCredential = await confirmation.confirm(otp);
+      const userCredential = await phoneConfirmation.confirm(otp);
 
       // 2. Get Firebase ID Token
       const firebaseIdToken = await userCredential.user.getIdToken();
@@ -208,21 +209,36 @@ useEffect(() => {
   const resendOTP = async () => {
     setOtpError("");
     setSendError("");
+    if (mobile.length !== 10) {
+      setSendError("Enter a valid 10-digit mobile number from the previous step.");
+      return;
+    }
     try {
       setLoading(true);
       const fullPhoneNumber = `${countryCode}${mobile}`;
-      
-      const confirmationResult = await auth().signInWithPhoneNumber(fullPhoneNumber);
+
+      // Second arg `true` = forceResend — required or the 2nd call can hang / never send SMS again
+      const confirmationResult = await auth().signInWithPhoneNumber(fullPhoneNumber, true);
       setConfirmationState(confirmationResult);
       setConfirmation(confirmationResult);
-      
+
+      Keyboard.dismiss();
       setTimer(30);
       setCanResend(false);
       setOtp("");
+      lastOtpRef.current = "";
       setResendHint("A new OTP has been sent.");
     } catch (error: any) {
       console.error("Resend OTP Error:", error);
-      setSendError("Failed to resend OTP. Please try again.");
+      let friendlyMessage = "Failed to resend OTP. Please try again.";
+      if (error.code === "auth/captcha-check-failed") {
+        friendlyMessage = "Safety check failed. Please try again.";
+      } else if (error.code === "auth/invalid-phone-number") {
+        friendlyMessage = "The phone number format is incorrect.";
+      } else if (error.code === "auth/too-many-requests") {
+        friendlyMessage = "Too many attempts. Please try again later.";
+      }
+      setSendError(friendlyMessage);
     } finally {
       setLoading(false);
     }
@@ -342,6 +358,7 @@ useEffect(() => {
   onChangeText={(t) => {
     setOtp(t.replace(/[^0-9]/g, "").slice(0, 6));
     setOtpError("");
+    setSendError("");
     setResendHint("");
   }}
   keyboardType="number-pad"
@@ -356,6 +373,11 @@ useEffect(() => {
                     {otpError ? (
                       <Text className="text-amber-200 text-sm mb-3 text-center" accessibilityLiveRegion="polite">
                         {otpError}
+                      </Text>
+                    ) : null}
+                    {sendError ? (
+                      <Text className="text-amber-200 text-sm mb-3 text-center" accessibilityLiveRegion="polite">
+                        {sendError}
                       </Text>
                     ) : null}
                     {resendHint ? (

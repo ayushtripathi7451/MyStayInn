@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
@@ -61,6 +62,13 @@ export default function PaymentDueScreen({ navigation }: any) {
 
   const handlePayNow = (item: DueItem) => {
     if (item.type === "rent_cash") return;
+    if (!String(item.bookingId ?? "").trim()) {
+      Alert.alert(
+        "Cannot start payment",
+        "Missing booking reference for this due. Refresh this screen, then try again."
+      );
+      return;
+    }
 
     let yearMonthValue: string | undefined;
 

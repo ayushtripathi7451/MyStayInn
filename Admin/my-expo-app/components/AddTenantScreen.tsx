@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
@@ -32,6 +31,9 @@ export default function AddTenantScreen({ navigation }: AddTenantScreenProps) {
   });
 
   const [loading, setLoading] = useState(false);
+  const [formBanner, setFormBanner] = useState<{ text: string; variant: "error" | "success" } | null>(
+    null
+  );
 
   const updateFormData = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -41,22 +43,22 @@ export default function AddTenantScreen({ navigation }: AddTenantScreenProps) {
     const { name, phone, roomNumber, monthlyRent } = formData;
     
     if (!name.trim()) {
-      Alert.alert("Error", "Please enter tenant name");
+      setFormBanner({ variant: "error", text: "Please enter tenant name" });
       return false;
     }
-    
+
     if (!phone.trim() || phone.length !== 10) {
-      Alert.alert("Error", "Please enter a valid 10-digit phone number");
+      setFormBanner({ variant: "error", text: "Please enter a valid 10-digit phone number" });
       return false;
     }
-    
+
     if (!roomNumber.trim()) {
-      Alert.alert("Error", "Please enter room number");
+      setFormBanner({ variant: "error", text: "Please enter room number" });
       return false;
     }
-    
+
     if (!monthlyRent.trim() || isNaN(Number(monthlyRent))) {
-      Alert.alert("Error", "Please enter a valid monthly rent amount");
+      setFormBanner({ variant: "error", text: "Please enter a valid monthly rent amount" });
       return false;
     }
     
@@ -73,7 +75,10 @@ export default function AddTenantScreen({ navigation }: AddTenantScreenProps) {
       const searchRes = await userApi.get(`/api/users/search/customers?query=${formData.phone}`);
       
       if (!searchRes.data.success || !searchRes.data.customers || searchRes.data.customers.length === 0) {
-        Alert.alert("Error", "Customer not found. Please ensure the customer has registered with this phone number.");
+        setFormBanner({
+          variant: "error",
+          text: "Customer not found. Please ensure the customer has registered with this phone number.",
+        });
         return;
       }
       
@@ -84,14 +89,17 @@ export default function AddTenantScreen({ navigation }: AddTenantScreenProps) {
       const roomsRes = await propertyApi.get('/api/properties/rooms/all');
       
       if (!roomsRes.data.success || !Array.isArray(roomsRes.data.rooms)) {
-        Alert.alert("Error", "Failed to fetch rooms. Please try again.");
+        setFormBanner({ variant: "error", text: "Failed to fetch rooms. Please try again." });
         return;
       }
-      
+
       const room = roomsRes.data.rooms.find((r: any) => r.roomNumber === formData.roomNumber);
-      
+
       if (!room) {
-        Alert.alert("Error", `Room ${formData.roomNumber} not found. Please check the room number.`);
+        setFormBanner({
+          variant: "error",
+          text: `Room ${formData.roomNumber} not found. Please check the room number.`,
+        });
         return;
       }
       
@@ -111,24 +119,22 @@ export default function AddTenantScreen({ navigation }: AddTenantScreenProps) {
       });
       
       if (!bookingRes.data.success) {
-        Alert.alert("Error", bookingRes.data.message || "Failed to allocate room. Please try again.");
+        setFormBanner({
+          variant: "error",
+          text: bookingRes.data.message || "Failed to allocate room. Please try again.",
+        });
         return;
       }
-      
-      Alert.alert(
-        "Success",
-        `Tenant ${formData.name} has been successfully assigned to Room ${formData.roomNumber}!`,
-        [
-          {
-            text: "OK",
-            onPress: () => navigation.goBack()
-          }
-        ]
-      );
+
+      setFormBanner({
+        variant: "success",
+        text: `Tenant ${formData.name} assigned to Room ${formData.roomNumber}.`,
+      });
+      setTimeout(() => navigation.goBack(), 900);
     } catch (error: any) {
       console.error("Error adding tenant:", error);
       const message = error.response?.data?.message || "Failed to add tenant. Please try again.";
-      Alert.alert("Error", message);
+      setFormBanner({ variant: "error", text: message });
     } finally {
       setLoading(false);
     }
@@ -151,6 +157,22 @@ export default function AddTenantScreen({ navigation }: AddTenantScreenProps) {
           Add New Tenant
         </Text>
       </View>
+
+      {formBanner ? (
+        <View
+          className={`mx-5 mt-3 rounded-xl p-3 border ${
+            formBanner.variant === "error"
+              ? "bg-rose-50 border-rose-200"
+              : "bg-emerald-50 border-emerald-200"
+          }`}
+        >
+          <Text
+            className={`text-sm ${formBanner.variant === "error" ? "text-rose-800" : "text-emerald-800"}`}
+          >
+            {formBanner.text}
+          </Text>
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView 
         behavior={Platform.OS === "ios" ? "padding" : "height"}

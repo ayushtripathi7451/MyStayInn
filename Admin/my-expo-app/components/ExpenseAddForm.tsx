@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Platform,
 } from "react-native";
 import ScrollableDatePicker from "./ScrollableDatePicker";
@@ -39,6 +38,7 @@ export default function ExpenseAddForm({
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     expenseApi
@@ -53,17 +53,18 @@ export default function ExpenseAddForm({
   }, []);
 
   const handleSave = async () => {
+    setFormError(null);
     if (!propertyId) {
-      Alert.alert("Error", "No property selected.");
+      setFormError("No property selected.");
       return;
     }
     if (!category.trim()) {
-      Alert.alert("Error", "Please select a category.");
+      setFormError("Please select a category.");
       return;
     }
     const num = parseFloat(amount.replace(/,/g, ""));
     if (Number.isNaN(num) || num < 0) {
-      Alert.alert("Error", "Please enter a valid amount.");
+      setFormError("Please enter a valid amount.");
       return;
     }
 
@@ -81,8 +82,13 @@ export default function ExpenseAddForm({
     } catch (e: any) {
       const status = e?.response?.status;
       const msg = e?.response?.data?.message || e?.message || "Failed to save expense";
-      const detail = status === 401 ? "Please log in again." : status === 404 ? "Expense service not found. Check that it's running on port 3006." : msg;
-      Alert.alert("Error", detail);
+      const detail =
+        status === 401
+          ? "Please log in again."
+          : status === 404
+            ? "Expense service not found. Check that it's running on port 3006."
+            : msg;
+      setFormError(detail);
     } finally {
       setSaving(false);
     }
@@ -90,6 +96,11 @@ export default function ExpenseAddForm({
 
   return (
     <View className="flex-1 bg-[#F6F8FF] p-3">
+      {formError ? (
+        <View className="mb-3 p-3 rounded-xl bg-red-50 border border-red-100">
+          <Text className="text-red-700 text-sm">{formError}</Text>
+        </View>
+      ) : null}
       <Text className="text-[15px] text-gray-700 mb-1">Category</Text>
       <CustomDropdown
         options={categories}
@@ -138,7 +149,7 @@ export default function ExpenseAddForm({
         <TouchableOpacity
           onPress={handleSave}
           disabled={saving}
-          className="flex-1 py-4 bg-[#645CFF] rounded-xl items-center ml-3 flex-row justify-center"
+          className="flex-1 py-4 bg-[#4F46E5] rounded-xl items-center ml-3 flex-row justify-center"
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />

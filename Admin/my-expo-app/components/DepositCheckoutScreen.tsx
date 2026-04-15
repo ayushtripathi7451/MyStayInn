@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,6 +20,53 @@ type Props = {
 };
 
 type PaymentType = "security_deposit" | "rent_online";
+
+function stayMatchesBookingId(stay: any, bookingId: string): boolean {
+  const bid = stay?.booking?.id;
+  return bid != null && String(bid).trim() === String(bookingId).trim();
+}
+
+function stayMatchesPropertyId(stay: any, propertyId: string): boolean {
+  const pid = String(propertyId ?? "").trim();
+  if (!pid) return false;
+  const b = stay?.booking;
+  const r = b?.room && typeof b.room === "object" ? b.room : null;
+  const candidates = [
+    stay?.property?.id,
+    stay?.property?.uniqueId,
+    b?.propertyId,
+    b?.propertyUniqueId,
+    r?.propertyId,
+    r?.propertyUniqueId,
+  ]
+    .filter((v) => v != null && String(v).trim() !== "")
+    .map((v) => String(v));
+  return candidates.some((c) => c === pid);
+}
+
+function resolveCheckoutStay(
+  list: any[],
+  opts: { bookingId?: string; propertyId?: string }
+): any | null {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const bidRaw = opts.bookingId != null ? String(opts.bookingId).trim() : "";
+  const propRaw = opts.propertyId != null ? String(opts.propertyId).trim() : "";
+
+  if (bidRaw) {
+    const byBooking = list.find((s) => stayMatchesBookingId(s, bidRaw));
+    if (byBooking) return byBooking;
+    return null;
+  }
+
+  if (propRaw) {
+    const matches = list.filter((s) => stayMatchesPropertyId(s, propRaw));
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null;
+    return null;
+  }
+
+  return list[0] ?? null;
+}
 
 function normalizeHttpUrl(url: string): string {
   const u = String(url || "").trim();
@@ -72,8 +118,12 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [details, setDetails] = useState<any>(null);
+  const [checkoutBanner, setCheckoutBanner] = useState<{ text: string; tone: "error" | "info" | "success" } | null>(
+    null
+  );
 
   const accent = "#1E33FF";
+  const theme = route?.params?.theme as string | undefined;
 
   const fetchCurrentStay = useCallback(async () => {
     try {
@@ -89,18 +139,10 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
             ? [res.data.currentStay]
             : [];
 
-      let currentStay = list[0] ?? null;
-      if (bookingIdParam) {
-        currentStay =
-          list.find((s: any) => String(s?.booking?.id) === String(bookingIdParam)) ?? null;
-      } else if (propertyIdParam) {
-        currentStay =
-          list.find(
-            (s: any) =>
-              String(s?.property?.id) === String(propertyIdParam) ||
-              String(s?.property?.uniqueId) === String(propertyIdParam)
-          ) ?? currentStay;
-      }
+      const currentStay = resolveCheckoutStay(list, {
+        bookingId: bookingIdParam,
+        propertyId: propertyIdParam,
+      });
 
       if (!currentStay?.booking || !currentStay?.property) {
         setDetails(null);
@@ -127,6 +169,9 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         .filter(Boolean)
         .join(", ");
 
+      const resolvedBookingId =
+        currentStay.booking.id != null ? String(currentStay.booking.id).trim() : "";
+
       setDetails({
         propertyName: currentStay.property.name,
         propertyAddress: address,
@@ -137,6 +182,7 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         ownerId: currentStay.property.ownerId,
         yearMonth: finalYearMonth, // Use consistent yearMonth
         paymentId,
+        bookingId: resolvedBookingId,
       });
     } catch {
       setDetails(null);
@@ -166,6 +212,7 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
     if (!details?.propertyId) return;
 
     setSubmitting(true);
+    setCheckoutBanner(null);
 
     try {
       const profileRes = await userApi.get("/api/users/me");
@@ -176,10 +223,14 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
       const customerPhone = String(p.phone || "").replace(/\D/g, "").slice(-10);
 
       if (!customerPhone || customerPhone.length < 10) {
-        Alert.alert("Profile needed", "Please add phone number.");
+        setCheckoutBanner({ tone: "error", text: "Please add a phone number to your profile first." });
         setSubmitting(false);
         return;
       }
+
+      const rawBid =
+        details.bookingId != null ? String(details.bookingId).trim() : "";
+      const numericBookingId = /^\d+$/.test(rawBid) ? rawBid : "";
 
       const resp = await transactionApi.post("/create-payment-link", {
         amount: details.amount,
@@ -191,6 +242,7 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
           details.paymentType === "rent_online"
             ? "first_rent"
             : "security_deposit",
+        ...(numericBookingId ? { bookingId: numericBookingId } : {}),
         // Pass the target month for rent payments
         ...(details.paymentType === "rent_online" && details.yearMonth && {
           yearMonth: details.yearMonth,
@@ -216,15 +268,15 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         // ✅ Rely on webhook for all payments (recommended architecture)
         // Frontend just opens the link, webhook handles the rest
         dispatch(refreshCurrentStay({ force: true }));
-        
-        Alert.alert(
-          "Payment Link Opened",
-          "Complete the payment in your browser. Your payment status will update automatically.",
-          [{ text: "OK", onPress: () => navigation.goBack() }]
-        );
+
+        setCheckoutBanner({
+          tone: "success",
+          text: "Payment page opened. Complete payment in the browser; status updates automatically.",
+        });
+        setTimeout(() => navigation.goBack(), 1600);
       }
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Payment failed");
+      setCheckoutBanner({ tone: "error", text: e?.message || "Payment failed" });
     } finally {
       setSubmitting(false);
     }
@@ -242,6 +294,30 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
           {paymentType === "rent_online" ? "Rent" : "Security Deposit"}
         </Text>
       </View>
+
+      {checkoutBanner ? (
+        <View
+          className={`mx-6 mt-2 rounded-xl p-3 border ${
+            checkoutBanner.tone === "error"
+              ? "bg-rose-50 border-rose-200"
+              : checkoutBanner.tone === "success"
+                ? "bg-emerald-50 border-emerald-200"
+                : "bg-slate-100 border-slate-200"
+          }`}
+        >
+          <Text
+            className={`text-sm ${
+              checkoutBanner.tone === "error"
+                ? "text-rose-800"
+                : checkoutBanner.tone === "success"
+                  ? "text-emerald-800"
+                  : "text-slate-800"
+            }`}
+          >
+            {checkoutBanner.text}
+          </Text>
+        </View>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 20 }} />

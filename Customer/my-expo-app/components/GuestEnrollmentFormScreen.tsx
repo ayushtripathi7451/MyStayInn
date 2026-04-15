@@ -3,10 +3,8 @@ import {
   View,
   Text,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -132,8 +130,6 @@ function FormRowPair({
 
 export default function GuestEnrollmentFormScreen({ navigation }: any) {
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [signatureName, setSignatureName] = useState("");
   const [form, setForm] = useState<{
     status: string;
     prefilledData?: PrefilledData | null;
@@ -181,34 +177,6 @@ export default function GuestEnrollmentFormScreen({ navigation }: any) {
     }, [fetchForm])
   );
 
-  const handleSign = async () => {
-    const name = signatureName.trim();
-    if (!name || name.length < 2) {
-      Alert.alert("Required", "Please enter your full name to sign.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const res = await bookingApi.post("/api/bookings/guest-enrollment-form/sign", {
-        signatureName: name,
-      });
-      if (res.data?.success) {
-        setForm((prev) =>
-          prev ? { ...prev, status: "signed", signatureName: name, signedAt: new Date().toISOString() } : null
-        );
-        Alert.alert("Signed", "Your enrollment form has been signed and sent to the admin.", [
-          { text: "OK", onPress: () => navigation.goBack() },
-        ]);
-      } else {
-        Alert.alert("Error", res.data?.message || "Failed to sign.");
-      }
-    } catch (e: any) {
-      Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to sign.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-white justify-center items-center">
@@ -245,7 +213,6 @@ export default function GuestEnrollmentFormScreen({ navigation }: any) {
   const pg = data?.pgInfo;
   const guest = data?.guestPersonal;
   const identity = data?.identity;
-  const employment = data?.employment;
   const payment = data?.payment;
   const emergency = data?.emergency;
   const room = data?.roomAllotment;
@@ -292,16 +259,27 @@ export default function GuestEnrollmentFormScreen({ navigation }: any) {
           </View>
         </View>
 
+        <View className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+          <Text className="text-sm text-slate-700 text-center">
+            Enrollment is completed automatically when your room is allocated. This page is for your records only.
+          </Text>
+        </View>
+
         {/* Form body: label + dotted-line value rows */}
         <View className="px-4 py-5">
-          {/* Date (top right) + Name & Mob */}
-          <View className="flex-row justify-between mb-1">
-            <View className="flex-1" />
-            <View className="flex-1 items-end">
-              <Text className="text-xs text-slate-600">Date:</Text>
-              <View className="border-b border-slate-300 w-24 pb-0.5" style={{ borderStyle: "dotted" }}>
+          <View className="flex-row justify-between mb-4 items-start">
+            <View className="flex-1">
+              <Text className="text-xs text-slate-600 mb-1">Move-in Date</Text>
+              <View className="border-b border-slate-300 w-28 pb-0.5" style={{ borderStyle: "dotted" }}>
                 <Text className="text-sm text-slate-900">{toDisplayValue(room?.date) || " "}</Text>
               </View>
+            </View>
+            <View className="w-24 h-28 border border-slate-300 rounded items-center justify-center bg-slate-50 ml-4">
+              {room?.guestPhotoUrl ? (
+                <Image source={{ uri: room.guestPhotoUrl }} className="w-full h-full rounded" resizeMode="cover" />
+              ) : (
+                <Text className="text-xs text-slate-400 text-center px-1">Guest Photo</Text>
+              )}
             </View>
           </View>
           <FormRowPair label1="Name" value1={guest?.name} label2="Mob." value2={guest?.mobile} />
@@ -322,49 +300,35 @@ export default function GuestEnrollmentFormScreen({ navigation }: any) {
               </Text>
             </View>
           </View>
-          {guest?.addressAsPerAadhaar ? (
-            <View className="mb-3">
-              <Text className="text-xs text-slate-600 font-medium mb-0.5">Address as per Aadhaar</Text>
-              <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
-                <Text className="text-sm text-slate-900" numberOfLines={2}>
-                  {guest.addressAsPerAadhaar}
-                </Text>
-              </View>
+          <View className="mb-3">
+            <Text className="text-xs text-slate-600 font-medium mb-0.5">Address as per Aadhaar</Text>
+            <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
+              <Text className="text-sm text-slate-900" numberOfLines={3}>
+                {guest?.addressAsPerAadhaar ? String(guest.addressAsPerAadhaar) : "—"}
+              </Text>
             </View>
-          ) : null}
-          {guest?.currentAddress && guest.currentAddress !== toDisplayValue(guest?.permanentAddress) ? (
-            <View className="mb-3">
-              <Text className="text-xs text-slate-600 font-medium mb-0.5">Current Address</Text>
-              <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
-                <Text className="text-sm text-slate-900" numberOfLines={2}>
-                  {guest.currentAddress}
-                </Text>
-              </View>
+          </View>
+          <View className="mb-3">
+            <Text className="text-xs text-slate-600 font-medium mb-0.5">Current Address</Text>
+            <View className="border-b border-slate-300 pb-1" style={{ borderStyle: "dotted" }}>
+              <Text className="text-sm text-slate-900" numberOfLines={3}>
+                {guest?.currentAddress ? String(guest.currentAddress) : "—"}
+              </Text>
             </View>
-          ) : null}
+          </View>
           <FormRow label="E-Mail ID" value={guest?.email} />
           <FormRow label="ID Proof Details" value={identity?.idProofDetails} />
           <FormRow label="Aadhaar No #" value={identity?.aadhaarNumber} />
           <FormRow label="Deposit Received Amt Rs." value={payment?.depositReceivedAmount} />
           <FormRow label="Monthly Rent Amt Rs." value={payment?.monthlyRentAmount} />
 
-          {/* Room allotment + Photo box (two-column on paper; we stack on mobile) */}
-          <View className="mt-4 flex-row gap-4">
-            <View className="flex-1">
-              <Text className="text-xs text-slate-600 font-medium mb-1">Guest Room allotment</Text>
-              <View
-                className="border border-slate-300 rounded-lg px-3 py-2 min-h-[44px]"
-                style={{ borderStyle: "dotted" }}
-              >
-                <Text className="text-sm text-slate-900">{toDisplayValue(room?.guestRoomAllotment) || " "}</Text>
-              </View>
-            </View>
-            <View className="w-24 h-28 border border-slate-300 rounded items-center justify-center bg-slate-50">
-              {room?.guestPhotoUrl ? (
-                <Image source={{ uri: room.guestPhotoUrl }} className="w-full h-full rounded" resizeMode="cover" />
-              ) : (
-                <Text className="text-xs text-slate-400">Photo</Text>
-              )}
+          <View className="mt-2">
+            <Text className="text-xs text-slate-600 font-medium mb-1">Guest Room allotment</Text>
+            <View
+              className="border border-slate-300 rounded-lg px-3 py-2 min-h-[44px]"
+              style={{ borderStyle: "dotted" }}
+            >
+              <Text className="text-sm text-slate-900">{toDisplayValue(room?.guestRoomAllotment) || " "}</Text>
             </View>
           </View>
         </View>
@@ -384,52 +348,33 @@ export default function GuestEnrollmentFormScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Signature section */}
+        {/* Signature — system-completed at allocation */}
         <View className="px-4 py-6 border-t-2 border-slate-400 mt-2">
-          <View>
-            <Text className="text-xs font-semibold text-slate-700 mb-1">Signature of Guest</Text>
-              {isSigned ? (
-                <View className="border-b border-slate-400 py-2">
-                  <Text className="text-sm font-semibold text-slate-900">{form?.signatureName || "—"}</Text>
-                  {form?.signedAt ? (
-                    <Text className="text-xs text-slate-500 mt-0.5">
-                      {new Date(form.signedAt).toLocaleDateString("en-GB", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : (
-                <>
-                  <TextInput
-                    value={signatureName}
-                    onChangeText={setSignatureName}
-                    placeholder="Enter your full name"
-                    placeholderTextColor="#94A3B8"
-                    className="border-b border-slate-400 py-2 text-slate-900 font-medium text-sm"
-                  />
-                  <TouchableOpacity
-                    onPress={handleSign}
-                    disabled={submitting}
-                    className="mt-4 bg-slate-800 py-3 rounded"
-                  >
-                    {submitting ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text className="text-white text-center font-semibold">Sign & Submit</Text>
-                    )}
-                  </TouchableOpacity>
-                </>
-              )}
-          </View>
-          {isSigned && (
-            <View className="mt-4 bg-green-50 rounded-lg p-3 border border-green-200">
-              <Text className="text-green-800 text-sm font-medium">
-                This form has been signed and sent to the admin.
-              </Text>
-            </View>
+          <Text className="text-xs font-semibold text-slate-700 mb-1">Signature of Guest</Text>
+          {isSigned ? (
+            <>
+              <View className="border-b border-slate-400 py-2">
+                <Text className="text-sm font-semibold text-slate-900">{form?.signatureName || "—"}</Text>
+                {form?.signedAt ? (
+                  <Text className="text-xs text-slate-500 mt-0.5">
+                    {new Date(form.signedAt).toLocaleDateString("en-GB", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </Text>
+                ) : null}
+              </View>
+              <View className="mt-4 bg-green-50 rounded-lg p-3 border border-green-200">
+                <Text className="text-green-800 text-sm font-medium">
+                  Signed automatically when your room was allocated. A copy was sent to the property.
+                </Text>
+              </View>
+            </>
+          ) : (
+            <Text className="text-amber-800 text-sm py-2">
+              Your enrollment will appear here after the property completes room allocation.
+            </Text>
           )}
         </View>
       </ScrollView>

@@ -64,6 +64,8 @@ export default function CreateMPINScreen({ navigation }: any) {
     mpin === confirm &&
     isChecked;
 
+  const buttonFilled = isValid || loading;
+
   const handleSaveMPIN = async () => {
     try {
       setLoading(true);
@@ -138,9 +140,9 @@ export default function CreateMPINScreen({ navigation }: any) {
 
             {/* PROGRESS */}
             <View className="flex-row justify-center mt-3 mb-8">
-              <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-6 h-1.5 bg-purple-500 rounded-full mx-1" />
-              <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+              <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+              <View className="w-6 h-1.5 bg-indigo-500 rounded-full mx-1" />
+              <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
             </View>
 
             {/* ENTER MPIN */}
@@ -212,7 +214,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               <View
                 className={`w-5 h-5 rounded border mr-3 ${
                   isChecked
-                    ? "bg-purple-600 border-purple-600"
+                    ? "bg-indigo-600 border-indigo-600"
                     : "border-gray-400"
                 } items-center justify-center`}
               >
@@ -223,7 +225,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               <Text className="text-gray-700">
                 I agree to the{" "}
                 <Text
-                  className="font-semibold text-purple-600"
+                  className="font-semibold text-indigo-600"
                   onPress={() => setShowTerms(true)}
                 >
                   Terms & Conditions
@@ -235,12 +237,19 @@ export default function CreateMPINScreen({ navigation }: any) {
             <TouchableOpacity
               disabled={!isValid || loading}
               onPress={handleSaveMPIN}
-              className={`w-full py-4 rounded-xl mt-10 flex-row justify-center items-center ${
-                isValid && !loading ? "bg-purple-600" : "bg-purple-300"
+              className={`w-full py-4 rounded-xl mt-10 flex-row justify-center items-center border-2 ${
+                buttonFilled
+                  ? "bg-indigo-600 border-indigo-600"
+                  : "bg-indigo-100 border-indigo-200"
               }`}
+              accessibilityState={{ disabled: !isValid || loading }}
             >
-              {loading && <ActivityIndicator color="white" className="mr-2" />}
-              <Text className="text-center text-white font-semibold text-lg">
+              {loading && <ActivityIndicator color="#FFFFFF" className="mr-2" />}
+              <Text
+                className={`text-center font-semibold text-lg ${
+                  buttonFilled ? "text-white" : "text-indigo-800"
+                }`}
+              >
                 {loading ? "Creating MPIN..." : "Continue"}
               </Text>
             </TouchableOpacity>
@@ -251,8 +260,8 @@ export default function CreateMPINScreen({ navigation }: any) {
         <View className="absolute bottom-4 left-0 right-0 items-center">
           <Text className="text-center text-gray-600 text-sm px-8 w-[300px]">
             By using MyStayInn, you agree to the{" "}
-            <Text className="font-semibold">Terms</Text> and{" "}
-            <Text className="font-semibold">Privacy Policy</Text>.
+            <Text className="font-semibold text-gray-700">Terms</Text> and{" "}
+            <Text className="font-semibold text-gray-700">Privacy Policy</Text>.
           </Text>
         </View>
 
@@ -278,7 +287,7 @@ export default function CreateMPINScreen({ navigation }: any) {
               </ScrollView>
               <TouchableOpacity
                 onPress={() => { setIsChecked(true); setShowTerms(false); }}
-                className="bg-purple-600 py-4 rounded-xl mt-4 items-center"
+                className="bg-indigo-600 py-4 rounded-xl mt-4 items-center"
               >
                 <Text className="text-white font-semibold text-base">I Agree</Text>
               </TouchableOpacity>

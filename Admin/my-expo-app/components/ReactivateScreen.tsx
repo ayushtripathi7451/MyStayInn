@@ -226,7 +226,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
             disabled={mobile.length !== 10}
             className="py-4 rounded-xl mb-6"
             style={{
-              backgroundColor: "#A855F7",
+              backgroundColor: "#4F46E5",
               opacity: mobile.length === 10 ? 1 : 0.5,
             }}
           >
@@ -266,7 +266,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
               </Text>
             ) : (
               <TouchableOpacity onPress={sendOTP}>
-                <Text className="text-purple-600 font-semibold mb-4">
+                <Text className="text-indigo-600 font-semibold mb-4">
                   Resend OTP
                 </Text>
               </TouchableOpacity>
@@ -277,7 +277,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
               disabled={otp.length !== 6}
               className="py-4 rounded-xl"
               style={{
-                backgroundColor: "#A855F7",
+                backgroundColor: "#4F46E5",
                 opacity: otp.length === 6 ? 1 : 0.5,
               }}
             >
@@ -358,7 +358,7 @@ export default function ChangeMPINScreen({ navigation }: any) {
               disabled={newPin.length !== 4 || confirmPin.length !== 4 || isMismatch}
               className="py-4 rounded-xl"
               style={{
-                backgroundColor: "#A855F7",
+                backgroundColor: "#4F46E5",
                 opacity:
                   newPin.length === 4 &&
                   confirmPin.length === 4 &&

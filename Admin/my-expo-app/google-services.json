@@ -12,7 +12,12 @@
           "package_name": "mystayy.com"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "616137550294-4vik65p98fb3beu9u60u9to8b54j4bm7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAGYbj0Yha9eWo_B2OkZFPtzyVd1ak0jzA"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "616137550294-4vik65p98fb3beu9u60u9to8b54j4bm7.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     },
@@ -31,7 +41,12 @@
           "package_name": "mystayyuser.com"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "616137550294-4vik65p98fb3beu9u60u9to8b54j4bm7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAGYbj0Yha9eWo_B2OkZFPtzyVd1ak0jzA"
@@ -39,7 +54,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "616137550294-4vik65p98fb3beu9u60u9to8b54j4bm7.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

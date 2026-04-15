@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StatusBar,
   TextInput,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -38,14 +37,16 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
   const [adminComments, setAdminComments] = useState("");
   const [securityDepositReturned, setSecurityDepositReturned] = useState("");
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const submit = async () => {
+    setFormError(null);
     if (!customerId || !bookingId || !roomId) {
-      Alert.alert("Error", "Missing customer or booking details.");
+      setFormError("Missing customer or booking details.");
       return;
     }
     if (!adminComments.trim()) {
-      Alert.alert("Validation", "Admin comments are required.");
+      setFormError("Admin comments are required.");
       return;
     }
 
@@ -66,18 +67,14 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
           securityDepositReturned.trim() !== "" ? parseFloat(securityDepositReturned) : undefined,
       });
       if (res.data?.success) {
-        Alert.alert("Success", "Move-out initiated. It will appear in the Accepted tab.", [
-          {
-            text: "OK",
-            onPress: () => navigation.navigate("MoveOutManagementScreen", { openTab: "accepted" }),
-          },
-        ]);
+        setTimeout(() => {
+          navigation.navigate("MoveOutManagementScreen", { openTab: "accepted" });
+        }, 0);
       } else {
-        Alert.alert("Error", res.data?.message || "Failed to initiate move-out");
+        setFormError(res.data?.message || "Failed to initiate move-out");
       }
     } catch (err: any) {
-      Alert.alert(
-        "Error",
+      setFormError(
         err?.response?.data?.message || err?.message || "Failed to initiate move-out"
       );
     } finally {
@@ -98,6 +95,12 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
       </View>
 
       <ScrollView className="flex-1 px-5" showsVerticalScrollIndicator={false}>
+        {formError ? (
+          <View className="mt-4 p-4 rounded-xl bg-red-50 border border-red-100">
+            <Text className="text-red-700 text-sm leading-5">{formError}</Text>
+          </View>
+        ) : null}
+
         <View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
           <Text className="text-slate-500 font-medium mb-1">Tenant</Text>
           <Text className="text-lg font-bold text-slate-900">{customerName}</Text>
@@ -120,7 +123,10 @@ export default function AdminInitiateMoveOutScreen({ navigation, route }: AdminI
           <Text className="text-slate-700 font-bold mb-2">Admin comments *</Text>
           <TextInput
             value={adminComments}
-            onChangeText={setAdminComments}
+            onChangeText={(t) => {
+              setAdminComments(t);
+              if (formError) setFormError(null);
+            }}
             placeholder="Add comments (required, e.g. reason/notes)"
             placeholderTextColor="#94A3B8"
             className="border border-slate-200 rounded-xl px-4 py-3 text-slate-900 min-h-[80px]"

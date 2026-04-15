@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StatusBar,
   RefreshControl,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
@@ -26,7 +25,7 @@ export default function MoveOutManagementScreen({ navigation, route }: MoveOutMa
   const propertyId = currentProperty?.id;
   const propertyUniqueId = currentProperty?.uniqueId ?? currentProperty?.id;
   const openTabParam = route?.params?.openTab;
-  const [activeTab, setActiveTab] = useState<'requested' | 'accepted'>(openTabParam ?? 'accepted');
+  const [activeTab, setActiveTab] = useState<'requested' | 'accepted'>(openTabParam ?? 'requested');
   const [pendingRequests, setPendingRequests] = useState<MoveOutRequest[]>([]);
   const [scheduledMoveOuts, setScheduledMoveOuts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -58,7 +57,7 @@ export default function MoveOutManagementScreen({ navigation, route }: MoveOutMa
         const tenantRequestedOnly = requestsRes.data.requests.filter(
           (r: MoveOutRequest) => r.type !== "admin_initiated"
         );
-        const scoped =
+        let scoped =
           propertyId || currentProperty?.name || propertyUniqueId
             ? tenantRequestedOnly.filter((r) =>
                 moveOutRequestMatchesProperty(r, {
@@ -68,12 +67,70 @@ export default function MoveOutManagementScreen({ navigation, route }: MoveOutMa
                 })
               )
             : tenantRequestedOnly;
+        // Rows with propertyId=null are excluded by API ?propertyId= — widen like scheduled move-outs
+        if (
+          scoped.length === 0 &&
+          (propertyId || propertyUniqueId || currentProperty?.name)
+        ) {
+          const wideRes = await MoveOutService.getMoveOutRequests(undefined, "pending", undefined);
+          if (wideRes.success && wideRes.data?.requests?.length) {
+            const tenantWide = wideRes.data.requests.filter(
+              (r: MoveOutRequest) => r.type !== "admin_initiated"
+            );
+            scoped = tenantWide.filter((r) =>
+              moveOutRequestMatchesProperty(r, {
+                propertyId,
+                propertyName: currentProperty?.name,
+                propertyUniqueId,
+              })
+            );
+          }
+        }
         setPendingRequests(scoped);
       } else {
         setPendingRequests([]);
       }
       if (scheduledRes.success && scheduledRes.data) {
-        setScheduledMoveOuts(scheduledRes.data);
+        let scheduled = scheduledRes.data;
+        // Rows created before propertyId was passed have propertyId=null and are excluded by API filter — widen and scope client-side
+        if (
+          scheduled.length === 0 &&
+          (propertyId || propertyUniqueId || currentProperty?.name)
+        ) {
+          const wide = await MoveOutService.getScheduledMoveOuts(undefined);
+          if (wide.success && wide.data?.length) {
+            scheduled = wide.data.filter((r: any) =>
+              moveOutRequestMatchesProperty(
+                {
+                  propertyId: r.propertyId,
+                  propertyUniqueId: r.propertyUniqueId,
+                  propertyName: r.propertyName,
+                },
+                {
+                  propertyId,
+                  propertyName: currentProperty?.name,
+                  propertyUniqueId,
+                }
+              )
+            );
+          }
+        } else if (propertyId || propertyUniqueId || currentProperty?.name) {
+          scheduled = scheduled.filter((r: any) =>
+            moveOutRequestMatchesProperty(
+              {
+                propertyId: r.propertyId,
+                propertyUniqueId: r.propertyUniqueId,
+                propertyName: r.propertyName,
+              },
+              {
+                propertyId,
+                propertyName: currentProperty?.name,
+                propertyUniqueId,
+              }
+            )
+          );
+        }
+        setScheduledMoveOuts(scheduled);
       } else {
         setScheduledMoveOuts([]);
       }
@@ -228,6 +285,11 @@ export default function MoveOutManagementScreen({ navigation, route }: MoveOutMa
 
       {/* Tab Navigation */}
       <View className="bg-white px-6 py-4 border-b border-slate-100">
+        <View className="mb-3 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+          <Text className="text-indigo-800 font-bold text-sm">
+            Requested → Accepted → Moved Out
+          </Text>
+        </View>
         <View className="flex-row bg-slate-100 rounded-xl p-1">
           <TouchableOpacity
             className={`flex-1 py-3 rounded-lg ${

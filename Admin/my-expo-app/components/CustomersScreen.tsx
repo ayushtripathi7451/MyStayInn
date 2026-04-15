@@ -11,7 +11,6 @@ import {
   TouchableWithoutFeedback,
   TextInput,
   ActivityIndicator,
-  Alert,
   Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -61,6 +60,16 @@ const ENROLLMENT_DB = DUMMY_TENANTS.filter(t => t.status === "active").map(tenan
   status: tenant.kycStatus === "Verified" ? "Approved" : "Requested",
 }));
 
+function enrollmentCardPhoto(name: string, apiPhoto?: string | null) {
+  const p = typeof apiPhoto === "string" ? apiPhoto.trim() : "";
+  if (p) return p;
+  return (
+    "https://ui-avatars.com/api/?name=" +
+    encodeURIComponent(name || "C") +
+    "&size=150&background=3B82F6&color=fff"
+  );
+}
+
 export default function CustomersScreen() {
   const navigation = useNavigation<NavigationProp<any>>();
   const route = useRoute();
@@ -82,6 +91,16 @@ export default function CustomersScreen() {
     useState<any[]>(ENROLLMENT_DB);
   const [enrollmentList, setEnrollmentList] = useState<any[]>([]);
   const [enrollmentLoading, setEnrollmentLoading] = useState(false);
+  const [customerBanner, setCustomerBanner] = useState<{
+    text: string;
+    variant: "error" | "success" | "warning";
+  } | null>(null);
+
+  useEffect(() => {
+    if (!customerBanner) return;
+    const t = setTimeout(() => setCustomerBanner(null), 6500);
+    return () => clearTimeout(t);
+  }, [customerBanner]);
 
   // Fetch enrollment requests for the current property only (so customer enrolled in A doesn't show in B)
   useEffect(() => {
@@ -102,7 +121,7 @@ export default function CustomersScreen() {
               mystayId: r.mystayId || r.uniqueId || r.id,
               name: r.name || "Customer",
               phone: r.phone || "—",
-              photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
+              photo: enrollmentCardPhoto(r.name || "Customer", r.photo),
               kycStatus: "Requested",
               roomPreference: r.roomPreference || "—",
               moveInDate: r.moveInDate,
@@ -151,7 +170,7 @@ export default function CustomersScreen() {
             mystayId: r.mystayId || r.uniqueId || r.id,
             name: r.name || "Customer",
             phone: r.phone || "—",
-            photo: "https://ui-avatars.com/api/?name=" + encodeURIComponent(r.name || "C") + "&size=150&background=3B82F6&color=fff",
+            photo: enrollmentCardPhoto(r.name || "Customer", r.photo),
             kycStatus: "Requested",
             roomPreference: r.roomPreference || "—",
             moveInDate: r.moveInDate,
@@ -235,7 +254,10 @@ export default function CustomersScreen() {
     const isId = /^MYS\d{2}[A-Z]\d{6}$/i.test(q);
 
     if (!isPhone && !isId) {
-      Alert.alert("Invalid Input", "Please enter a valid 10-digit phone number or MyStayInn ID (e.g., MYS25A000001)");
+      setCustomerBanner({
+        variant: "warning",
+        text: "Please enter a valid 10-digit phone number or MyStayInn ID (e.g., MYS25A000001)",
+      });
       setSearchResults([]);
       return;
     }
@@ -270,13 +292,13 @@ export default function CustomersScreen() {
             // Show WhatsApp invite for phone searches
             return;
           }
-          Alert.alert("Not Found", "No customer found with this ID");
+          setCustomerBanner({ variant: "warning", text: "No customer found with this ID" });
         }
       } else {
         setSearchResults([]);
         // Customer not found - for phone searches, show WhatsApp option
         if (!isPhone) {
-          Alert.alert("Not Found", "No customer found with this ID");
+          setCustomerBanner({ variant: "warning", text: "No customer found with this ID" });
         }
       }
     } catch (error: any) {
@@ -286,10 +308,10 @@ export default function CustomersScreen() {
       if (error.response?.status === 404) {
         // Customer not found - for phone searches, show WhatsApp option
         if (!isPhone) {
-          Alert.alert("Not Found", "No customer found with this ID");
+          setCustomerBanner({ variant: "warning", text: "No customer found with this ID" });
         }
       } else {
-        Alert.alert("Error", "Failed to search customer. Please try again.");
+        setCustomerBanner({ variant: "error", text: "Failed to search customer. Please try again." });
       }
     } finally {
       setSearching(false);
@@ -306,7 +328,7 @@ export default function CustomersScreen() {
         phone: phoneWithCode,
       });
       if (res.data?.success) {
-        Alert.alert("Sent", "WhatsApp invitation was sent to this number.");
+        setCustomerBanner({ variant: "success", text: "WhatsApp invitation was sent to this number." });
         setSearchQuery("");
         setSearchResults([]);
         setHasSearched(false);
@@ -326,11 +348,11 @@ export default function CustomersScreen() {
           setSearchResults([]);
           setHasSearched(false);
         } catch {
-          Alert.alert("Error", "Unable to open WhatsApp");
+          setCustomerBanner({ variant: "error", text: "Unable to open WhatsApp" });
         }
         return;
       }
-      Alert.alert("Error", msg || "Failed to send WhatsApp invite");
+      setCustomerBanner({ variant: "error", text: msg || "Failed to send WhatsApp invite" });
     }
   };
 
@@ -372,6 +394,29 @@ export default function CustomersScreen() {
 
       {/* BODY */}
       <View className="flex-1 bg-[#F6F8FF] rounded-t-[40px] -mt-6 px-4 pt-6">
+        {customerBanner ? (
+          <View
+            className={`mb-4 rounded-xl p-3 border ${
+              customerBanner.variant === "error"
+                ? "bg-rose-50 border-rose-200"
+                : customerBanner.variant === "success"
+                  ? "bg-emerald-50 border-emerald-200"
+                  : "bg-amber-50 border-amber-200"
+            }`}
+          >
+            <Text
+              className={`text-sm ${
+                customerBanner.variant === "error"
+                  ? "text-rose-800"
+                  : customerBanner.variant === "success"
+                    ? "text-emerald-800"
+                    : "text-amber-800"
+              }`}
+            >
+              {customerBanner.text}
+            </Text>
+          </View>
+        ) : null}
         {/* TAB SWITCH */}
         <View className="flex-row bg-[#1E33FF] rounded-full p-1 mb-6">
           {["customer", "enrollment"].map((t) => (
@@ -601,19 +646,6 @@ export default function CustomersScreen() {
                             MyStayInnID: {e.mystayId}
                           </Text>
                         </View>
-                        <Text
-                          className={`text-sm font-bold ${
-                            e.status === "Approved"
-                              ? "text-green-700"
-                              : e.status === "Rejected"
-                              ? "text-red-700"
-                              : e.status === "Pay pending"
-                              ? "text-amber-700"
-                              : "text-orange-600"
-                          }`}
-                        >
-                          {e.status}
-                        </Text>
                       </View>
 
                       <View className="flex-row justify-between mt-3">

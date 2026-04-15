@@ -120,33 +120,7 @@ export default function NotificationScreen() {
           </TouchableOpacity>
         </View>
 
-        <View className="flex-row bg-[#EFF1F5] mx-6 rounded-full p-1 mt-4">
-          <TouchableOpacity
-            onPress={() => setTab("recent")}
-            className={`flex-1 py-2 rounded-full ${tab === "recent" ? "bg-white shadow" : ""}`}
-          >
-            <Text
-              className={`text-center font-semibold ${
-                tab === "recent" ? "text-indigo-600" : "text-gray-500"
-              }`}
-            >
-              Recent
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setTab("past")}
-            className={`flex-1 py-2 rounded-full ${tab === "past" ? "bg-white shadow" : ""}`}
-          >
-            <Text
-              className={`text-center font-semibold ${
-                tab === "past" ? "text-indigo-600" : "text-gray-500"
-              }`}
-            >
-              Past History
-            </Text>
-          </TouchableOpacity>
-        </View>
+        
       </View>
 
       <ScrollView

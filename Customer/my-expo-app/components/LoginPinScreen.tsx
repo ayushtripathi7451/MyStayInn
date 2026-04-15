@@ -23,7 +23,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function LoginPinScreen({ navigation }: any) {
   const [globalPinFocus, setGlobalPinFocus] = useState(false);
-  const [mode, setMode] = useState<"pin" | "biometric">("pin");
+  const [mode, setMode] = useState<"pin" | "biometric">("biometric");
   const { theme } = useTheme();
   const { name } = useUser();
   const displayName = name || "User";

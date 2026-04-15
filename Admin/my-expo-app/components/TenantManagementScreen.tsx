@@ -38,6 +38,35 @@ interface BookingWithDetails {
   rentCashPaidYearMonth?: string | null;
 }
 
+interface BackendInactiveTenant {
+  id?: string;
+  uniqueId?: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  sex?: string;
+  profession?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  aadhaarStatus?: string;
+  kycStatus?: string;
+  profileImage?: string;
+  profileExtras?: Record<string, any>;
+  roomId?: string;
+  roomNumber?: string;
+  floor?: string | number;
+  propertyId?: string;
+  propertyName?: string;
+  moveInDate?: string;
+  moveOutDate?: string;
+  securityDeposit?: number;
+  currentDue?: number;
+  movedOutAt?: string;
+  moveOutRequestId?: string;
+}
+
 function isEnrollmentBookingStatus(status: string | undefined): boolean {
   const s = String(status || "").toLowerCase();
   return (
@@ -101,6 +130,59 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const mergeInactiveTenants = (
+    backendRows: BackendInactiveTenant[],
+    localRows: InactiveTenantSnapshot[]
+  ): InactiveTenantSnapshot[] => {
+    const out: InactiveTenantSnapshot[] = [];
+    const seen = new Set<string>();
+
+    const pushUnique = (row: InactiveTenantSnapshot) => {
+      const key = `${String(row.uniqueId || "").trim().toLowerCase()}|${String(row.id || "").trim()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(row);
+    };
+
+    backendRows.forEach((t) => {
+      pushUnique({
+        id: String(t.id ?? t.uniqueId ?? ""),
+        uniqueId: String(t.uniqueId ?? ""),
+        firstName: String(t.firstName ?? ""),
+        lastName: String(t.lastName ?? ""),
+        name:
+          String(t.name ?? "").trim() ||
+          [String(t.firstName ?? "").trim(), String(t.lastName ?? "").trim()].filter(Boolean).join(" ") ||
+          "Tenant",
+        phone: String(t.phone ?? ""),
+        email: String(t.email ?? ""),
+        sex: t.sex,
+        profession: t.profession,
+        emergencyName: t.emergencyName,
+        emergencyPhone: t.emergencyPhone,
+        aadhaarStatus: t.aadhaarStatus,
+        kycStatus: t.kycStatus,
+        profileImage: t.profileImage,
+        profileExtras: t.profileExtras,
+        roomId: t.roomId,
+        roomNumber: t.roomNumber,
+        floor: t.floor,
+        propertyId: t.propertyId,
+        propertyName: t.propertyName,
+        moveInDate: t.moveInDate,
+        moveOutDate: t.moveOutDate,
+        securityDeposit: t.securityDeposit,
+        currentDue: t.currentDue,
+        movedOutAt: t.movedOutAt || new Date().toISOString(),
+        moveOutRequestId: t.moveOutRequestId,
+        status: "inactive",
+      });
+    });
+
+    localRows.forEach((t) => pushUnique(t));
+    return out;
+  };
+
   const fetchData = useCallback(async () => {
     try {
       setError(null);
@@ -113,10 +195,11 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
         return;
       }
       const params: Record<string, string> = { propertyId };
-      const [bookingsRes, requestedRes, acceptedRes] = await Promise.all([
+      const [bookingsRes, requestedRes, acceptedRes, inactiveRes] = await Promise.all([
         bookingApi.get("/api/bookings/list/active-with-details", { params, timeout: 15000 }),
         moveOutApi.get("/api/move-out/requests", { params: { status: "requested", propertyId }, timeout: 10000 }).catch(() => ({ data: { data: { requests: [] } } })),
         moveOutApi.get("/api/move-out/requests", { params: { status: "accepted", propertyId }, timeout: 10000 }).catch(() => ({ data: { data: { requests: [] } } })),
+        bookingApi.get("/api/bookings/list/inactive-for-property", { params: { propertyId }, timeout: 15000 }).catch(() => ({ data: { success: false, tenants: [] } })),
       ]);
 
       if (bookingsRes.data?.success && Array.isArray(bookingsRes.data.bookings)) {
@@ -137,9 +220,13 @@ export default function TenantManagementScreen({ navigation }: { navigation: any
       requested.forEach((r: any) => r.customerId && ids.add(String(r.customerId)));
       accepted.forEach((r: any) => r.customerId && ids.add(String(r.customerId)));
       setMoveOutCustomerIds(ids);
-      const inactive = await getInactiveTenants();
+      const inactiveLocal = await getInactiveTenants();
+      const inactiveBackend = (inactiveRes?.data?.success && Array.isArray(inactiveRes.data.tenants)
+        ? inactiveRes.data.tenants
+        : []) as BackendInactiveTenant[];
+      const mergedInactive = mergeInactiveTenants(inactiveBackend, inactiveLocal);
       setInactiveTenants(
-        inactive.filter((tenant) =>
+        mergedInactive.filter((tenant) =>
           bookingBelongsToProperty(
             {
               room: {

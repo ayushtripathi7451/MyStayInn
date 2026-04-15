@@ -6,7 +6,7 @@ export default function InfoCards() {
   const data = [
     { value: 40, color: "#00C0DB" }, // cyan
     { value: 47, color: "#FFA647" }, // orange
-    { value: 23, color: "#B39DFF" }, // purple
+    { value: 23, color: "#818CF8" }, // indigo
     { value: 20, color: "#FF6AC4" }, // pink
   ];
 
@@ -73,7 +73,7 @@ export default function InfoCards() {
 
       <View className="flex-row justify-between mt-3 px-2">
         <View className="flex-row items-center">
-          <View className="w-3 h-3 rounded-full bg-[#B39DFF]" />
+          <View className="w-3 h-3 rounded-full bg-[#818CF8]" />
           <Text className="ml-2 text-gray-700">other</Text>
         </View>
 

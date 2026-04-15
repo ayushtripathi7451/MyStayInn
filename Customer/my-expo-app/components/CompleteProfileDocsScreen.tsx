@@ -18,6 +18,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CommonActions } from "@react-navigation/native";
 import { useTheme } from "../context/ThemeContext";
 import { api, userApi } from "../utils/api";
 
@@ -116,12 +117,10 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
         return;
       }
 
-      // Launch image picker with cropping
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
-        allowsEditing: true,
-        aspect: [4, 3], // Good aspect ratio for documents
-        quality: 0.5,
+        allowsEditing: false,
+        quality: 1,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -167,41 +166,26 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
     (!requiresExtraId || (idFront && idBack));
 
   /**
-   * Document uploads: keep under ~500KB file / ~700KB base64 so nginx (often 1MB) + JSON keys do not 413.
+   * Full frame only — no crop, no shrinking dimensions here (only JPEG re-encode).
+   * Size limits are handled in ensureBase64UnderLimit with compress-first, then aspect-preserving resize.
    */
   const prepareLocalImageForUpload = async (uri: string): Promise<string> => {
     if (!uri.startsWith("file://")) return uri;
-    const maxEdge = 600;
-    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
-      Image.getSize(
-        uri,
-        (w, h) => resolve({ width: w, height: h }),
-        (e) => reject(e)
-      );
-    });
-    const actions: ImageManipulator.Action[] = [];
-    if (width > maxEdge || height > maxEdge) {
-      if (width >= height) {
-        actions.push({ resize: { width: maxEdge } });
-      } else {
-        actions.push({ resize: { height: maxEdge } });
-      }
-    }
-    const manipulated = await ImageManipulator.manipulateAsync(uri, actions, {
-      compress: 0.3,
+    const manipulated = await ImageManipulator.manipulateAsync(uri, [], {
+      compress: 0.92,
       format: ImageManipulator.SaveFormat.JPEG,
     });
     return manipulated.uri;
   };
 
-  /** Re-encode until base64 fits typical 1MB proxy limits (filename + JSON overhead). */
+  /** Re-encode until base64 fits typical 1MB proxy limits — compress first; resize preserves full image (no crop). */
   const ensureBase64UnderLimit = async (startUri: string): Promise<string> => {
     const MAX_BASE64_CHARS = 300_000;
     let u = startUri;
     let base64 = await FileSystem.readAsStringAsync(u, { encoding: "base64" });
     if (base64.length <= MAX_BASE64_CHARS) return base64;
 
-    for (const q of [0.4, 0.34, 0.28, 0.24]) {
+    for (const q of [0.72, 0.6, 0.5, 0.42, 0.36, 0.32, 0.28, 0.24]) {
       const m = await ImageManipulator.manipulateAsync(u, [], {
         compress: q,
         format: ImageManipulator.SaveFormat.JPEG,
@@ -211,11 +195,22 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       if (base64.length <= MAX_BASE64_CHARS) return base64;
     }
 
-    const m2 = await ImageManipulator.manipulateAsync(
-      u,
-      [{ resize: { width: 640 } }],
-      { compress: 0.28, format: ImageManipulator.SaveFormat.JPEG }
-    );
+    const maxEdge = 1600;
+    const { width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+      Image.getSize(u, (w, h) => resolve({ width: w, height: h }), (e) => reject(e));
+    });
+    const actions: ImageManipulator.Action[] = [];
+    if (width > maxEdge || height > maxEdge) {
+      if (width >= height) {
+        actions.push({ resize: { width: maxEdge } });
+      } else {
+        actions.push({ resize: { height: maxEdge } });
+      }
+    }
+    const m2 = await ImageManipulator.manipulateAsync(u, actions, {
+      compress: 0.32,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
     base64 = await FileSystem.readAsStringAsync(m2.uri, { encoding: "base64" });
     if (base64.length <= MAX_BASE64_CHARS) return base64;
 
@@ -359,7 +354,9 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
       console.log('[CompleteProfileDocsScreen] Response:', response.data);
 
       if (response.data.success) {
-        navigation.navigate("Home");
+        navigation.dispatch(
+          CommonActions.reset({ index: 0, routes: [{ name: "Home" }] })
+        );
       } else {
         showBannerError(
           response.data.message || "Failed to complete profile"
@@ -499,7 +496,11 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
                     onPress={() => pickImage(item.setter, item.label)}
                   >
                     {item.value ? (
-                      <Image source={{ uri: item.value }} className="w-full h-full" />
+                      <Image
+                        source={{ uri: item.value }}
+                        className="w-full h-full"
+                        resizeMode="contain"
+                      />
                     ) : (
                       <>
                         <Ionicons
@@ -531,7 +532,11 @@ export default function CompleteProfileDocsScreen({ navigation, route }: any) {
                         onPress={() => pickImage(item.setter, item.label)}
                       >
                         {item.value ? (
-                          <Image source={{ uri: item.value }} className="w-full h-full" />
+                          <Image
+                            source={{ uri: item.value }}
+                            className="w-full h-full"
+                            resizeMode="contain"
+                          />
                         ) : (
                           <>
                             <Ionicons

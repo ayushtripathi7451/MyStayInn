@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
@@ -74,6 +73,16 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
   const [priority, setPriority] = useState<"normal" | "high">(template?.priority || "normal");
   const [loading, setLoading] = useState(false);
   const [tenantSearchQuery, setTenantSearchQuery] = useState("");
+  const [banner, setBanner] = useState<{
+    text: string;
+    tone: "error" | "info" | "success" | "warning";
+  } | null>(null);
+
+  useEffect(() => {
+    if (!banner) return;
+    const t = setTimeout(() => setBanner(null), 8000);
+    return () => clearTimeout(t);
+  }, [banner]);
 
   useEffect(() => {
     NotificationService.fetchActiveTenants()
@@ -87,11 +96,11 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
         const status = err?.response?.status;
         const message = err?.response?.data?.message || err?.message;
         if (status === 401) {
-          Alert.alert(
-            "Session expired",
-            "Please log in again. If you use a deployed backend, ensure JWT_SECRET is the same on auth and booking services.",
-            [{ text: "OK", onPress: () => navigation.goBack() }]
-          );
+          setBanner({
+            tone: "error",
+            text: "Session expired. Please log in again. If you use a deployed backend, ensure JWT_SECRET matches on auth and booking services.",
+          });
+          setTimeout(() => navigation.goBack(), 2200);
         } else {
           console.error("Failed to fetch tenants:", err);
         }
@@ -120,20 +129,20 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
 
   const validateForm = () => {
     if (!customTitle.trim()) {
-      Alert.alert("Error", "Please enter a notification title");
+      setBanner({ tone: "error", text: "Please enter a notification title" });
       return false;
     }
-    
+
     if (!customMessage.trim()) {
-      Alert.alert("Error", "Please enter a notification message");
+      setBanner({ tone: "error", text: "Please enter a notification message" });
       return false;
     }
-    
+
     if (recipientType === "selected" && selectedTenants.length === 0) {
-      Alert.alert("Error", "Please select at least one tenant");
+      setBanner({ tone: "error", text: "Please select at least one tenant" });
       return false;
     }
-    
+
     return true;
   };
 
@@ -160,33 +169,36 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
         const fcmErrorCode = result.fcmErrorCode;
 
         if (tokensSent === 0) {
-          Alert.alert(
-            "No devices to receive",
-            "No tenant has push notifications enabled. Tenants should open the Customer app, log in, and go to the Home screen at least once (push registers when Home is shown). If they have already done that, ask them to open the app again and go to Home.",
-            [{ text: "OK", onPress: () => navigation.goBack() }]
-          );
+          setBanner({
+            tone: "warning",
+            text: "No tenant has push notifications enabled. Tenants should open the Customer app, log in, and visit Home at least once. Closing this screen in a moment.",
+          });
+          setTimeout(() => navigation.goBack(), 2800);
         } else if (successCount === 0) {
           const isMismatchedCredential = fcmErrorCode?.includes("mismatched-credential");
           const deliveryMessage = isMismatchedCredential
-            ? "The server's Firebase project does not match the Customer app. Use the same Firebase project: set FCM_SERVICE_ACCOUNT_JSON in the notification-service to the service account from the same project as the Customer app's google-services.json."
-            : "Notification was sent to FCM but could not be delivered to any device. If the code is mismatched-credential, fix the server Firebase project (see above). Otherwise devices may be offline or tokens expired—ask tenants to open the Customer app and go to Home to refresh tokens.";
-          Alert.alert(
-            "Delivery failed",
-            deliveryMessage + (fcmErrorCode ? `\n\nFCM code: ${fcmErrorCode}` : ""),
-            [{ text: "OK", onPress: () => navigation.goBack() }]
-          );
+            ? "The server's Firebase project does not match the Customer app. Set FCM_SERVICE_ACCOUNT_JSON in the notification-service to the service account from the same project as the Customer app's google-services.json."
+            : "Notification reached FCM but was not delivered to any device. Devices may be offline or tokens expired—ask tenants to open the Customer app and go to Home.";
+          setBanner({
+            tone: "error",
+            text:
+              deliveryMessage +
+              (fcmErrorCode ? ` (FCM: ${fcmErrorCode})` : "") +
+              " Returning shortly.",
+          });
+          setTimeout(() => navigation.goBack(), 3200);
         } else {
-          Alert.alert(
-            "Success",
-            `Notification sent to ${recipientCount} tenant${recipientCount !== 1 ? "s" : ""} (${successCount} device${successCount !== 1 ? "s" : ""} received).`,
-            [{ text: "OK", onPress: () => navigation.goBack() }]
-          );
+          setBanner({
+            tone: "success",
+            text: `Sent to ${recipientCount} tenant${recipientCount !== 1 ? "s" : ""} (${successCount} device${successCount !== 1 ? "s" : ""} received).`,
+          });
+          setTimeout(() => navigation.goBack(), 1400);
         }
       } else {
-        Alert.alert("Error", result.error || "Failed to send notification");
+        setBanner({ tone: "error", text: result.error || "Failed to send notification" });
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to send notification. Please try again.");
+      setBanner({ tone: "error", text: "Failed to send notification. Please try again." });
     } finally {
       setLoading(false);
     }
@@ -212,6 +224,34 @@ export default function SendNotificationScreen({ navigation, route }: SendNotifi
           Announcement Page
         </Text>
       </View>
+
+      {banner ? (
+        <View
+          className={`mx-5 mt-3 rounded-xl p-3 border ${
+            banner.tone === "error"
+              ? "bg-rose-50 border-rose-200"
+              : banner.tone === "success"
+                ? "bg-emerald-50 border-emerald-200"
+                : banner.tone === "warning"
+                  ? "bg-amber-50 border-amber-200"
+                  : "bg-slate-100 border-slate-200"
+          }`}
+        >
+          <Text
+            className={`text-sm ${
+              banner.tone === "error"
+                ? "text-rose-800"
+                : banner.tone === "success"
+                  ? "text-emerald-800"
+                  : banner.tone === "warning"
+                    ? "text-amber-800"
+                    : "text-slate-800"
+            }`}
+          >
+            {banner.text}
+          </Text>
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView 
         behavior={Platform.OS === "ios" ? "padding" : "height"}

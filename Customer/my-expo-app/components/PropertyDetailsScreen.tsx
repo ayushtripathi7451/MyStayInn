@@ -50,6 +50,15 @@ function dialableHref(raw: string | undefined | null): string | null {
   return `+${digits}`;
 }
 
+/** Readable label for UI (registration phone from backend). */
+function formatPhoneDisplay(raw: string | undefined | null): string {
+  if (raw == null || typeof raw !== "string") return "";
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+  if (digits.length > 0) return raw.trim();
+  return "";
+}
+
 function getFloorLabel(floor: number | undefined): string {
   if (floor == null) return "—";
   if (floor === 0) return "Ground Floor";
@@ -79,6 +88,16 @@ const ROOM_FACILITIES = [
   "Attached Bath",
   "RO Water",
 ];
+
+/** Hide primary Move-out CTA once tenant has requested or admin has accepted (matches current-stay card). */
+function shouldShowMoveOutButton(property: Record<string, unknown>): boolean {
+  const mo = property.moveOutStatus;
+  if (mo === "accepted" || mo === "requested") return false;
+  const label = String(property.status ?? "").toLowerCase();
+  if (label.includes("move-out accepted")) return false;
+  if (label.includes("move-out requested")) return false;
+  return true;
+}
 
 export default function PropertyDetailsScreen({ navigation, route }: any) {
   const { theme } = useTheme();
@@ -110,6 +129,7 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
   const adminTel = dialableHref(adminPhoneRaw ?? null);
 
   const displayName = property.name ?? "Property";
+  const showMoveOutButton = shouldShowMoveOutButton(property as unknown as Record<string, unknown>);
   const rulesItems = useMemo(() => {
     const r = property?.rules;
     if (!r || typeof r !== "object") return [];
@@ -463,6 +483,15 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
             <Text className="text-[15px] font-semibold text-slate-800">
               Contact property admin
             </Text>
+            {adminPhoneRaw ? (
+              <Text className="text-[14px] text-slate-700 mt-1" selectable>
+                {formatPhoneDisplay(adminPhoneRaw)}
+              </Text>
+            ) : (
+              <Text className="text-[12px] text-gray-500 mt-1">
+                Phone not available yet
+              </Text>
+            )}
           </View>
           <TouchableOpacity
             onPress={() => {
@@ -481,28 +510,32 @@ export default function PropertyDetailsScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
 
-        {/* Move Out */}
-        {hasDue && (
-          <Text className="text-center text-xs text-red-600 mt-2">
-            Please clear your dues to initiate Move-out.
-          </Text>
-        )}
-        <TouchableOpacity
-          className={`py-4 rounded-2xl mt-2 mb-6 items-center ${
-            hasDue ? "bg-gray-300" : "bg-red-500"
-          }`}
-          activeOpacity={hasDue ? 1 : 0.85}
-          disabled={hasDue}
-          onPress={() => {
-            if (!hasDue) {
-              navigation.navigate("MoveOutRequestScreen", { property });
-            }
-          }}
-        >
-          <Text className="text-white text-lg font-bold">
-            {hasDue ? "Move Out (Dues Pending)" : "Move Out"}
-          </Text>
-        </TouchableOpacity>
+        {/* Move Out — hidden after request submitted or admin accepted */}
+        {showMoveOutButton ? (
+          <>
+            {hasDue && (
+              <Text className="text-center text-xs text-red-600 mt-2">
+                Please clear your dues to initiate Move-out.
+              </Text>
+            )}
+            <TouchableOpacity
+              className={`py-4 rounded-2xl mt-2 mb-6 items-center ${
+                hasDue ? "bg-gray-300" : "bg-red-500"
+              }`}
+              activeOpacity={hasDue ? 1 : 0.85}
+              disabled={hasDue}
+              onPress={() => {
+                if (!hasDue) {
+                  navigation.navigate("MoveOutRequestScreen", { property });
+                }
+              }}
+            >
+              <Text className="text-white text-lg font-bold">
+                {hasDue ? "Move Out (Dues Pending)" : "Move Out"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

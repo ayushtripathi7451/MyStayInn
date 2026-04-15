@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Switch, TouchableOpacity, ScrollView, Alert, Modal, Dimensions, ActivityIndicator } from "react-native";
+import { View, Text, Switch, TouchableOpacity, ScrollView, Modal, Dimensions, ActivityIndicator } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation, NavigationProp } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -16,6 +16,8 @@ export default function SettingsScreen() {
   const dispatch = useDispatch();
   const { properties, currentProperty, setCurrentProperty, loading: propertiesLoading, refresh } = useProperty();
   const [showPropertyModal, setShowPropertyModal] = useState(false);
+  const [logoutSheetVisible, setLogoutSheetVisible] = useState(false);
+  const [infoSheet, setInfoSheet] = useState<{ title: string; body: string } | null>(null);
   const [pushNotifications, setPushNotifications] = useState(true);
 
   const handlePropertySelect = (property: any) => {
@@ -29,35 +31,25 @@ export default function SettingsScreen() {
     navigation.navigate("ProfileSetup");
   };
 
-  const handleLogout = () => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            // Clear auth tokens used across the app
-            await clearTokens();
-            // Clear app-scoped cached user/property selections
-            await AsyncStorage.multiRemove([
-              "userData",
-              "currentProperty",
-              "PUSH_FCM_TOKEN",
-            ]);
-          } catch {
-            // ignore
-          } finally {
-            setShowPropertyModal(false);
-            // Hard reset navigation so user can't go back
-            navigation.reset({
-              index: 0,
-              routes: [{ name: "Welcome" }],
-            });
-          }
-        },
-      },
-    ]);
+  const confirmLogout = () => {
+    setLogoutSheetVisible(false);
+    setTimeout(async () => {
+      try {
+        await clearTokens();
+        await AsyncStorage.multiRemove([
+          "userData",
+          "currentProperty",
+          "PUSH_FCM_TOKEN",
+        ]);
+      } catch {
+        // ignore
+      }
+      setShowPropertyModal(false);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Welcome" }],
+      });
+    }, 0);
   };
 
   return (
@@ -111,18 +103,75 @@ export default function SettingsScreen() {
         <View className="mt-6">
           <Text className="text-xs font-black text-slate-400 uppercase tracking-[2px] mb-3 px-2">Support & About</Text>
           <View className="bg-white rounded-[24px] overflow-hidden shadow-sm border border-white">
-            <SettingItem icon="help-circle-outline" label="Help & Support" onPress={() => Alert.alert("Support", "Contact support@mystayinn.com")} showBorder />
-            <SettingItem icon="information-circle-outline" label="App Version" value="v1.0.0" onPress={() => Alert.alert("Version", "MyStayInn Admin v1.0.0")} />
+            <SettingItem
+              icon="help-circle-outline"
+              label="Help & Support"
+              onPress={() => setInfoSheet({ title: "Support", body: "Contact support@mystayinn.com" })}
+              showBorder
+            />
+            <SettingItem
+              icon="information-circle-outline"
+              label="App Version"
+              value="v1.0.0"
+              onPress={() => setInfoSheet({ title: "Version", body: "MyStayInn Admin v1.0.0" })}
+            />
           </View>
         </View>
 
-        <TouchableOpacity onPress={handleLogout} className="bg-red-50 rounded-[24px] p-5 mt-6 mb-4 flex-row items-center justify-center border-2 border-red-100" activeOpacity={0.8}>
+        <TouchableOpacity
+          onPress={() => setLogoutSheetVisible(true)}
+          className="bg-red-50 rounded-[24px] p-5 mt-6 mb-4 flex-row items-center justify-center border-2 border-red-100"
+          activeOpacity={0.8}
+        >
           <Ionicons name="log-out-outline" size={22} color="#EF4444" />
           <Text className="text-red-600 font-black text-lg ml-3">Logout</Text>
         </TouchableOpacity>
 
         <Text className="text-center text-slate-400 text-xs mt-4 mb-2">MyStayInn Admin © 2026</Text>
       </ScrollView>
+
+      <Modal
+        visible={logoutSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLogoutSheetVisible(false)}
+      >
+        <View className="flex-1 bg-black/50 justify-end">
+          <View className="bg-white rounded-t-[24px] p-6 pb-8">
+            <Text className="text-xl font-black text-slate-900 mb-2">Logout</Text>
+            <Text className="text-slate-600 text-[15px] mb-6 leading-6">
+              Are you sure you want to logout? You will need to sign in again to access the admin app.
+            </Text>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 bg-slate-100 py-4 rounded-xl"
+                onPress={() => setLogoutSheetVisible(false)}
+              >
+                <Text className="text-center font-bold text-slate-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity className="flex-1 bg-red-500 py-4 rounded-xl" onPress={confirmLogout}>
+                <Text className="text-center font-bold text-white">Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!infoSheet} transparent animationType="fade" onRequestClose={() => setInfoSheet(null)}>
+        <TouchableOpacity className="flex-1 bg-black/50 justify-center px-6" activeOpacity={1} onPress={() => setInfoSheet(null)}>
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()} className="bg-white rounded-2xl p-6">
+            {infoSheet ? (
+              <>
+                <Text className="text-lg font-black text-slate-900 mb-2">{infoSheet.title}</Text>
+                <Text className="text-slate-600 text-[15px] leading-6 mb-6">{infoSheet.body}</Text>
+                <TouchableOpacity className="bg-indigo-600 py-4 rounded-xl" onPress={() => setInfoSheet(null)}>
+                  <Text className="text-center font-bold text-white">OK</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Property Selection Modal */}
       <Modal visible={showPropertyModal} transparent animationType="fade" onRequestClose={() => setShowPropertyModal(false)}>

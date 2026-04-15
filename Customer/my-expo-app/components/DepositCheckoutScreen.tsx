@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../context/ThemeContext";
 import { userApi, transactionApi } from "../utils/api";
 import { refreshCurrentStay } from "../src/store/actions";
+import { resetStackToPaymentComplete } from "../utils/navigationRef";
 
 type Props = {
   navigation: any;
@@ -36,6 +37,61 @@ function normalizeHttpUrl(url: string): string {
 const PAYMENT_RETURN_URL = "mystay://payment-success";
 
 type PaymentOpenResult = "success" | "cancel" | "error";
+
+/**
+ * Resolve which stay row from `/current-stay` this checkout belongs to.
+ * Never fall back to `list[0]` when the user tapped a specific booking/property — that
+ * mis-attributes rent/deposit to another PG and clears due links for everyone after refresh.
+ */
+function stayMatchesBookingId(stay: any, bookingId: string): boolean {
+  const bid = stay?.booking?.id;
+  return bid != null && String(bid).trim() === String(bookingId).trim();
+}
+
+function stayMatchesPropertyId(stay: any, propertyId: string): boolean {
+  const pid = String(propertyId ?? "").trim();
+  if (!pid) return false;
+  const b = stay?.booking;
+  const r = b?.room && typeof b.room === "object" ? b.room : null;
+  const candidates = [
+    stay?.property?.id,
+    stay?.property?.uniqueId,
+    b?.propertyId,
+    b?.propertyUniqueId,
+    r?.propertyId,
+    r?.propertyUniqueId,
+  ]
+    .filter((v) => v != null && String(v).trim() !== "")
+    .map((v) => String(v));
+  return candidates.some((c) => c === pid);
+}
+
+function resolveCheckoutStay(
+  list: any[],
+  opts: { bookingId?: string; propertyId?: string }
+): any | null {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const bidRaw = opts.bookingId != null ? String(opts.bookingId).trim() : "";
+  const propRaw = opts.propertyId != null ? String(opts.propertyId).trim() : "";
+
+  if (bidRaw) {
+    const byBooking = list.find((s) => stayMatchesBookingId(s, bidRaw));
+    if (byBooking) return byBooking;
+    return null;
+  }
+
+  if (propRaw) {
+    const matches = list.filter((s) => stayMatchesPropertyId(s, propRaw));
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      // Same property id on multiple bookings — cannot disambiguate without bookingId
+      return null;
+    }
+    return null;
+  }
+
+  return list[0] ?? null;
+}
 
 /**
  * Opens Cashfree in an auth session so when the gateway redirects to our app scheme,
@@ -115,18 +171,10 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
             ? [res.data.currentStay]
             : [];
 
-      let currentStay = list[0] ?? null;
-      if (bookingIdParam) {
-        currentStay =
-          list.find((s: any) => String(s?.booking?.id) === String(bookingIdParam)) ?? null;
-      } else if (propertyIdParam) {
-        currentStay =
-          list.find(
-            (s: any) =>
-              String(s?.property?.id) === String(propertyIdParam) ||
-              String(s?.property?.uniqueId) === String(propertyIdParam)
-          ) ?? currentStay;
-      }
+      const currentStay = resolveCheckoutStay(list, {
+        bookingId: bookingIdParam,
+        propertyId: propertyIdParam,
+      });
 
       if (!currentStay?.booking || !currentStay?.property) {
         setDetails(null);
@@ -175,6 +223,9 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         .filter(Boolean)
         .join(", ");
 
+      const resolvedBookingId =
+        currentStay.booking.id != null ? String(currentStay.booking.id).trim() : "";
+
       setDetails({
         propertyName: currentStay.property.name,
         propertyAddress: address,
@@ -185,13 +236,14 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         ownerId: currentStay.property.ownerId,
         yearMonth: effectiveYearMonth,
         paymentId,
+        bookingId: resolvedBookingId,
       });
     } catch {
       setDetails(null);
     } finally {
       setLoading(false);
     }
-  }, [paymentType, paramAmount, paymentId, paymentDateParam, effectiveYearMonth, bookingIdParam, propertyIdParam]);
+  }, [paymentType, paramAmount, paymentId, effectiveYearMonth, bookingIdParam, propertyIdParam]);
 
   useEffect(() => {
     fetchCurrentStay();
@@ -229,6 +281,10 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
         return;
       }
 
+      const rawBid =
+        details.bookingId != null ? String(details.bookingId).trim() : "";
+      const numericBookingId = /^\d+$/.test(rawBid) ? rawBid : "";
+
       const resp = await transactionApi.post("/create-payment-link", {
         amount: details.amount,
         customerName,
@@ -240,9 +296,7 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
           details.paymentType === "rent_online"
             ? "first_rent"
             : "security_deposit",
-        ...(bookingIdParam && /^\d+$/.test(String(bookingIdParam).trim()) && {
-          bookingId: String(bookingIdParam).trim(),
-        }),
+        ...(numericBookingId ? { bookingId: numericBookingId } : {}),
         ...(details.paymentType === "rent_online" && {
           yearMonth: details.yearMonth,
         }),
@@ -268,7 +322,8 @@ export default function DepositCheckoutScreen({ navigation, route }: Props) {
       dispatch(refreshCurrentStay({ force: true }));
 
       if (outcome === "success") {
-        navigation.replace("PaymentComplete");
+        // WebBrowser dismiss can leave `navigation` without context briefly — use root ref.
+        resetStackToPaymentComplete();
         return;
       }
       if (outcome === "error") {

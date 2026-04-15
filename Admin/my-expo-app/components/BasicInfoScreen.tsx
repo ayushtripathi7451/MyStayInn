@@ -96,6 +96,9 @@ export default function BasicInfoScreen({ navigation }: any) {
     /^[0-9]{10}$/.test(mobile) &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
+  /** Primary fill while form is complete or OTP is sending (avoid flashing to “disabled” look during load). */
+  const buttonFilled = isValid || loading;
+
   const sendOTP = async () => {
     setSendError("");
     if (!validate()) return;
@@ -189,7 +192,7 @@ export default function BasicInfoScreen({ navigation }: any) {
 
               {/* PROGRESS BAR */}
               <View className="flex-row justify-center mt-3 mb-8">
-                <View className="w-10 h-1.5 bg-purple-500 rounded-full mx-1" />
+                <View className="w-10 h-1.5 bg-indigo-500 rounded-full mx-1" />
                 <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
                 <View className="w-6 h-1.5 bg-gray-300 mx-1 rounded-full" />
               </View>
@@ -314,16 +317,25 @@ export default function BasicInfoScreen({ navigation }: any) {
                 </Text>
               ) : null}
 
-              {/* BUTTON */}
+              {/* BUTTON — disabled state uses dark text on light fill so it stays visible before fields are complete */}
               <TouchableOpacity
                 onPress={sendOTP}
                 disabled={!isValid || loading}
-                className={`w-full py-4 rounded-xl mt-8 flex-row justify-center items-center ${
-                  isValid && !loading ? "bg-purple-500" : "bg-purple-300"
+                className={`w-full py-4 rounded-xl mt-8 flex-row justify-center items-center border-2 ${
+                  buttonFilled
+                    ? "bg-indigo-600 border-indigo-600"
+                    : "bg-indigo-100 border-indigo-200"
                 }`}
+                accessibilityState={{ disabled: !isValid || loading }}
               >
-                {loading && <ActivityIndicator color="white" className="mr-2" />}
-                <Text className="text-center text-white font-semibold text-lg">
+                {loading && (
+                  <ActivityIndicator color="#FFFFFF" className="mr-2" />
+                )}
+                <Text
+                  className={`text-center font-semibold text-lg ${
+                    buttonFilled ? "text-white" : "text-indigo-800"
+                  }`}
+                >
                   {loading ? "Sending OTP..." : "Send OTP"}
                 </Text>
               </TouchableOpacity>

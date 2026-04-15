@@ -182,20 +182,34 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
   const resendOTP = async () => {
     setOtpError("");
     setSendError("");
+    if (mobile.length !== 10) {
+      setSendError("Enter a valid 10-digit mobile number from the previous step.");
+      return;
+    }
     try {
       setLoading(true);
       const fullPhoneNumber = `${countryCode}${mobile}`;
-      
-      const confirmationResult = await auth().signInWithPhoneNumber(fullPhoneNumber);
+
+      // Second arg `true` = forceResend — required or the 2nd call can hang / never send SMS again
+      const confirmationResult = await auth().signInWithPhoneNumber(fullPhoneNumber, true);
       setConfirmation(confirmationResult);
-      
+
+      Keyboard.dismiss();
       setTimer(30);
       setCanResend(false);
       setOtp("");
       setResendHint("A new OTP has been sent.");
     } catch (error: any) {
       console.error("Resend OTP Error:", error);
-      setSendError("Failed to resend OTP. Please try again.");
+      let friendlyMessage = "Failed to resend OTP. Please try again.";
+      if (error.code === "auth/captcha-check-failed") {
+        friendlyMessage = "Safety check failed. Please try again.";
+      } else if (error.code === "auth/invalid-phone-number") {
+        friendlyMessage = "The phone number format is incorrect.";
+      } else if (error.code === "auth/too-many-requests") {
+        friendlyMessage = "Too many attempts. Please try again later.";
+      }
+      setSendError(friendlyMessage);
     } finally {
       setLoading(false);
     }
@@ -311,6 +325,7 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
                       onChangeText={(t) => {
                         setOtp(t.replace(/[^0-9]/g, "").slice(0, 6));
                         setOtpError("");
+                        setSendError("");
                         setResendHint("");
                       }}
                       keyboardType="number-pad"
@@ -322,6 +337,11 @@ export default function MobileOTPLoginScreen({ navigation }: any) {
                     {otpError ? (
                       <Text className="text-amber-200 text-sm mb-3 text-center" accessibilityLiveRegion="polite">
                         {otpError}
+                      </Text>
+                    ) : null}
+                    {sendError ? (
+                      <Text className="text-amber-200 text-sm mb-3 text-center" accessibilityLiveRegion="polite">
+                        {sendError}
                       </Text>
                     ) : null}
                     {resendHint ? (

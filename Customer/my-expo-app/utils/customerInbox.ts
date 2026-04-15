@@ -190,5 +190,38 @@ export function mergeInboxRows(announcements: InboxRow[], pushes: InboxRow[]): I
     const tb = parseFlexibleDate(b.sentAt);
     return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
   });
-  return merged;
+
+  // Same notification can arrive from two channels:
+  // 1) backend announcement log, 2) local push inbox append.
+  // Keep a single row when title/body are same and timestamps are very close.
+  const DEDUPE_WINDOW_MS = 2 * 60 * 1000;
+  const seenByContent = new Map<string, number[]>();
+  const out: InboxRow[] = [];
+
+  for (const row of merged) {
+    const title = String(row.title || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const body = String(row.body || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const contentKey = `${title}||${body}`;
+    const ts = parseFlexibleDate(row.sentAt);
+    const existingTimes = seenByContent.get(contentKey) || [];
+
+    const isDuplicate = existingTimes.some((t) => {
+      if (Number.isNaN(ts) || Number.isNaN(t)) return false;
+      return Math.abs(ts - t) <= DEDUPE_WINDOW_MS;
+    });
+
+    if (isDuplicate) continue;
+
+    existingTimes.push(ts);
+    seenByContent.set(contentKey, existingTimes);
+    out.push(row);
+  }
+
+  return out;
 }

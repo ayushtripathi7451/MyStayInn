@@ -3,7 +3,7 @@ import { View, Text } from "react-native";
 
 const tickets = [
   { id: "TICKET-001", date: "20 April 2025", status: "Open", color: "#C8FACC", text: "#0A8A2A" },
-  { id: "TICKET-002", date: "21 April 2025", status: "In Progress", color: "#E5E3FF", text: "#6C5CE7" },
+  { id: "TICKET-002", date: "21 April 2025", status: "In Progress", color: "#EEF2FF", text: "#4F46E5" },
   { id: "TICKET-003", date: "23 April 2025", status: "Closed", color: "#FAD7D7", text: "#C0392B" },
 ];
 

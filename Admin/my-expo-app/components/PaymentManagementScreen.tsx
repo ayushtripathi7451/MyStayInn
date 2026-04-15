@@ -6,7 +6,6 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
@@ -16,6 +15,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import BottomNav from "./BottomNav";
 import { bookingApi } from "../utils/api";
 import { useProperty } from "../contexts/PropertyContext";
+import NotifService, { type Tenant } from "../services/notificationService";
 
 interface BookingWithDetails {
   id: string;
@@ -130,6 +130,17 @@ export default function PaymentManagementScreen({ route }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [markingPaidBookingId, setMarkingPaidBookingId] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<{
+    text: string;
+    kind: "error" | "info" | "success";
+  } | null>(null);
+  const [notifying, setNotifying] = useState(false);
+
+  useEffect(() => {
+    if (!actionMessage) return;
+    const t = setTimeout(() => setActionMessage(null), 4500);
+    return () => clearTimeout(t);
+  }, [actionMessage]);
 
   const fetchBookings = useCallback(async () => {
     try {
@@ -1059,17 +1070,89 @@ export default function PaymentManagementScreen({ route }: any) {
     }
   };
 
-  const handleNotifySelected = () => {
+  const handleNotifySelected = async () => {
     if (selectedCustomers.length === 0) {
-      Alert.alert("No Selection", "Please select customers to notify");
+      setActionMessage({ kind: "error", text: "Please select customers to notify" });
       return;
     }
 
-    Alert.alert(
-      "Notification Sent",
-      `Payment reminder sent to ${selectedCustomers.length} customer(s)`,
-      [{ text: "OK", onPress: () => setSelectedCustomers([]) }]
-    );
+    const selectedSet = new Set(selectedCustomers);
+    const selectedDueItems = dueCustomers.filter((d) => selectedSet.has(d.id));
+    const uniqueCustomerIds = [
+      ...new Set(
+        selectedDueItems
+          .map((d) => String(d.customerId ?? "").trim())
+          .filter((id) => id.length > 0)
+      ),
+    ];
+
+    if (uniqueCustomerIds.length === 0) {
+      setActionMessage({
+        kind: "error",
+        text: "Could not resolve tenants for the selected rows. Try again.",
+      });
+      return;
+    }
+
+    const propertyLabel =
+      currentProperty?.name?.trim() ||
+      selectedDueItems.find((d) => d.propertyName?.trim())?.propertyName?.trim() ||
+      "";
+
+    const title = "Payment due reminder";
+    const message = propertyLabel
+      ? `You have pending payment due for ${propertyLabel}. Please open the MyStayInn app to view details and pay.`
+      : "You have pending payment due. Please open the MyStayInn app to view details and pay.";
+
+    const activeTenantsForPush: Tenant[] = uniqueCustomerIds.map((id) => ({
+      id,
+      name: "Tenant",
+      phone: "",
+      roomNumber: "—",
+      status: "Active",
+    }));
+
+    setNotifying(true);
+    try {
+      const result = await NotifService.sendNotification(
+        title,
+        message,
+        "selected",
+        uniqueCustomerIds,
+        "normal",
+        activeTenantsForPush
+      );
+
+      if (!result.success) {
+        setActionMessage({
+          kind: "error",
+          text: result.error || "Failed to send notifications",
+        });
+        return;
+      }
+
+      const delivered = (result.successCount ?? 0) > 0 || (result.tokensSent ?? 0) > 0;
+      if (!delivered) {
+        setActionMessage({
+          kind: "info",
+          text:
+            "Reminder saved, but no push devices were found for those tenants. Ask them to open the customer app and allow notifications.",
+        });
+      } else {
+        setActionMessage({
+          kind: "success",
+          text: `Payment reminder sent to ${uniqueCustomerIds.length} tenant(s).`,
+        });
+      }
+      setSelectedCustomers([]);
+    } catch (e: any) {
+      setActionMessage({
+        kind: "error",
+        text: e?.message || "Failed to send notifications",
+      });
+    } finally {
+      setNotifying(false);
+    }
   };
 
   const handleMarkDailyRentPaid = async (
@@ -1083,7 +1166,10 @@ export default function PaymentManagementScreen({ route }: any) {
 
     // Only allow cash payments to be marked manually
     if (type !== "cash") {
-      Alert.alert("Info", "Online payments are processed automatically via payment gateway.");
+      setActionMessage({
+        kind: "info",
+        text: "Online payments are processed automatically via payment gateway.",
+      });
       return;
     }
 
@@ -1097,9 +1183,12 @@ export default function PaymentManagementScreen({ route }: any) {
       ...(dailyPaymentId ? { dailyPaymentId } : {}),
     });
     await fetchBookings();
-    Alert.alert("Success", "Daily rent marked as paid");
+    setActionMessage({ kind: "success", text: "Daily rent marked as paid" });
   } catch (e: any) {
-    Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to mark as paid");
+    setActionMessage({
+      kind: "error",
+      text: e?.response?.data?.message || e?.message || "Failed to mark as paid",
+    });
   } finally {
     setMarkingPaidBookingId(null);
   }
@@ -1126,7 +1215,10 @@ export default function PaymentManagementScreen({ route }: any) {
       }
     }
     if (!resolvedYm) {
-      Alert.alert("Error", "Could not determine which month to mark. Please refresh and try again.");
+      setActionMessage({
+        kind: "error",
+        text: "Could not determine which month to mark. Please refresh and try again.",
+      });
       return;
     }
 
@@ -1134,9 +1226,12 @@ export default function PaymentManagementScreen({ route }: any) {
       yearMonth: resolvedYm,
     });
     await fetchBookings();
-    Alert.alert("Success", "Cash rent marked as paid");
+    setActionMessage({ kind: "success", text: "Cash rent marked as paid" });
   } catch (e: any) {
-    Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to mark as paid");
+    setActionMessage({
+      kind: "error",
+      text: e?.response?.data?.message || e?.message || "Failed to mark as paid",
+    });
   } finally {
     setMarkingPaidBookingId(null);
   }
@@ -1148,7 +1243,10 @@ export default function PaymentManagementScreen({ route }: any) {
       await bookingApi.patch(`/api/bookings/${bookingId}/mark-security-paid`);
       await fetchBookings();
     } catch (e: any) {
-      Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to mark as paid");
+      setActionMessage({
+        kind: "error",
+        text: e?.response?.data?.message || e?.message || "Failed to mark as paid",
+      });
     } finally {
       setMarkingPaidBookingId(null);
     }
@@ -1344,6 +1442,29 @@ export default function PaymentManagementScreen({ route }: any) {
 
       {/* Body */}
       <View className="flex-1 bg-[#F6F8FF] rounded-t-[40px] -mt-10 px-4 pt-6 overflow-hidden">
+        {actionMessage ? (
+          <View
+            className={`mb-4 rounded-xl p-3 border ${
+              actionMessage.kind === "error"
+                ? "bg-rose-50 border-rose-200"
+                : actionMessage.kind === "success"
+                  ? "bg-emerald-50 border-emerald-200"
+                  : "bg-slate-100 border-slate-200"
+            }`}
+          >
+            <Text
+              className={`text-sm ${
+                actionMessage.kind === "error"
+                  ? "text-rose-800"
+                  : actionMessage.kind === "success"
+                    ? "text-emerald-800"
+                    : "text-slate-800"
+              }`}
+            >
+              {actionMessage.text}
+            </Text>
+          </View>
+        ) : null}
         {/* Tab Switch */}
         <View className="bg-[#1E33FF] rounded-full mb-6 overflow-hidden">
           <View className="flex-row justify-between p-1">
@@ -1407,12 +1528,21 @@ export default function PaymentManagementScreen({ route }: any) {
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={handleNotifySelected}
-                className="bg-blue-500 px-4 py-2 rounded-full flex-row items-center"
+                onPress={() => void handleNotifySelected()}
+                disabled={notifying || selectedCustomers.length === 0}
+                className={`px-4 py-2 rounded-full flex-row items-center ${
+                  notifying || selectedCustomers.length === 0 ? "bg-blue-300" : "bg-blue-500"
+                }`}
               >
-                <MaterialCommunityIcons name="bell-outline" size={16} color="white" />
+                {notifying ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <MaterialCommunityIcons name="bell-outline" size={16} color="white" />
+                )}
                 <Text className="text-white font-medium ml-1">
-                  Notify {selectedCustomers.length > 0 ? `(${selectedCustomers.length})` : "All"}
+                  {notifying
+                    ? "Sending…"
+                    : `Notify ${selectedCustomers.length > 0 ? `(${selectedCustomers.length})` : ""}`}
                 </Text>
               </TouchableOpacity>
             </View>

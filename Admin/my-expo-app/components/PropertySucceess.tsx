@@ -1,11 +1,33 @@
-import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import SuccessIcon from "./SuccessIcon";
+import { CommonActions } from "@react-navigation/native";
+import SuccessBrandMark from "./SuccessBrandMark";
+import { useProperty } from "../contexts/PropertyContext";
 
 export default function PropertySuccess({ navigation, route }: any) {
   const { id } = route.params || {};
-  const propertyId = id || "MYS25A000001";
+  const propertyId = id ?? "—";
+  const { refresh } = useProperty();
+  const [continuing, setContinuing] = useState(false);
+
+  const goToHome = async () => {
+    if (continuing) return;
+    setContinuing(true);
+    try {
+      const selectId =
+        id != null && String(id).trim() !== "" && propertyId !== "—" ? String(id).trim() : undefined;
+      await refresh(selectId ? { selectPropertyId: selectId } : undefined);
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: "Home" }],
+        })
+      );
+    } finally {
+      setContinuing(false);
+    }
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-white px-6">
@@ -16,9 +38,9 @@ export default function PropertySuccess({ navigation, route }: any) {
         {/* TOP CONTENT */}
         <View className="items-center mt-20 px-4">
 
-          {/* SVG ICON */}
+          {/* Splash-style logo on blue gradient */}
           <View className="mb-10">
-            <SuccessIcon />
+            <SuccessBrandMark />
           </View>
 
           {/* TITLE */}
@@ -41,12 +63,15 @@ export default function PropertySuccess({ navigation, route }: any) {
 
           {/* BUTTON */}
           <TouchableOpacity
-            onPress={() => navigation.navigate("Home")}
-            className="bg-purple-600 w-full py-4 px-20 rounded-xl mt-10"
+            onPress={goToHome}
+            disabled={continuing}
+            className="bg-indigo-600 w-80 py-4 rounded-xl mt-10 items-center justify-center min-h-[52px]"
           >
-            <Text className=" text-center w-20 mx-20 text-white font-semibold text-md text-nowrap">
-              Continue
-            </Text>
+            {continuing ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text className="text-white font-semibold text-base">Continue</Text>
+            )}
           </TouchableOpacity>
         </View>
 

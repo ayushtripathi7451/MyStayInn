@@ -78,8 +78,8 @@ export default function PinLoginCard({ navigation, globalPinFocus, setGlobalPinF
           }
         }
         
-        // Navigate to complete profile screen
-        navigation.navigate('CompleteProfile');
+        // Replace so back from CompleteProfile / Home does not return to PIN screen
+        navigation.replace('CompleteProfile');
       }
     } catch (error: any) {
       console.error('MPIN Verification Error:', error);

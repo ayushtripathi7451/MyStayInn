@@ -1,13 +1,54 @@
-import { Alert, Platform } from "react-native";
+import {
+  Platform,
+  PermissionsAndroid,
+  Alert,
+  Linking,
+} from "react-native";
 import messaging, {
   AuthorizationStatus,
   getMessaging,
   getToken,
+  hasPermission,
   onMessage,
   requestPermission,
 } from "@react-native-firebase/messaging";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { userApi } from "./api";
+
+async function requestAndroidPostNotificationsIfNeeded(): Promise<boolean> {
+  if (Platform.OS !== "android") return true;
+  const api = typeof Platform.Version === "number" ? Platform.Version : 0;
+  if (api < 33) return true;
+  const perm =
+    (PermissionsAndroid.PERMISSIONS as { POST_NOTIFICATIONS?: string })
+      .POST_NOTIFICATIONS ?? "android.permission.POST_NOTIFICATIONS";
+  try {
+    const r = await PermissionsAndroid.request(
+      perm as "android.permission.POST_NOTIFICATIONS"
+    );
+    return r === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
+
+function isMessagingPermissionGranted(status: number): boolean {
+  return (
+    status === AuthorizationStatus.AUTHORIZED ||
+    status === AuthorizationStatus.PROVISIONAL
+  );
+}
+
+let notificationSettingsPromptShown = false;
+
+function maybePromptOpenNotificationSettings(body: string): void {
+  if (notificationSettingsPromptShown) return;
+  notificationSettingsPromptShown = true;
+  Alert.alert("Turn on notifications", body, [
+    { text: "Not now", style: "cancel" },
+    { text: "Open settings", onPress: () => void Linking.openSettings() },
+  ]);
+}
 
 // Must be at top-level (global scope), not inside a component.
 messaging().setBackgroundMessageHandler(async (remoteMessage) => {
@@ -27,13 +68,22 @@ type PushPayload = {
 
 export async function registerPushNotifications(): Promise<void> {
   try {
+    const androidPostOk = await requestAndroidPostNotificationsIfNeeded();
+
     const messagingInstance = getMessaging();
-    const authStatus = await requestPermission(messagingInstance);
-    const enabled =
-      authStatus === AuthorizationStatus.AUTHORIZED ||
-      authStatus === AuthorizationStatus.PROVISIONAL;
+    let authStatus = await hasPermission(messagingInstance);
+
+    if (!isMessagingPermissionGranted(authStatus)) {
+      authStatus = await requestPermission(messagingInstance);
+    }
+
+    const messagingOk = isMessagingPermissionGranted(authStatus);
+    const enabled = messagingOk && androidPostOk;
 
     if (!enabled) {
+      maybePromptOpenNotificationSettings(
+        "To get tenant updates, payments, and property alerts, allow notifications. You can turn them on in Settings."
+      );
       return;
     }
 
@@ -122,7 +172,7 @@ export function setupForegroundNotificationHandler(): void {
       const body = String(
         remoteMessage?.notification?.body ?? remoteMessage?.data?.body ?? ""
       );
-      Alert.alert(title, body);
+      console.log("[AdminPush][foreground]", title, body);
     });
   } catch (err) {
     console.warn("[AdminPush] Foreground handler setup failed:", err);

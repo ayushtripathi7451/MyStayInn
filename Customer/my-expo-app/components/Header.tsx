@@ -1,7 +1,7 @@
-import React from "react";
-import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import React, { useCallback, useMemo } from "react";
+import { View, Text, TouchableOpacity, ActivityIndicator, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../types";
 import { useUser } from "../src/hooks";
@@ -10,8 +10,20 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, "Home">;
 
 export default function Header() {
   const navigation = useNavigation<NavigationProp>();
-  const { name, uniqueId, data, loading } = useUser();
+  const { name, uniqueId, data, loading, refresh } = useUser();
   const showLoading = !data && loading;
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
+
+  const profileImageUri = useMemo(() => {
+    const extras = data?.profileExtras as { profileImage?: string } | undefined;
+    const u = typeof extras?.profileImage === "string" ? extras.profileImage.trim() : "";
+    return u.length > 0 ? u : null;
+  }, [data]);
 
   return (
     <View className="bg-white rounded-2xl p-5 mt-3 -mb-2 shadow shadow-black/10 mx-2">
@@ -19,8 +31,16 @@ export default function Header() {
       </View>
 
       <View className="flex-row items-center mt-4">
-        <View className="w-[45px] h-[45px] rounded-full bg-[#EAF1FF] justify-center items-center">
-          <Text className="text-[22px]">😇</Text>
+        <View className="w-[45px] h-[45px] rounded-full bg-[#EAF1FF] justify-center items-center overflow-hidden">
+          {profileImageUri ? (
+            <Image
+              source={{ uri: profileImageUri }}
+              className="w-[45px] h-[45px]"
+              resizeMode="cover"
+            />
+          ) : (
+            <Ionicons name="person-outline" size={26} color="#64748B" />
+          )}
         </View>
         <View className="flex-1 ml-2">
           <Text className="text-2xl font-medium text-black">

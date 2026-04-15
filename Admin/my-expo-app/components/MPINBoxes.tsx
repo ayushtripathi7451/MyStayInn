@@ -28,9 +28,9 @@ export default function MPINBoxes({
               className={`w-14 h-12 mx-1 rounded-xl items-center justify-center border
                 ${
                   filled
-                    ? "border-purple-600"
+                    ? "border-indigo-600"
                     : active
-                    ? "border-purple-400"
+                    ? "border-indigo-400"
                     : "border-gray-300"
                 }
               `}

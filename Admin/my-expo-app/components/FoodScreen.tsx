@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Alert,
   ActivityIndicator,
   Switch,
   KeyboardAvoidingView,
@@ -67,6 +66,7 @@ export default function FoodScreen({ navigation, route }: any) {
   const [saving, setSaving] = useState(false);
   const [activeDay, setActiveDay] = useState(0);
   const [foodMenu, setFoodMenu] = useState<FoodMenuState>(getDefaultFoodMenu);
+  const [saveBanner, setSaveBanner] = useState<{ type: "error"; text: string } | null>(null);
 
   useEffect(() => {
     loadFoodMenu();
@@ -136,8 +136,9 @@ export default function FoodScreen({ navigation, route }: any) {
   };
 
   const handleSave = async () => {
+    setSaveBanner(null);
     if (!propertyId) {
-      Alert.alert("Error", "No property selected.");
+      setSaveBanner({ type: "error", text: "No property selected." });
       return;
     }
     setSaving(true);
@@ -149,11 +150,12 @@ export default function FoodScreen({ navigation, route }: any) {
         ? { ...existingRules, foodMenu: foodPayload }
         : { foodMenu: foodPayload };
       await propertyApi.put(`/api/properties/${propertyId}`, { rules: rulesPayload });
-      Alert.alert("Saved", "Food menu has been saved.", [
-        { text: "OK", onPress: () => navigation.goBack() },
-      ]);
+      setTimeout(() => navigation.goBack(), 0);
     } catch (e: any) {
-      Alert.alert("Error", e.response?.data?.message || e.message || "Failed to save food menu.");
+      setSaveBanner({
+        type: "error",
+        text: e.response?.data?.message || e.message || "Failed to save food menu.",
+      });
     } finally {
       setSaving(false);
     }
@@ -192,6 +194,12 @@ export default function FoodScreen({ navigation, route }: any) {
           >
             <Text className="text-2xl font-bold text-gray-900 mt-6 tracking-tight">Food menu & timings</Text>
             <Text className="text-gray-500 mb-6">Set menu for each day. You can notify tenants when food is ready.</Text>
+
+            {saveBanner ? (
+              <View className="mb-4 p-3 rounded-xl bg-red-50 border border-red-100">
+                <Text className="text-red-700 text-sm">{saveBanner.text}</Text>
+              </View>
+            ) : null}
 
             {/* Day tabs */}
             <ScrollView

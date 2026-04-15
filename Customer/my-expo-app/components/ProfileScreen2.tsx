@@ -6,7 +6,6 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Alert,
   TextInput,
   Keyboard,
   Linking,
@@ -22,7 +21,7 @@ import BottomNav from "./BottomNav";
 import { useTheme } from "../context/ThemeContext";
 import { api, userApi } from "../utils/api";
 import { clearAadhaarKycOnAuthService } from "../utils/authKycSync";
-import { resetToWelcome } from "../utils/navigationRef";
+import { logoutAndResetToWelcome } from "../utils/navigationRef";
 import { formatAddress, cashfreeAddressToStructured } from "../utils/address";
 import {
   computeKycIdentityMatch,
@@ -147,6 +146,7 @@ export default function ProfileScreen2({ navigation }: any) {
   const [verifyingAadhaar, setVerifyingAadhaar] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [kycResetModalVisible, setKycResetModalVisible] = useState(false);
+  const [logoutSheetVisible, setLogoutSheetVisible] = useState(false);
   const kycResetResolveRef = useRef<((ok: boolean) => void) | null>(null);
 
   /* 🎨 THEME COLORS */
@@ -297,18 +297,9 @@ export default function ProfileScreen2({ navigation }: any) {
     console.error("Failed to fetch profile:", error);
     
     if (error.response?.status === 401) {
-      Alert.alert(
-        "Session Expired",
-        "Please login again to continue.",
-        [
-          {
-            text: "OK",
-            onPress: () => navigation.replace("LoginPin"),
-          },
-        ]
-      );
+      navigation.replace("LoginPin");
     } else {
-      Alert.alert("Error", "Failed to load profile data");
+      console.warn("Failed to load profile data");
     }
     throw error; // Re-throw to be caught by the main useEffect
   }
@@ -477,30 +468,20 @@ const refreshData = async () => {
             await persistKycAndAddressFromStatus(response.data);
           } catch (pe) {
             console.error(pe);
-            Alert.alert(
-              "Partial save",
-              "Aadhaar verified, but saving your address failed. You can edit it manually below."
-            );
           }
           setAadhaarVerifiedByKycService(true);
           setAadhaarDetailsFromKycService(mergeKycDetails(response.data));
           await fetchProfile();
-          Alert.alert("Success", "Aadhaar verified. Your address has been updated from Aadhaar.");
           setVerifyingAadhaar(false);
           return;
         }
         if (response.data.status === "CONSENT_DENIED") {
           clearInterval(interval);
-          Alert.alert(
-            "Consent Denied",
-            "You denied document access. Please try again if you want to verify."
-          );
           setVerifyingAadhaar(false);
           return;
         }
         if (response.data.status === "EXPIRED") {
           clearInterval(interval);
-          Alert.alert("Expired", "Verification link expired. Please start verification again.");
           setVerifyingAadhaar(false);
           return;
         }
@@ -509,10 +490,7 @@ const refreshData = async () => {
       }
       if (attempts >= maxAttempts) {
         clearInterval(interval);
-        Alert.alert(
-          "Verification Pending",
-          "Verification is taking longer than expected. Pull down to refresh your profile shortly."
-        );
+        console.warn("KYC poll: max attempts");
         setVerifyingAadhaar(false);
       }
     }, 6000);
@@ -526,11 +504,7 @@ const refreshData = async () => {
 
       if (!response.data.success) {
         if (response.data.shouldCheckStatus) {
-          Alert.alert(
-            "Verification In Progress",
-            "A verification is already in progress. Checking status…",
-            [{ text: "OK" }]
-          );
+          pollKycStatus();
           setVerifyingAadhaar(false);
           return;
         }
@@ -545,19 +519,18 @@ const refreshData = async () => {
             setAadhaarVerifiedByKycService(true);
             setAadhaarDetailsFromKycService(mergeKycDetails(statusRes.data));
             await fetchProfile();
-            Alert.alert("Already verified", "Your Aadhaar is already verified. Address updated from Aadhaar.");
           }
           setVerifyingAadhaar(false);
           return;
         }
-        Alert.alert("Error", response.data.message || "Failed to start verification");
+        console.warn("KYC start failed:", response.data.message || "Failed to start verification");
         setVerifyingAadhaar(false);
         return;
       }
 
       const consentUrl = response.data.consentUrl;
       if (!consentUrl) {
-        Alert.alert("Error", "Verification URL not received");
+        console.warn("KYC: no consent URL");
         setVerifyingAadhaar(false);
         return;
       }
@@ -582,18 +555,14 @@ const refreshData = async () => {
           setAadhaarVerifiedByKycService(true);
           setAadhaarDetailsFromKycService(mergeKycDetails(statusRes.data));
           await fetchProfile();
-          Alert.alert("Already verified", "Your Aadhaar is already verified.");
         }
         setVerifyingAadhaar(false);
         return;
       }
       if (msg.includes("ack id")) {
-        Alert.alert(
-          "Link Already Used",
-          "This verification link was already used. Tap Verify Aadhaar again for a new link."
-        );
+        console.warn("KYC: link already used");
       } else {
-        Alert.alert("Error", msg || "Failed to start verification");
+        console.warn("KYC error:", msg || "Failed to start verification");
       }
       setVerifyingAadhaar(false);
     }
@@ -623,7 +592,6 @@ useEffect(() => {
           setAadhaarDetailsFromKycService(mergeKycDetails(response.data));
           await fetchProfile();
           setVerifyingAadhaar(false);
-          Alert.alert("Success", "Aadhaar verified. Your address has been updated from Aadhaar.");
         }
       } catch (e) {
         console.error(e);
@@ -632,23 +600,9 @@ useEffect(() => {
     return () => subscription.remove();
   }, []);
 
-  const handleLogout = async () => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to logout?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            const { logoutClearClientSession } = await import("../utils/sessionStorage");
-            await logoutClearClientSession();
-            resetToWelcome();
-          },
-        },
-      ]
-    );
+  const confirmLogout = () => {
+    setLogoutSheetVisible(false);
+    void logoutAndResetToWelcome();
   };
 
   const handlePhotoUpload = async () => {
@@ -657,18 +611,13 @@ useEffect(() => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (status !== "granted") {
-        Alert.alert(
-          "Permission Required",
-          "Please allow access to your photo library to upload a profile photo."
-        );
         return;
       }
 
       // Launch image picker
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 0.8,
       });
 
@@ -693,17 +642,12 @@ useEffect(() => {
       console.log("[ProfileScreen2] Upload response:", updateRes.data);
 
       if (updateRes.data.success) {
-        Alert.alert("Success", "Profile photo updated successfully!");
         await refreshData(); // Refresh profile data
       } else {
         throw new Error(updateRes.data.message || "Failed to update photo");
       }
     } catch (error: any) {
       console.error("Photo upload/selection error:", error);
-      Alert.alert(
-        "Upload Failed",
-        error?.response?.data?.message || error?.message || "Failed to upload photo. Please try again."
-      );
       setUploadingPhoto(false);
       return;
     }
@@ -916,7 +860,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 await saveIdentityFieldWithKycWarning({ firstName, lastName });
               } catch (e: any) {
                 if (e?.message === "CANCELLED") return;
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -935,7 +879,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 await saveIdentityFieldWithKycWarning({ dob: next });
               } catch (e: any) {
                 if (e?.message === "CANCELLED") return;
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -960,7 +904,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 await saveIdentityFieldWithKycWarning({ gender: next });
               } catch (e: any) {
                 if (e?.message === "CANCELLED") return;
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -979,7 +923,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 if (!res.data?.success) throw new Error(res.data?.message || "Update failed");
                 await fetchProfile();
               } catch (e: any) {
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -1010,7 +954,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 if (!res.data?.success) throw new Error(res.data?.message || "Update failed");
                 await fetchProfile();
               } catch (e: any) {
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -1036,7 +980,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 if (!res.data?.success) throw new Error(res.data?.message || "Update failed");
                 await fetchProfile();
               } catch (e: any) {
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -1061,7 +1005,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 if (!res.data?.success) throw new Error(res.data?.message || "Update failed");
                 await fetchProfile();
               } catch (e: any) {
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -1081,7 +1025,7 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 if (!res.data?.success) throw new Error(res.data?.message || "Update failed");
                 await fetchProfile();
               } catch (e: any) {
-                Alert.alert("Error", e?.response?.data?.message || e?.message || "Could not save");
+                console.warn("Save failed:", e?.response?.data?.message || e?.message || "Could not save");
                 throw e;
               }
             }}
@@ -1217,25 +1161,13 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
 
         {/* ⚙️ OPTIONS */}
         <View className="bg-white rounded-2xl shadow shadow-black/10">
-          <ProfileOption
-            icon="headset-outline"
-            label="Support"
-            color={primaryColor}
-            onPress={() => Alert.alert("Support", "Contact support feature coming soon")}
-          />
-          <Divider />
-          <ProfileOption
-            icon="document-text-outline"
-            label="Terms & Conditions"
-            color={primaryColor}
-            onPress={() => Alert.alert("Terms & Conditions", "Terms & Conditions coming soon")}
-          />
-          <Divider />
+         
+          
           <ProfileOption
             icon="log-out-outline"
             label="Logout"
             danger
-            onPress={handleLogout}
+            onPress={() => setLogoutSheetVisible(true)}
           />
         </View>
       </ScrollView>
@@ -1270,6 +1202,37 @@ const shouldHideVerifyButton = aadhaarVerifiedByKycService || !shouldShowVerifyB
                 onPress={onKycResetModalConfirm}
               >
                 <Text className="text-center font-bold text-white">Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={logoutSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setLogoutSheetVisible(false)}
+      >
+        <View className="flex-1 bg-black/50 justify-end">
+          <View className="bg-white rounded-t-[24px] p-6 pb-8">
+            <Text className="text-xl font-black text-slate-900 mb-2">Logout</Text>
+            <Text className="text-slate-600 text-[15px] mb-6 leading-6">
+              Are you sure you want to logout? You will need to sign in again to access your account.
+            </Text>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 bg-slate-100 py-4 rounded-xl"
+                onPress={() => setLogoutSheetVisible(false)}
+              >
+                <Text className="text-center font-bold text-slate-700">Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 py-4 rounded-xl"
+                style={{ backgroundColor: primaryColor }}
+                onPress={confirmLogout}
+              >
+                <Text className="text-center font-bold text-white">Logout</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1397,7 +1360,7 @@ function InlineEditableRow({
       await onSave(out);
       setEditing(false);
     } catch {
-      // Parent shows Alert
+      // Errors logged by parent onSave
     } finally {
       setSaving(false);
     }
@@ -1429,7 +1392,7 @@ function InlineEditableRow({
     try {
       await onSave(g);
     } catch {
-      // Parent shows Alert
+      // Errors logged by parent onSave
     } finally {
       setSaving(false);
     }

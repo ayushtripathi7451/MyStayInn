@@ -48,7 +48,7 @@ export default function SetupHeader({ activeTab }: any) {
   return (
     <>
       {/* TOP HEADER BOX */}
-      <View className="bg-[#F7F3FF] px-5 py-6 rounded-[24px] mt-2">
+      <View className="bg-[#EEF2FF] px-5 py-6 rounded-[24px] mt-2">
         <Text className="text-[22px] font-bold">{headerTitle}</Text>
         <Text className="text-gray-600 mt-1">{headerSubtitle}</Text>
       </View>
@@ -71,14 +71,14 @@ export default function SetupHeader({ activeTab }: any) {
                 // onPress={() => navigation.navigate(tab.screen as never)}
                 className={`px-4 py-1.5 rounded-full border ${
                   isActive
-                    ? "border-purple-600 bg-white"
+                    ? "border-indigo-600 bg-white"
                     : "border-gray-200 bg-gray-100"
                 }`}
               >
                 <Text
                   className={
                     isActive
-                      ? "text-purple-600 font-semibold"
+                      ? "text-indigo-600 font-semibold"
                       : "text-gray-500"
                   }
                 >

@@ -41,7 +41,7 @@ const CHART_COLORS = [
   "#FFD93D", // yellow
   "#6BCF7F", // green
   "#4D96FF", // blue
-  "#9D5DFF", // purple
+  "#6366F1", // indigo
   "#FF8AD0", // pink
   "#00CEC9", // teal
 ];
@@ -955,6 +955,219 @@ const EMPTY_REPORT_DETAILS: ReportDetailsState = {
   monthwiseMoveOutBlocks: [],
 };
 
+/** One tenant row in reports when the same customer has multiple active bookings (multi-bed). */
+function customerMergeKey(b: any): string {
+  const c = b.customer || {};
+  const uid = String(c.uniqueId || "").trim();
+  if (uid) return `uid:${uid}`;
+  const cid = String(b.customerId ?? c.id ?? "").trim();
+  if (cid && cid !== "undefined" && cid !== "null") return `cid:${cid}`;
+  return `bid:${String(b.id ?? "")}`;
+}
+
+function roomDisplayFromBooking(b: any): string {
+  const rn = b.room?.roomNumber != null ? String(b.room.roomNumber).trim() : "";
+  if (!rn) return "—";
+  const beds =
+    Array.isArray(b.bedNumbers) && b.bedNumbers.length > 0
+      ? b.bedNumbers.map((x: any) => String(x).trim()).filter(Boolean).join(", ")
+      : "";
+  return beds ? `${rn} (${beds})` : rn;
+}
+
+function groupBookingsByCustomer(bookings: any[]): any[][] {
+  const order: string[] = [];
+  const map = new Map<string, any[]>();
+  for (const b of bookings) {
+    const k = customerMergeKey(b);
+    if (!map.has(k)) {
+      map.set(k, []);
+      order.push(k);
+    }
+    map.get(k)!.push(b);
+  }
+  return order.map((key) => map.get(key)!);
+}
+
+function mergeDetailedActiveRowsGroup(
+  rows: DetailedActiveRow[],
+  num: number,
+  bookings: any[]
+): DetailedActiveRow {
+  if (rows.length === 0) {
+    throw new Error("mergeDetailedActiveRowsGroup: empty rows");
+  }
+  if (rows.length === 1) {
+    return { ...rows[0], num };
+  }
+  const base = { ...rows[0] };
+  base.num = num;
+  base.due = rows.reduce((s, r) => s + (Number(r.due) || 0), 0);
+  base.securityDeposit = rows.reduce((s, r) => s + (Number(r.securityDeposit) || 0), 0);
+  base.payments = rows.flatMap((r) => r.payments || []);
+  const seenRoom = new Set<string>();
+  const roomParts: string[] = [];
+  for (const r of rows) {
+    const p = String(r.room || "").trim();
+    if (p && p !== "—" && !seenRoom.has(p)) {
+      seenRoom.add(p);
+      roomParts.push(p);
+    }
+  }
+  base.room = roomParts.length === 0 ? "—" : roomParts.join("; ");
+
+  const times = bookings
+    .map((b) => new Date(b.moveInDate).getTime())
+    .filter((t) => !Number.isNaN(t));
+  if (times.length) {
+    const earliest = new Date(Math.min(...times));
+    base.moveIn = formatDateLabel(earliest);
+    base.moveInMonthKey = toMonthKeyFromDate(earliest);
+  }
+
+  const moveOuts = rows.map((r) => r.moveOut).filter((m) => m && m !== "—");
+  if (moveOuts.length) base.moveOut = moveOuts[moveOuts.length - 1];
+
+  return base;
+}
+
+function buildDetailedRowFromBooking(
+  b: any,
+  profileMap: Record<string, any>,
+  kycByUniqueId: Map<string, string>,
+  dueMode: "active" | "transaction"
+): DetailedActiveRow {
+  const c = b.customer || {};
+  const uid = String(c.uniqueId || "");
+  const prof = profileMap[uid];
+  const det = extractProfileDetails(prof, c);
+  const fn = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
+  const due = dueMode === "active" ? getTotalDueFromBooking(b) : 0;
+  const payDate = formatDateLabel(b.moveInDate);
+  const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
+  const payments: NonNullable<DetailedActiveRow["payments"]> = [];
+
+  const sec = Number(b.securityDeposit) || 0;
+  if (sec > 0 && toBool(b.isSecurityPaid)) {
+    payments.push({
+      amount: sec,
+      date: payDate,
+      type: "Online",
+      label: "Security deposit",
+      monthKey: moveInMonthKey || undefined,
+    });
+  }
+
+  const onlinePaidYm = String(b.rentOnlinePaidYearMonth || "").trim();
+  const onlinePaidMonths = onlinePaidYm
+    ? onlinePaidYm.split(",").map((m: string) => m.trim()).filter(Boolean)
+    : [];
+  const schedOnline = Number(b.scheduledOnlineRent ?? 0);
+
+  if (schedOnline > 0 && onlinePaidMonths.length > 0) {
+    onlinePaidMonths.forEach((monthKey: string) => {
+      const monthLabel = monthKeyToShortLabel(monthKey);
+      payments.push({
+        amount: schedOnline,
+        date: monthLabel,
+        type: "Online",
+        label: `Rent - ${monthLabel}`,
+        monthKey,
+      });
+    });
+  } else {
+    const online = Number(b.onlinePaymentRecv) || 0;
+    if (online > 0 && toBool(b.isRentOnlinePaid)) {
+      payments.push({
+        amount: online,
+        date: payDate,
+        type: "Online",
+        label: "Rent",
+        monthKey: moveInMonthKey || undefined,
+      });
+    }
+  }
+
+  const cashPaidYm = String(b.rentCashPaidYearMonth || "").trim();
+  const cashPaidMonths = cashPaidYm
+    ? cashPaidYm.split(",").map((m: string) => m.trim()).filter(Boolean)
+    : [];
+  const schedCash = Number(b.scheduledCashRent ?? 0);
+
+  if (schedCash > 0 && cashPaidMonths.length > 0) {
+    cashPaidMonths.forEach((monthKey: string) => {
+      const monthLabel = monthKeyToShortLabel(monthKey);
+      payments.push({
+        amount: schedCash,
+        date: monthLabel,
+        type: "Cash",
+        label: `Rent - ${monthLabel}`,
+        monthKey,
+      });
+    });
+  } else {
+    const cash = Number(b.cashPaymentRecv) || 0;
+    if (cash > 0 && toBool(b.isRentCashPaid)) {
+      payments.push({
+        amount: cash,
+        date: payDate,
+        type: "Cash",
+        label: "Rent",
+        monthKey: moveInMonthKey || undefined,
+      });
+    }
+  }
+
+  if (Array.isArray(b.dailyPayments) && b.dailyPayments.length > 0) {
+    b.dailyPayments.forEach((dp: any) => {
+      const dayLabel = formatDateLabel(dp.paymentDate);
+      const dayMonthKey = toMonthKeyFromDate(dp.paymentDate);
+
+      if (toBool(dp.paidOnline) && Number(dp.onlineAmount ?? 0) > 0) {
+        payments.push({
+          amount: Number(dp.onlineAmount),
+          date: dayLabel,
+          type: "Online",
+          label: `Daily Rent - ${dayLabel}`,
+          monthKey: dayMonthKey || undefined,
+        });
+      }
+
+      if (toBool(dp.paidCash) && Number(dp.cashAmount ?? 0) > 0) {
+        payments.push({
+          amount: Number(dp.cashAmount),
+          date: dayLabel,
+          type: "Cash",
+          label: `Daily Rent - ${dayLabel}`,
+          monthKey: dayMonthKey || undefined,
+        });
+      }
+    });
+  }
+
+  return {
+    num: 0,
+    fullName: fn || det.fullName,
+    phone: det.phone,
+    email: det.email,
+    dob: det.dob,
+    aadhaar: det.aadhaarDisplay,
+    aadhaarLast4: getAadhaarLast4Digits(prof, c),
+    address: det.address,
+    emergencyName: det.emergencyName,
+    emergencyPhone: det.emergencyPhone,
+    room: roomDisplayFromBooking(b),
+    moveIn: formatDateLabel(b.moveInDate),
+    moveOut: b.moveOutDate ? formatDateLabel(b.moveOutDate) : "—",
+    securityDeposit: Number(b.securityDeposit) || 0,
+    due,
+    payments,
+    moveInMonthKey: toMonthKeyFromDate(b.moveInDate),
+    kycStatus: prof ? kycLabelFromUser(prof) : kycByUniqueId.get(uid) || "Unverified",
+    uniqueId: uid,
+  };
+}
+
 /* -------------------- MAIN SCREEN -------------------- */
 
 export default function ReportsHubScreen() {
@@ -1729,19 +1942,40 @@ useEffect(() => {
             : Number(floorValue) === 0
               ? "Ground Floor"
               : `${Number(floorValue)} Floor`;
-        const bedNumbers =
-          Array.isArray(b?.bedNumbers) && b.bedNumbers.length > 0 ? b.bedNumbers.join(", ") : "—";
+        const bedPart =
+          Array.isArray(b?.bedNumbers) && b.bedNumbers.length > 0
+            ? b.bedNumbers.map((x: any) => String(x).trim()).filter(Boolean).join(", ")
+            : "";
         const due = getTotalDueFromBooking(b);
         const previous = tenantMap.get(mapKey);
+        const mergedBeds = (() => {
+          if (!previous?.bedNumbers || previous.bedNumbers === "—") return bedPart || "—";
+          if (!bedPart) return previous.bedNumbers;
+          const set = new Set<string>([
+            ...String(previous.bedNumbers)
+              .split(/[,\s]+/)
+              .map((s: string) => s.trim())
+              .filter(Boolean),
+            ...bedPart.split(/[,\s]+/).map((s: string) => s.trim()).filter(Boolean),
+          ]);
+          return set.size ? [...set].join(", ") : bedPart;
+        })();
+        const mergedRoom =
+          previous?.room &&
+          previous.room !== "—" &&
+          roomNumber !== "—" &&
+          String(previous.room) !== String(roomNumber)
+            ? `${previous.room}; ${roomNumber}`
+            : roomNumber;
         tenantMap.set(mapKey, {
           id: rowId || previous?.id || "—",
           uniqueId: uniqueId || previous?.uniqueId || "—",
           name: fullName,
           phone: String(c.phone || previous?.phone || "—"),
           email: String(c.email || previous?.email || "—"),
-          room: roomNumber,
+          room: mergedRoom,
           floor,
-          bedNumbers,
+          bedNumbers: mergedBeds,
           status: String(b.status || previous?.status || "active"),
           moveInDate: b.moveInDate || previous?.moveInDate || "",
           totalDue: (previous?.totalDue || 0) + due,
@@ -1812,247 +2046,28 @@ useEffect(() => {
         };
       });
 
-      const detailedActiveRows: DetailedActiveRow[] = activeBk.map((b: any, idx: number) => {
-        const c = b.customer || {};
-        const uid = String(c.uniqueId || "");
-        const prof = profileMap[uid];
-        const det = extractProfileDetails(prof, c);
-        const fn = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
-        const due = getTotalDueFromBooking(b);
-        const payDate = formatDateLabel(b.moveInDate);
-        const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
-        const payments: DetailedActiveRow["payments"] = [];
-        
-        // Security deposit (single payment)
-        const sec = Number(b.securityDeposit) || 0;
-        if (sec > 0 && toBool(b.isSecurityPaid)) {
-          payments.push({ 
-            amount: sec, 
-            date: payDate, 
-            type: "Online", 
-            label: "Security deposit",
-            monthKey: moveInMonthKey || undefined
-          });
-        }
-        
-        // Online rent - multi-month tracking
-        const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
-        const onlinePaidMonths = onlinePaidYm ? onlinePaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
-        const schedOnline = Number(b.scheduledOnlineRent ?? 0);
-        
-        if (schedOnline > 0 && onlinePaidMonths.length > 0) {
-          // Add each paid month separately
-          onlinePaidMonths.forEach((monthKey: string) => {
-            const monthLabel = monthKeyToShortLabel(monthKey);
-            payments.push({ 
-              amount: schedOnline, 
-              date: monthLabel, 
-              type: "Online", 
-              label: `Rent - ${monthLabel}`,
-              monthKey: monthKey
-            });
-          });
-        } else {
-          // Legacy: single payment
-          const online = Number(b.onlinePaymentRecv) || 0;
-          if (online > 0 && toBool(b.isRentOnlinePaid)) {
-            payments.push({ 
-              amount: online, 
-              date: payDate, 
-              type: "Online", 
-              label: "Rent",
-              monthKey: moveInMonthKey || undefined
-            });
-          }
-        }
-        
-        // Cash rent - multi-month tracking
-        const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
-        const cashPaidMonths = cashPaidYm ? cashPaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
-        const schedCash = Number(b.scheduledCashRent ?? 0);
-        
-        if (schedCash > 0 && cashPaidMonths.length > 0) {
-          // Add each paid month separately
-          cashPaidMonths.forEach((monthKey: string) => {
-            const monthLabel = monthKeyToShortLabel(monthKey);
-            payments.push({ 
-              amount: schedCash, 
-              date: monthLabel, 
-              type: "Cash", 
-              label: `Rent - ${monthLabel}`,
-              monthKey: monthKey
-            });
-          });
-        } else {
-          // Legacy: single payment
-          const cash = Number(b.cashPaymentRecv) || 0;
-          if (cash > 0 && toBool(b.isRentCashPaid)) {
-            payments.push({ 
-              amount: cash, 
-              date: payDate, 
-              type: "Cash", 
-              label: "Rent",
-              monthKey: moveInMonthKey || undefined
-            });
-          }
-        }
-
-        // ✅ Daily rent payments (online and cash)
-        if (Array.isArray(b.dailyPayments) && b.dailyPayments.length > 0) {
-          b.dailyPayments.forEach((dp: any) => {
-            const dayLabel = formatDateLabel(dp.paymentDate);
-            const dayMonthKey = toMonthKeyFromDate(dp.paymentDate);
-            
-            // Daily rent online
-            if (toBool(dp.paidOnline) && Number(dp.onlineAmount ?? 0) > 0) {
-              payments.push({
-                amount: Number(dp.onlineAmount),
-                date: dayLabel,
-                type: "Online",
-                label: `Daily Rent - ${dayLabel}`,
-                monthKey: dayMonthKey || undefined
-              });
-            }
-            
-            // Daily rent cash
-            if (toBool(dp.paidCash) && Number(dp.cashAmount ?? 0) > 0) {
-              payments.push({
-                amount: Number(dp.cashAmount),
-                date: dayLabel,
-                type: "Cash",
-                label: `Daily Rent - ${dayLabel}`,
-                monthKey: dayMonthKey || undefined
-              });
-            }
-          });
-        }
-        
-        return {
-          num: idx + 1,
-          fullName: fn || det.fullName,
-          phone: det.phone,
-          email: det.email,
-          dob: det.dob,
-          aadhaar: det.aadhaarDisplay,
-          aadhaarLast4: getAadhaarLast4Digits(prof, c),
-          address: det.address,
-          emergencyName: det.emergencyName,
-          emergencyPhone: det.emergencyPhone,
-          room: b.room?.roomNumber != null ? String(b.room.roomNumber) : "—",
-          moveIn: formatDateLabel(b.moveInDate),
-          moveOut: b.moveOutDate ? formatDateLabel(b.moveOutDate) : "—",
-          securityDeposit: Number(b.securityDeposit) || 0,
-          due,
-          payments,
-          moveInMonthKey: toMonthKeyFromDate(b.moveInDate),
-          kycStatus: prof ? kycLabelFromUser(prof) : kycByUniqueId.get(uid) || "Unverified",
-          uniqueId: uid,
-        };
+      const activeBookingGroups = groupBookingsByCustomer(activeBk);
+      const detailedActiveRows: DetailedActiveRow[] = activeBookingGroups.map((group, idx) => {
+        const rows = group.map((b: any) =>
+          buildDetailedRowFromBooking(b, profileMap, kycByUniqueId, "active")
+        );
+        return mergeDetailedActiveRowsGroup(rows, idx + 1, group);
       });
       
-      // Create transaction rows from ALL bookings (including completed) for Transaction Report
-      console.log('[ReportsHub] Creating allTransactionRows from', allBkForTransactions.length, 'bookings');
-      const allTransactionRows: DetailedActiveRow[] = allBkForTransactions.map((b: any, idx: number) => {
-        const c = b.customer || {};
-        const uid = String(c.uniqueId || "");
-        const prof = profileMap[uid];
-        const det = extractProfileDetails(prof, c);
-        const fn = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
-        const payDate = formatDateLabel(b.moveInDate);
-        const moveInMonthKey = toMonthKeyFromDate(b.moveInDate);
-        const payments: DetailedActiveRow["payments"] = [];
-        
-        // Security deposit (single payment)
-        const sec = Number(b.securityDeposit) || 0;
-        if (sec > 0 && toBool(b.isSecurityPaid)) {
-          payments.push({ 
-            amount: sec, 
-            date: payDate, 
-            type: "Online", 
-            label: "Security deposit",
-            monthKey: moveInMonthKey || undefined
-          });
-        }
-        
-        // Online rent - multi-month tracking
-        const onlinePaidYm = String(b.rentOnlinePaidYearMonth || '').trim();
-        const onlinePaidMonths = onlinePaidYm ? onlinePaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
-        const schedOnline = Number(b.scheduledOnlineRent ?? 0);
-        
-        if (schedOnline > 0 && onlinePaidMonths.length > 0) {
-          onlinePaidMonths.forEach((monthKey: string) => {
-            const monthLabel = monthKeyToShortLabel(monthKey);
-            payments.push({ 
-              amount: schedOnline, 
-              date: monthLabel, 
-              type: "Online", 
-              label: `Rent - ${monthLabel}`,
-              monthKey: monthKey
-            });
-          });
-        } else {
-          const online = Number(b.onlinePaymentRecv) || 0;
-          if (online > 0 && toBool(b.isRentOnlinePaid)) {
-            payments.push({ 
-              amount: online, 
-              date: payDate, 
-              type: "Online", 
-              label: "Rent",
-              monthKey: moveInMonthKey || undefined
-            });
-          }
-        }
-        
-        // Cash rent - multi-month tracking
-        const cashPaidYm = String(b.rentCashPaidYearMonth || '').trim();
-        const cashPaidMonths = cashPaidYm ? cashPaidYm.split(',').map((m: string) => m.trim()).filter(Boolean) : [];
-        const schedCash = Number(b.scheduledCashRent ?? 0);
-        
-        if (schedCash > 0 && cashPaidMonths.length > 0) {
-          cashPaidMonths.forEach((monthKey: string) => {
-            const monthLabel = monthKeyToShortLabel(monthKey);
-            payments.push({ 
-              amount: schedCash, 
-              date: monthLabel, 
-              type: "Cash", 
-              label: `Rent - ${monthLabel}`,
-              monthKey: monthKey
-            });
-          });
-        } else {
-          const cash = Number(b.cashPaymentRecv) || 0;
-          if (cash > 0 && toBool(b.isRentCashPaid)) {
-            payments.push({ 
-              amount: cash, 
-              date: payDate, 
-              type: "Cash", 
-              label: "Rent",
-              monthKey: moveInMonthKey || undefined
-            });
-          }
-        }
-        
-        return {
-          num: idx + 1,
-          fullName: fn || det.fullName,
-          phone: det.phone,
-          email: det.email,
-          dob: det.dob,
-          aadhaar: det.aadhaarDisplay,
-          aadhaarLast4: getAadhaarLast4Digits(prof, c),
-          address: det.address,
-          emergencyName: det.emergencyName,
-          emergencyPhone: det.emergencyPhone,
-          room: b.room?.roomNumber != null ? String(b.room.roomNumber) : "—",
-          moveIn: formatDateLabel(b.moveInDate),
-          moveOut: b.moveOutDate ? formatDateLabel(b.moveOutDate) : "—",
-          securityDeposit: Number(b.securityDeposit) || 0,
-          due: 0, // Completed bookings have no dues
-          payments,
-          moveInMonthKey: toMonthKeyFromDate(b.moveInDate),
-          kycStatus: prof ? kycLabelFromUser(prof) : kycByUniqueId.get(uid) || "Unverified",
-          uniqueId: uid,
-        };
+      // Transaction report: same tenant groups as active (multi-bed → one row); due stays 0 per booking slice
+      const transactionBookingGroups = groupBookingsByCustomer(allBkForTransactions);
+      console.log(
+        "[ReportsHub] Creating allTransactionRows from",
+        allBkForTransactions.length,
+        "bookings in",
+        transactionBookingGroups.length,
+        "tenant groups"
+      );
+      const allTransactionRows: DetailedActiveRow[] = transactionBookingGroups.map((group, idx) => {
+        const rows = group.map((b: any) =>
+          buildDetailedRowFromBooking(b, profileMap, kycByUniqueId, "transaction")
+        );
+        return mergeDetailedActiveRowsGroup(rows, idx + 1, group);
       });
       
       console.log('[ReportsHub] Created allTransactionRows:', allTransactionRows.length, 'rows');
@@ -2087,6 +2102,7 @@ useEffect(() => {
         string,
         { num: number; name: string; phone: string; moveIn: string; moveOut: string; due: number }[]
       >();
+      const roomTenantRowIndex = new Map<string, Map<string, number>>();
       activeBk.forEach((b: any) => {
         const c = b.customer || {};
         const uid = String(c.uniqueId || "");
@@ -2100,14 +2116,25 @@ useEffect(() => {
               ? `num:${String(b.room.roomNumber).trim()}`
               : null;
         if (!k) return;
+        const tkey = customerMergeKey(b);
         const list = roomTenantsMap.get(k) || [];
+        const idxMap = roomTenantRowIndex.get(k) || new Map<string, number>();
+        const due = getTotalDueFromBooking(b);
+        if (idxMap.has(tkey)) {
+          const i = idxMap.get(tkey)!;
+          list[i] = { ...list[i], due: list[i].due + due };
+          roomTenantsMap.set(k, list);
+          return;
+        }
+        idxMap.set(tkey, list.length);
+        roomTenantRowIndex.set(k, idxMap);
         list.push({
           num: list.length + 1,
           name,
           phone: det.phone,
           moveIn: formatDateLabel(b.moveInDate),
           moveOut: b.moveOutDate ? formatDateLabel(b.moveOutDate) : "—",
-          due: getTotalDueFromBooking(b),
+          due,
         });
         roomTenantsMap.set(k, list);
       });
@@ -2126,34 +2153,124 @@ useEffect(() => {
 
       const bands = getMonthsFromCurrentThroughApril();
       const monthwiseMoveOutBlocks: MonthwiseMoveOutBlock[] = bands.map(({ monthKey, label }) => {
-        const rowsInMonth = moveOutListFull.filter((r: any) => {
-          const d = r.movedOutAt ? new Date(r.movedOutAt) : null;
-          if (!d || Number.isNaN(d.getTime())) return false;
-          const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-          return k === monthKey;
+        const rowsFromMoveOutApi = moveOutListFull
+          .filter((r: any) => {
+            const d = r.movedOutAt ? new Date(r.movedOutAt) : null;
+            if (!d || Number.isNaN(d.getTime())) return false;
+            const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+            return k === monthKey;
+          })
+          .map((r: any) => ({ source: "moveOutApi" as const, payload: r }));
+
+        const rowsFromInactiveTenants = inactiveList
+          .filter((t: any) => {
+            const raw = t.moveOutDate || t.movedOutAt || t.updatedAt;
+            const d = raw ? new Date(raw) : null;
+            if (!d || Number.isNaN(d.getTime())) return false;
+            const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+            return k === monthKey;
+          })
+          .map((t: any) => ({ source: "inactiveList" as const, payload: t }));
+
+        // Some tenants exist in both sources; keep one row per logical move-out.
+        const mergedRows = [...rowsFromMoveOutApi, ...rowsFromInactiveTenants];
+        const seen = new Set<string>();
+        const rowsInMonth = mergedRows.filter((row) => {
+          if (row.source === "moveOutApi") {
+            const r = row.payload;
+            const key = `api:${String(r.moveOutRequestId || r.bookingId || r.customerUniqueId || r.customerId || "")}`;
+            if (!key || key === "api:") return true;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }
+          const t = row.payload;
+          const key = `inactive:${String(t.moveOutRequestId || t.uniqueId || t.id || "")}:${String(
+            t.roomNumber || ""
+          )}`;
+          if (!key || key.startsWith("inactive::")) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
         });
-        return {
-          label,
-          rows: rowsInMonth.map((r: any, i: number) => {
-            const uid = String(r.customerUniqueId || "");
-            const prof = profileMap[uid];
-            const booking = r.bookingId != null ? bookingMap[String(r.bookingId)] : null;
-            const det = extractProfileDetails(prof, {});
-            const name =
-              det.fullName !== "—" ? det.fullName : `Tenant ${String(r.customerId || i + 1)}`;
+        const rawRows = rowsInMonth.map((row: any, i: number) => {
+            if (row.source === "moveOutApi") {
+              const r = row.payload;
+              const uid = String(r.customerUniqueId || "");
+              const prof = profileMap[uid];
+              const booking = r.bookingId != null ? bookingMap[String(r.bookingId)] : null;
+              const det = extractProfileDetails(prof, {});
+              const name =
+                det.fullName !== "—" ? det.fullName : `Tenant ${String(r.customerId || i + 1)}`;
+              return {
+                num: i + 1,
+                fullName: name,
+                phone: det.phone,
+                room: r.roomNumber != null ? String(r.roomNumber) : "—",
+                moveIn: booking?.moveInDate ? formatDateLabel(booking.moveInDate) : "—",
+                moveOut: booking?.moveOutDate
+                  ? formatDateLabel(booking.moveOutDate)
+                  : formatDateLabel(r.movedOutAt),
+                dues: Number(r.currentDue) || 0,
+                _mergeKey: `uid:${uid || r.customerId || ""}|room:${String(r.roomNumber || "—").trim()}|month:${monthKey}`,
+              };
+            }
+
+            const t = row.payload;
+            const uid = String(t.uniqueId || "");
+            const prof = uid ? profileMap[uid] : null;
+            const det = extractProfileDetails(prof, t);
+            const fullName =
+              String(t.name || "").trim() ||
+              [String(t.firstName || "").trim(), String(t.lastName || "").trim()]
+                .filter(Boolean)
+                .join(" ")
+                .trim() ||
+              det.fullName ||
+              `Tenant ${i + 1}`;
             return {
               num: i + 1,
-              fullName: name,
-              phone: det.phone,
-              room: r.roomNumber != null ? String(r.roomNumber) : "—",
-              moveIn: booking?.moveInDate ? formatDateLabel(booking.moveInDate) : "—",
-              moveOut: booking?.moveOutDate
-                ? formatDateLabel(booking.moveOutDate)
-                : formatDateLabel(r.movedOutAt),
-              dues: Number(r.currentDue) || 0,
+              fullName,
+              phone: String(t.phone || det.phone || "—"),
+              room: t.roomNumber != null ? String(t.roomNumber) : "—",
+              moveIn: t.moveInDate ? formatDateLabel(t.moveInDate) : "—",
+              moveOut: formatDateLabel(t.moveOutDate || t.movedOutAt || t.updatedAt),
+              dues: Number(t.currentDue) || 0,
+              _mergeKey: `uid:${uid || t.id || ""}|room:${String(t.roomNumber || "—").trim()}|month:${monthKey}`,
             };
-          }),
-        };
+          });
+
+        // Same moved-out tenant may appear from multiple sources with different due snapshots.
+        // Keep one row per tenant+room+month and preserve the larger due / richer fields.
+        const mergedByTenant = new Map<string, any>();
+        rawRows.forEach((r) => {
+          const key = String(r._mergeKey || "");
+          if (!key) return;
+          const prev = mergedByTenant.get(key);
+          if (!prev) {
+            mergedByTenant.set(key, r);
+            return;
+          }
+          mergedByTenant.set(key, {
+            ...prev,
+            moveIn: prev.moveIn && prev.moveIn !== "—" ? prev.moveIn : r.moveIn,
+            moveOut: prev.moveOut && prev.moveOut !== "—" ? prev.moveOut : r.moveOut,
+            phone: prev.phone && prev.phone !== "—" ? prev.phone : r.phone,
+            dues: Math.max(Number(prev.dues) || 0, Number(r.dues) || 0),
+          });
+        });
+
+        const rows = Array.from(mergedByTenant.values()).map((r, idx) => ({
+          num: idx + 1,
+          fullName: r.fullName,
+          phone: r.phone,
+          room: r.room,
+          moveIn: r.moveIn,
+          moveOut: r.moveOut,
+          dues: r.dues,
+        }));
+
+        return { label, rows };
       });
 
       const nextDetails: ReportDetailsState = {

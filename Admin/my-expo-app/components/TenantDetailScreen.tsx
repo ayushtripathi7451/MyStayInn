@@ -1,10 +1,9 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Image,
   ActivityIndicator,
   Linking,
@@ -13,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { userApi, bookingApi, propertyApi } from "../utils/api";
+import { useProperty } from "../contexts/PropertyContext";
 import { formatAddress } from "../utils/address";
 import { resolveFinalKycVerified } from "../utils/kyc";
 import { adminDisplayDueAmount } from "./DueAmount";
@@ -97,6 +97,14 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
   const [booking, setBooking] = useState<any>(passedBooking || null);
   const [bookingHistory, setBookingHistory] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [hintMessage, setHintMessage] = useState<string | null>(null);
+  const { currentProperty } = useProperty();
+
+  useEffect(() => {
+    if (!hintMessage) return;
+    const t = setTimeout(() => setHintMessage(null), 3500);
+    return () => clearTimeout(t);
+  }, [hintMessage]);
 
   const fetchDetails = useCallback(async () => {
     if (!tenantId) {
@@ -204,7 +212,15 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
       case "payment":
         navigation.navigate("PaymentManagementScreen", { initialTab: "dues" });
         break;
-      case "moveout":
+      case "moveout": {
+        const fromRoom = booking?.room;
+        const resolvedPropertyId =
+          fromRoom?.propertyId ??
+          booking?.propertyId ??
+          currentProperty?.id ??
+          currentProperty?.uniqueId;
+        const resolvedPropertyUniqueId =
+          fromRoom?.propertyUniqueId ?? currentProperty?.uniqueId ?? undefined;
         navigation.navigate("AdminInitiateMoveOut", {
           customerId: tenantId,
           customerName: profile ? [profile.firstName, profile.lastName].filter(Boolean).join(" ") : "Tenant",
@@ -213,13 +229,16 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
           bookingId: booking?.id,
           roomId: booking?.roomId,
           roomNumber: booking?.roomNumber,
-          propertyName: booking?.propertyName,
+          propertyId: resolvedPropertyId != null ? String(resolvedPropertyId) : undefined,
+          propertyUniqueId: resolvedPropertyUniqueId,
+          propertyName: booking?.propertyName ?? currentProperty?.name ?? "",
           securityDeposit: booking?.securityDeposit,
         });
         break;
+      }
       case "call":
         if (phone) Linking.openURL(`tel:${phone}`);
-        else Alert.alert("No phone", "Phone number not available");
+        else setHintMessage("Phone number not available");
         break;
       default:
         break;
@@ -292,10 +311,14 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
         </View>
       ) : null}
 
-      <ScrollView showsVerticalScrollIndicator={false} className="px-5">
-        // In TenantDetailScreen.tsx, update the profile header section:
+      {hintMessage ? (
+        <View className="mx-5 mt-3 bg-rose-50 rounded-xl p-3 border border-rose-200">
+          <Text className="text-rose-800 text-sm">{hintMessage}</Text>
+        </View>
+      ) : null}
 
-<View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
+      <ScrollView showsVerticalScrollIndicator={false} className="px-5">
+        <View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
   <View className="flex-row items-center justify-between mb-4">
     <View className="flex-row items-center">
       {/* Profile Image with proper access and fallback */}
@@ -342,7 +365,7 @@ export default function TenantDetailScreen({ navigation, route }: TenantDetailSc
       </TouchableOpacity>
     )}
   </View>
-</View>
+        </View>
 
         {tabs.length > 0 && (
           <View className="flex-row bg-white rounded-[24px] p-2 mt-4 shadow-sm border border-white">

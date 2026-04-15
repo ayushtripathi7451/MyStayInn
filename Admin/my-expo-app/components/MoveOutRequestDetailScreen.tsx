@@ -6,8 +6,8 @@ import {
   TouchableOpacity,
   StatusBar,
   TextInput,
-  Alert,
   Modal,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -26,6 +26,7 @@ export default function MoveOutRequestDetailScreen(props: any) {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const loadCustomerData = useCallback(async () => {
     if (!requestId) return;
@@ -128,45 +129,41 @@ export default function MoveOutRequestDetailScreen(props: any) {
   const confirmApprove = async () => {
     if (!requestId) return;
     setLoading(true);
+    setActionError(null);
     try {
       const res = await MoveOutService.acceptRequest(requestId, adminComment);
       setShowApproveModal(false);
       if (res.success) {
         navigation.goBack();
       } else {
-        Alert.alert("Error", res.error || "Failed to accept request");
+        setActionError(res.error || "Failed to accept request");
       }
     } catch {
-      Alert.alert("Error", "Failed to accept request");
+      setActionError("Failed to accept request");
     } finally {
       setLoading(false);
     }
   };
 
   const handleDecline = () => {
-    Alert.alert(
-      'Decline Move-Out Request',
-      `This move-out request will be declined. ${customerData.customerName} will be notified and will continue his/her stay unless they submit a new request.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Decline', onPress: () => setShowCancelModal(true) }
-      ]
-    );
+    setActionError(null);
+    setShowCancelModal(true);
   };
 
   const confirmCancel = async () => {
     if (!requestId) return;
     setLoading(true);
+    setActionError(null);
     try {
       const res = await MoveOutService.cancelRequest(requestId);
       setShowCancelModal(false);
       if (res.success) {
         navigation.goBack();
       } else {
-        Alert.alert("Error", res.error || "Failed to cancel request");
+        setActionError(res.error || "Failed to cancel request");
       }
     } catch {
-      Alert.alert("Error", "Failed to cancel request");
+      setActionError("Failed to cancel request");
     } finally {
       setLoading(false);
     }
@@ -204,6 +201,12 @@ export default function MoveOutRequestDetailScreen(props: any) {
         </Text>
       </View>
 
+      {actionError ? (
+        <View className="mx-5 mt-3 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          <Text className="text-rose-800 text-sm">{actionError}</Text>
+        </View>
+      ) : null}
+
       <ScrollView showsVerticalScrollIndicator={false} className="px-5">
         {/* Customer Info */}
         <View className="bg-white rounded-[24px] p-6 mt-6 shadow-sm border border-white">
@@ -233,7 +236,16 @@ export default function MoveOutRequestDetailScreen(props: any) {
                     <Text className="text-slate-500 font-medium">Phone</Text>
                     <TouchableOpacity
                       className="flex-row items-center"
-                      onPress={() => Alert.alert("Call", `Calling ${customerData.phone}`)}
+                      onPress={() => {
+                        const raw = String(customerData.phone || "").trim();
+                        if (!raw) {
+                          setActionError("No phone number on file");
+                          return;
+                        }
+                        Linking.openURL(`tel:${raw}`).catch(() =>
+                          setActionError("Could not start phone call")
+                        );
+                      }}
                     >
                       <Text className="font-bold text-slate-900 mr-2">{customerData.phone}</Text>
                       <Ionicons name="call" size={16} color="#1E33FF" />
@@ -441,7 +453,7 @@ export default function MoveOutRequestDetailScreen(props: any) {
             </View>
 
             <Text className="text-slate-600 text-sm mb-4">
-              The customer will be notified that their move-out request was declined. {customerData.customerName} will continue his/her stay.
+              Move out request will be rejected. {customerData.customerName} will continue his/her stay.
             </Text>
 
             <View className="flex-row space-x-3">
